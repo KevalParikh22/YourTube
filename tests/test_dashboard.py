@@ -125,3 +125,13 @@ class DashboardTest(unittest.TestCase):
 
     def test_cancel_without_job(self):
         self.assertEqual(self.call("/api/job/cancel", {})[1], {"ok": False})
+
+    def test_local_endpoints(self):
+        self.assertEqual(self.call("/api/local/pull", {"model": "bad name!"})[0], 400)
+        code, r = self.call("/api/ai/settings", {"edit": "ollama", "config": {"num_ctx": 999999, "base_url": "http://localhost:11434/v1"}})
+        self.assertEqual((r["ai"]["providers"]["ollama"]["num_ctx"], r["ai"]["providers"]["ollama"]["base_url"]), (131072, "http://localhost:11434"))
+        self.assertEqual(self.call("/api/ai/settings", {"edit": "ollama", "config": {"num_ctx": "big"}})[0], 400)
+        code, r = self.call("/api/ai/settings", {"local_only": True})
+        self.assertTrue(r["ai"]["local_only"])
+        self.call("/api/ai/settings", {"local_only": False, "edit": "ollama", "config": {"num_ctx": 8192}})
+

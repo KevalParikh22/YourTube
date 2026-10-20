@@ -71,7 +71,12 @@ Phase 1 learns from videos that have captions, using any AI provider. Phase 2.5 
 ## 7. Build order
 
 1. **Spike:** on 3–5 real videos, check that an anonymous paced audio and video download works. Measure faster-whisper speed and VRAM on the RTX 3050. Compare OCR with a small vision model on slide frames. Record the numbers in §3.
-2. Setup check and per-task local models (L3).
+2. Setup check and per-task local models (L3). **Done 2026-10-20**, except that the *vision* and *speech* task choices arrive with L2 and L1:
+   - Native Ollama provider (`/api/chat` with `num_ctx`, JSON format and `keep_alive`). The OpenAI-compatible `/v1` path can't set the context size, so long transcripts would be cut silently.
+   - Setup check on the AI page (GPU, memory, ffmpeg, Ollama and its models, faster-whisper), with one-click model download and "Use".
+   - "Local only" switch, and model recommendations by GPU memory (4 GB → `qwen3.5:4b`, 3.3 GB, text and images).
+   - Setup scripts for users: `scripts/setup.sh [--local-ai]` (Linux/macOS, tested on Linux) and `scripts/setup.ps1 [-LocalAI]` (Windows, not yet tested).
+   - Not yet tested against a real Ollama: Ollama was not installed when this was built.
 3. Local transcription (L1) on the shared job queue.
 4. Visual content (L2): frames, dedupe, OCR and vision, then visual segments in search and summaries.
 

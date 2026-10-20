@@ -384,6 +384,7 @@ const JOB_TEXT = {
   suggest: ['Asking the AI to sort videos…', 'Suggestions ready to review', 'AI run failed. See the log.'],
   details: ['Fetching video details, one video every few seconds…', 'Video details fetched', 'Details run stopped early. See the log.'],
   rate: ['Rating videos…', 'Videos rated', 'Rating stopped early. See the log.'],
+  pull: ['Downloading the model into Ollama…', 'Model downloaded', 'Download stopped. See the log.'],
 };
 const DETAIL_LABEL = { done: 'Transcript', no_captions: 'No captions', music: 'Music, no transcript', unavailable: 'Unavailable', failed: 'Failed, will retry' };
 
@@ -402,7 +403,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   triage: { verdict: 'all', cat: '', undo: [] },
-  drawer: null, polling: false, detailCache: {},
+  drawer: null, polling: false, detailCache: {}, local: null,
 };
 
 /* ---------------- helpers ---------------- */
@@ -541,7 +542,7 @@ function renderView() {
   else if (r === 'triage') { v.innerHTML = videos().length ? viewTriage() : emptyState(); updateJob(); }
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
-  else if (r === 'ai') v.innerHTML = viewAI();
+  else if (r === 'ai') { v.innerHTML = viewAI(); updateJob(); if (!S.local) loadLocal(); }
   else { v.innerHTML = videos().length ? viewLibrary() : emptyState(); renderList(); }
 }
 const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a YouTube playlist to get started. YT KB only reads it and never changes it.<br><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
@@ -931,10 +932,11 @@ function updateJob() {
   for (const b of $$('[data-job-btn]')) b.disabled = !!job.running;
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
+    : route() === 'ai' ? job.kind === 'pull'
     : ['sync', 'details'].includes(job.kind) || !job.kind;
   if (!mine || (!job.log && !job.running)) { box.innerHTML = ''; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
+  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate', 'pull'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
     : `<span class="status-line">${job.ok ? 'Finished' : '<span class="warn-text">Failed</span>'} · ${esc(fmtLocal(job.finished_at))}</span>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div><pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
@@ -956,6 +958,7 @@ async function pollJob() {
   if (job) {
     const t = JOB_TEXT[job.kind] || JOB_TEXT.sync;
     if (job.kind === 'details' || job.kind === 'sync') S.detailCache = {};  // details may have changed
+    if (job.kind === 'pull') S.local = null;                                // new model downloaded
     toast(job.ok ? t[1] : t[2], !job.ok); await load();
   }
 }
@@ -1073,7 +1076,7 @@ function viewAI() {
   const pick = (name, value, allowSame) => `<select data-ai-route="${name}" style="width:100%">
       ${allowSame ? `<option value="" ${!value ? 'selected' : ''}>Same as default${ai.provider !== 'none' && ai.providers[ai.provider] ? ` (${esc(ai.providers[ai.provider].label)})` : ''}</option>`
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
-      ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : ' (not set up)'}</option>`).join('')}
+      ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
   return `
   <section>
@@ -1082,6 +1085,8 @@ function viewAI() {
     <p class="lede" style="max-width:700px">Set up as many as you like, cloud or local, and choose which one does each job. The AI only suggests and rates:
       nothing changes until you accept. Only titles, descriptions and transcripts are sent, never your cookies. Local models keep everything on this computer.</p>
   </section>
+
+  ${viewLocal()}
 
   <section class="section card">
     <h2 class="h">Your AIs</h2>
@@ -1115,6 +1120,50 @@ function viewAI() {
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
   </section>`;
 }
+async function loadLocal() {
+  try { S.local = await api('/api/local/status'); } catch (e) { S.local = { error: e.message }; }
+  if (route() === 'ai') refresh();
+}
+function viewLocal() {
+  const L = S.local, ai = S.data.ai, running = !!S.data.job.running;
+  if (!L) return `<section class="section card"><h2 class="h">Local AI on this computer</h2><p class="note"><span class="spin" style="display:inline-block"></span> Checking this computer…</p></section>`;
+  if (L.error) return `<section class="section card"><h2 class="h">Local AI on this computer</h2><p class="note warn-text">${esc(L.error)}</p></section>`;
+  const row = (ok, label, detail) => `<div class="prov"><div><span class="dot ${ok ? 'ok' : ''}"></span><b style="font-weight:500">${label}</b>
+    <span class="faint" style="font-size:12.5px"> · ${esc(detail)}</span></div><span></span></div>`;
+  const have = new Set((L.ollama.models || []).map(m => m.name));
+  const current = ai.providers.ollama.model;
+  const useBtn = name => current === name && ai.provider === 'ollama'
+    ? '<span class="vb vb-watch">In use</span>'
+    : `<button class="btn btn-sm" data-act="local-use" data-model="${esc(name)}">Use</button>`;
+  return `
+  <section class="section card">
+    <h2 class="h">Local AI on this computer</h2>
+    <p class="note">Runs models on your own machine with Ollama: free, private and works offline. Run the whole setup in one go with
+      <code>bash scripts/setup.sh --local-ai</code> (Windows: <code>scripts\\setup.ps1 -LocalAI</code>).</p>
+    <div style="margin-top:8px">
+      ${row(L.gpu.ok, 'GPU', L.gpu.detail)}
+      ${row(L.memory.ok, 'Memory', L.memory.detail)}
+      ${row(L.ollama.ok, 'Ollama', L.ollama.detail)}
+      ${row(L.ffmpeg.ok, 'ffmpeg', L.ffmpeg.detail)}
+      ${row(L.whisper.ok, 'Speech-to-text', L.whisper.detail)}
+    </div>
+    ${!L.ollama.installed ? `<div class="banner"><span>Install Ollama: <code>curl -fsSL https://ollama.com/install.sh | sh</code> (macOS and Windows: ollama.com/download), then click Check again.</span></div>`
+      : !L.ollama.running ? `<div class="banner"><span>Ollama is installed but not running. Start it with <code>ollama serve</code>.</span></div>` : ''}
+    ${L.ollama.running ? `
+      <h3 style="font-size:14px;margin:22px 0 4px">Models</h3>
+      ${(L.ollama.models || []).map(m => `<div class="prov"><div><b style="font-weight:500">${esc(m.name)}</b>
+        <span class="faint" style="font-size:12.5px"> · ${m.size_gb} GB${m.params ? ' · ' + esc(m.params) : ''}${m.quant ? ' · ' + esc(m.quant) : ''}</span></div>${useBtn(m.name)}</div>`).join('')}
+      ${L.recommended.filter(r => !have.has(r.model)).map(r => `<div class="prov"><div>${r.best ? '<span class="vb vb-watch" style="margin-right:6px">Best fit</span>' : ''}<b style="font-weight:500">${esc(r.model)}</b>
+        <span class="faint" style="font-size:12.5px"> · ${esc(r.size)} · ${esc(r.why)}${r.fits_gpu ? '' : ' Too big for this GPU: runs partly on the CPU.'}</span></div>
+        <button class="btn btn-sm ${r.best ? 'btn-dark' : ''}" data-act="local-pull" data-model="${esc(r.model)}" data-job-btn ${running ? 'disabled' : ''}>Download</button></div>`).join('')}
+      <div class="actions"><input type="text" id="local-model" placeholder="Any Ollama model, e.g. gemma4:e2b" style="width:260px">
+        <button class="btn btn-sm" data-act="local-pull" data-job-btn ${running ? 'disabled' : ''}>Download</button></div>` : ''}
+    <label class="check" style="margin-top:16px"><input type="checkbox" data-change="local-only" ${ai.local_only ? 'checked' : ''}>
+      <span><b style="font-weight:500">Local only</b>: never send anything to a cloud AI (Claude, Gemini, hosted open-weight models)</span></label>
+    <div class="actions"><button class="btn-text" data-act="local-check">Check again</button></div>
+    <div id="job"></div>
+  </section>`;
+}
 function aiEditor(k, p) {
   const models = [...new Set([...(p.models || []), ...(S.ai.models[k] || [])])];
   const keyNote = p.key_source === 'saved' ? 'A key is saved. Leave blank to keep it.'
@@ -1123,9 +1172,12 @@ function aiEditor(k, p) {
     <div><label class="field-label" for="ai-model">Model</label>
       <input id="ai-model" type="text" list="ai-models" value="${esc(p.model)}" placeholder="${p.local ? 'e.g. llama3.1:8b' : 'model name'}">
       <datalist id="ai-models">${models.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
-      ${p.kind === 'openai' ? `<button class="btn-text" style="padding:0;margin-top:4px" data-act="ai-models" data-p="${k}">List models from server</button>` : ''}</div>
-    ${p.kind === 'openai' ? `<div><label class="field-label" for="ai-base">Server URL</label>
-      <input id="ai-base" type="text" value="${esc(p.base_url)}" placeholder="http://localhost:11434/v1"></div>` : '<div></div>'}
+      ${p.kind === 'openai' || p.kind === 'ollama' ? `<button class="btn-text" style="padding:0;margin-top:4px" data-act="ai-models" data-p="${k}">List models from server</button>` : ''}</div>
+    ${p.kind === 'openai' || p.kind === 'ollama' ? `<div><label class="field-label" for="ai-base">Server URL</label>
+      <input id="ai-base" type="text" value="${esc(p.base_url)}" placeholder="${p.kind === 'ollama' ? 'http://localhost:11434' : 'https://…/v1'}"></div>` : '<div></div>'}
+    ${p.kind === 'ollama' ? `<div><label class="field-label" for="ai-ctx">Context size (tokens)</label>
+      <input id="ai-ctx" type="number" min="2048" max="131072" step="1024" value="${p.num_ctx}">
+      <div class="hint" style="margin-top:6px">How much transcript the model reads at once. Bigger uses more memory; 8192 suits a 4 GB GPU.</div></div><div></div>` : ''}
     <div class="full"><label class="field-label" for="ai-key">API key</label>
       <input id="ai-key" type="password" autocomplete="off" value="${esc(S.ai.key)}" data-input="ai-key" placeholder="${p.key_source ? '••••••••' : ''}">
       <div class="hint" style="margin-top:6px">${keyNote} Stored only in <code>settings.json</code> on this computer.
@@ -1142,6 +1194,7 @@ function aiEditorBody(k) {
   const config = {};
   if ($('#ai-model')) config.model = $('#ai-model').value;
   if ($('#ai-base')) config.base_url = $('#ai-base').value;
+  if ($('#ai-ctx')) config.num_ctx = +$('#ai-ctx').value;
   if ($('#ai-key') && $('#ai-key').value.trim()) config.api_key = $('#ai-key').value.trim();
   const body = { edit: k, config };
   // The first AI you set up becomes the default
@@ -1383,6 +1436,18 @@ document.addEventListener('click', async e => {
       if (!confirm('Discard the proposed categories?')) break;
       try { await api('/api/ai/proposal/dismiss', {}); await load(); } catch (err) { toast(err.message, true); }
       break;
+    case 'local-check': S.local = null; refresh(); loadLocal(); break;
+    case 'local-pull': {
+      const model = el.dataset.model || $('#local-model')?.value.trim();
+      if (!model) { toast('Type a model name first', true); break; }
+      try { await api('/api/local/pull', { model }); S.data.job = { running: true, log: '', kind: 'pull' }; updateJob(); pollJob(); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'local-use':
+      try { S.data.ai = (await api('/api/local/use', { model: el.dataset.model })).ai; refresh(); toast(`Using ${el.dataset.model}`); }
+      catch (err) { toast(err.message, true); }
+      break;
     case 'ai-edit': S.ai.provider = S.ai.provider === el.dataset.p ? null : el.dataset.p; S.ai.key = ''; refresh(); break;
     case 'ai-save': try { await saveAi(aiEditorBody(el.dataset.p)); refresh(); renderBar(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
     case 'ai-save-prefs': try { await saveAi(aiPrefsBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
@@ -1462,6 +1527,10 @@ document.addEventListener('change', async e => {
     case 's-order': S.session.order = el.value; refresh(); break;
     case 't-cat': S.triage.cat = el.value; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
+    case 'local-only':
+      try { await saveAi({ local_only: el.checked }); refresh(); toast(el.checked ? 'Local only: cloud AIs are blocked' : 'Cloud AIs allowed again'); }
+      catch (err) { el.checked = !el.checked; toast(err.message, true); }
+      break;
     case 'transcripts': case 'details-after-sync':
       try {
         const r = await api('/api/details/settings', ch === 'transcripts' ? { category: el.dataset.name, on: el.checked } : { after_sync: el.checked });

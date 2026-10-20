@@ -34,8 +34,9 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "base_url": "https://openrouter.ai/api/v1", "model": "", "models": [],
     },
     "ollama": {
-        "label": "Local: Ollama", "kind": "openai", "needs_key": False, "local": True,
-        "base_url": "http://localhost:11434/v1", "model": "", "models": [],
+        # Native API (not /v1): it can set the context size, force JSON and unload models
+        "label": "Local: Ollama", "kind": "ollama", "needs_key": False, "local": True,
+        "base_url": "http://localhost:11434", "model": "", "models": [],
     },
     "lmstudio": {
         "label": "Local: LM Studio", "kind": "openai", "needs_key": False, "local": True,
@@ -51,6 +52,10 @@ PRICES = {
     "claude-opus-5-5": (4.00, 20.00), "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50),
     "gemini-2.5-pro": (1.25, 10.00), "gemini-2.5-flash": (0.30, 2.50), "gemini-2.5-flash-lite": (0.10, 0.40),
 }
+
+# Ollama defaults: its own default context is small and would silently cut long transcripts
+OLLAMA_NUM_CTX = 8192
+OLLAMA_KEEP_ALIVE = "5m"
 
 # Claude models that accept server-side refusal fallbacks
 _FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
@@ -77,6 +82,7 @@ def default_settings() -> Dict[str, Any]:
         "tasks": {},              # task -> provider, overriding the default for that job
         "interests": "",          # free text: what the user wants to learn, used by ratings
         "language": "English",    # language for summaries and rating reasons
+        "local_only": False,      # block every cloud provider
     }
 
 def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
@@ -90,7 +96,14 @@ def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
             for k, cfg in providers.items():
                 if k in s["providers"] and isinstance(cfg, dict):
                     s["providers"][k].update(cfg)
+    # Older settings pointed Ollama at its OpenAI-compatible /v1 path
+    ollama = s["providers"]["ollama"]
+    ollama["base_url"] = ollama_base(ollama.get("base_url"))
     return s
+
+def ollama_base(url: Optional[str]) -> str:
+    url = (url or "http://localhost:11434").rstrip("/")
+    return url[:-3] if url.endswith("/v1") else url
 
 def save_settings(settings: Dict[str, Any], path: str = SETTINGS_PATH) -> None:
     # Holds API keys: create the file owner-only from the start, not chmod it afterwards
@@ -115,6 +128,8 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
             "label": p["label"], "kind": p["kind"], "needs_key": p["needs_key"], "local": p.get("local", False),
             "env": env, "models": p["models"], "model": cfg.get("model", ""),
             "base_url": cfg.get("base_url", ""), "key_source": key_source,
+            "num_ctx": cfg.get("num_ctx") or OLLAMA_NUM_CTX if p["kind"] == "ollama" else None,
+            "blocked": bool(settings.get("local_only")) and not p.get("local"),
         }
         providers[k]["ready"] = _provider_ready(settings, k)
     return {
@@ -123,6 +138,7 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         "category_notes": settings["category_notes"], "proposal": settings["proposal"],
         "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS,
         "interests": settings["interests"], "language": settings["language"],
+        "local_only": bool(settings.get("local_only")),
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},
         "uses": {t: describe(settings, t) for t in TASKS},
@@ -139,12 +155,14 @@ def is_configured(settings: Dict[str, Any], task: Optional[str] = None) -> bool:
 def _provider_ready(settings: Dict[str, Any], provider: Optional[str]) -> bool:
     if provider not in PROVIDERS:
         return False
+    if settings.get("local_only") and not PROVIDERS[provider].get("local"):
+        return False
     cfg = settings["providers"].get(provider, {})
     if not cfg.get("model"):
         return False
     if PROVIDERS[provider]["needs_key"] and not _api_key(provider, cfg):
         return False
-    if PROVIDERS[provider]["kind"] == "openai" and not cfg.get("base_url"):
+    if PROVIDERS[provider]["kind"] in ("openai", "ollama") and not cfg.get("base_url"):
         return False
     return True
 
@@ -256,7 +274,35 @@ def _openai(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
     except (KeyError, IndexError):
         raise LLMError(f"Unexpected response from {cfg['base_url']}") from None
 
-_CALLS = {"anthropic": _anthropic, "gemini": _gemini, "openai": _openai}
+def _ollama(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
+    body: Dict[str, Any] = {
+        "model": cfg["model"], "stream": False, "format": "json",
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
+        "options": {"temperature": 0, "num_ctx": int(cfg.get("num_ctx") or OLLAMA_NUM_CTX)},
+        "keep_alive": cfg.get("keep_alive") or OLLAMA_KEEP_ALIVE,
+        "think": False,  # thinking models answer faster and still follow the JSON format
+    }
+    url = ollama_base(cfg.get("base_url")) + "/api/chat"
+    try:
+        data = _post_json(url, body, {})
+    except LLMError as e:
+        if "think" not in str(e).lower():
+            raise
+        body.pop("think")  # older Ollama or a model without a thinking switch
+        data = _post_json(url, body, {})
+    if data.get("error"):
+        raise LLMError(f"Ollama: {data['error']}")
+    return (data.get("message") or {}).get("content") or ""
+
+_CALLS = {"anthropic": _anthropic, "gemini": _gemini, "openai": _openai, "ollama": _ollama}
+
+def context_chars(settings: Dict[str, Any], task: Optional[str] = None, remote: int = 200_000) -> int:
+    """How much transcript text fits in one prompt for this task's model (about 3 chars per token)."""
+    provider = provider_for(settings, task)
+    if provider not in PROVIDERS or not PROVIDERS[provider].get("local"):
+        return remote
+    num_ctx = int(settings["providers"][provider].get("num_ctx") or OLLAMA_NUM_CTX)
+    return max(4_000, (num_ctx - 2_500) * 3)  # leave room for instructions and the reply
 
 def make_completer(settings: Dict[str, Any], task: Optional[str] = None) -> Callable[[str, str], str]:
     """Returns complete(system, prompt) -> text for the provider this task uses."""
@@ -269,6 +315,8 @@ def make_completer(settings: Dict[str, Any], task: Optional[str] = None) -> Call
         raise LLMError("Choose a model for the selected AI provider")
     if PROVIDERS[provider]["needs_key"] and not key:
         raise LLMError(f"Add an API key for {PROVIDERS[provider]['label']}")
+    if settings.get("local_only") and not PROVIDERS[provider].get("local"):
+        raise LLMError(f"Local only is on: {PROVIDERS[provider]['label']} is a cloud service. Choose a local model.")
     call = _CALLS[PROVIDERS[provider]["kind"]]
     return lambda system, prompt: call(cfg, key, system, prompt)
 
@@ -277,9 +325,12 @@ def list_models(provider: str, settings: Dict[str, Any]) -> List[str]:
     p = PROVIDERS.get(provider)
     if not p:
         raise LLMError("Unknown provider")
+    cfg = settings["providers"].get(provider, {})
+    if p["kind"] == "ollama":
+        data = _get_json(ollama_base(cfg.get("base_url")) + "/api/tags", {})
+        return sorted(m.get("name", "") for m in data.get("models", []) if m.get("name"))
     if p["kind"] != "openai":
         return list(p["models"])
-    cfg = settings["providers"].get(provider, {})
     key = _api_key(provider, cfg)
     data = _get_json(cfg.get("base_url", "").rstrip("/") + "/models",
                      {"Authorization": f"Bearer {key}"} if key else {})

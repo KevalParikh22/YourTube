@@ -1,0 +1,45 @@
+# YT KB setup for Windows (PowerShell). NOT YET TESTED ON WINDOWS — please report problems.
+#   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1            # app only
+#   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -LocalAI   # also Ollama + a model for this PC
+# Safe to run again; asks before installing anything system-wide.
+param([switch]$LocalAI, [switch]$Yes)
+$ErrorActionPreference = "Stop"
+Set-Location (Join-Path $PSScriptRoot "..")
+function Ask($q) { if ($Yes) { return $true }; return (Read-Host "  $q [y/N]") -match '^[Yy]' }
+
+Write-Host "`n1. Python" -ForegroundColor White
+$py = Get-Command py -ErrorAction SilentlyContinue
+if (-not $py) { $py = Get-Command python -ErrorAction SilentlyContinue }   # Windows PowerShell 5.1 has no ?? operator
+if (-not $py) { Write-Warning "Python 3.10+ not found. Install it from python.org, then run this again."; exit 1 }
+& $py.Source -c "import sys; sys.exit(sys.version_info < (3, 10))"; if ($LASTEXITCODE) { Write-Warning "Python 3.10+ is needed."; exit 1 }
+
+Write-Host "`n2. Virtual environment and dependencies" -ForegroundColor White
+if (-not (Test-Path .venv\Scripts\python.exe)) { & $py.Source -m venv .venv }
+& .venv\Scripts\python.exe -m pip install -q -r requirements.txt
+
+Write-Host "`n3. ffmpeg" -ForegroundColor White
+if (Get-Command ffmpeg -ErrorAction SilentlyContinue) { Write-Host "  ffmpeg found" }
+else { Write-Warning "ffmpeg not found (needed later). Install with: winget install Gyan.FFmpeg" }
+
+if ($LocalAI) {
+  Write-Host "`n4. Ollama" -ForegroundColor White
+  if (-not (Get-Command ollama -ErrorAction SilentlyContinue)) {
+    if (Ask "Install Ollama with winget (winget install Ollama.Ollama)?") { winget install --id Ollama.Ollama -e }
+    else { Write-Warning "Skipped. Install Ollama from https://ollama.com/download, then run this again."; exit 0 }
+    Write-Warning "Open a new PowerShell window so 'ollama' is on PATH, then run this script again."; exit 0
+  }
+  try { Invoke-RestMethod http://localhost:11434/api/version -TimeoutSec 3 | Out-Null }
+  catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 5 }
+
+  Write-Host "`n5. Model sized for this computer" -ForegroundColor White
+  $model = if ($env:YTKB_MODEL) { $env:YTKB_MODEL } else { & .venv\Scripts\python.exe local_setup.py --recommended }
+  Write-Host "  Recommended: $model"
+  if (Ask "Download $model now?") {
+    & .venv\Scripts\python.exe local_setup.py --pull $model
+    if (-not $LASTEXITCODE) { & .venv\Scripts\python.exe local_setup.py --use $model }
+  }
+}
+
+Write-Host "`nDone" -ForegroundColor White
+& .venv\Scripts\python.exe local_setup.py
+Write-Host "`n  Start the dashboard:  .venv\Scripts\python.exe dashboard.py"

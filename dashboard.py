@@ -7,6 +7,7 @@ Standard library only; binds to 127.0.0.1 so nothing is exposed to the network.
 """
 import os
 import io
+import re
 import sys
 import json
 import argparse
@@ -153,6 +154,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(build_state())
         if url.path == "/api/job":
             return self._json(JOB.snapshot())
+        if url.path == "/api/local/status":
+            import local_setup
+            return self._json(local_setup.status())
         if url.path == "/api/video":
             vid = (qs.get("id") or [""])[0]
             details = storage.get_details(vid)
@@ -275,6 +279,25 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("Another task is already running", 409)
                 return self._json({"ok": True})
 
+            if path == "/api/local/pull":
+                import local_setup
+                model = _clean(body.get("model"))
+                if not isinstance(model, str) or not re.fullmatch(r"[\w.\-/]+(:[\w.\-]+)?", model):
+                    return self._error("Not a valid model name")
+                if not JOB.start("pull", f"Download {model}",
+                                 lambda: local_setup.pull_model(model, should_stop=JOB.stop_requested)):
+                    return self._error("Another task is already running", 409)
+                return self._json({"ok": True})
+
+            if path == "/api/local/use":
+                import local_setup
+                model = _clean(body.get("model"))
+                tasks = [t for t in body.get("tasks") or [] if t in llm.TASKS]
+                if not isinstance(model, str) or not model:
+                    return self._error("Model is required")
+                local_setup.use_model(model, tasks)
+                return self._json({"ok": True, "ai": llm.public_settings(llm.load_settings())})
+
             if path in ("/api/rate", "/api/rate/estimate"):
                 import rater
                 ids = body.get("ids")
@@ -324,6 +347,13 @@ class Handler(BaseHTTPRequestHandler):
                 for k in ("model", "base_url"):
                     if isinstance(cfg.get(k), str):
                         target[k] = cfg[k].strip()
+                if edit == "ollama":
+                    target["base_url"] = llm.ollama_base(target.get("base_url"))
+                    if "num_ctx" in cfg:
+                        try:
+                            target["num_ctx"] = max(2048, min(131072, int(cfg["num_ctx"])))
+                        except (TypeError, ValueError):
+                            return self._error("Context size must be a number")
                 key = cfg.get("api_key")
                 if key == "__clear__":
                     target["api_key"] = ""
@@ -336,6 +366,8 @@ class Handler(BaseHTTPRequestHandler):
                         settings["tasks"][task] = provider
             if "auto_after_sync" in body:
                 settings["auto_after_sync"] = bool(body["auto_after_sync"])
+            if "local_only" in body:
+                settings["local_only"] = bool(body["local_only"])
             if isinstance(body.get("interests"), str):
                 settings["interests"] = body["interests"].strip()[:2000]
             if isinstance(body.get("language"), str) and body["language"].strip():

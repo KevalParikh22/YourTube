@@ -17,6 +17,8 @@ python3 -m venv --without-pip .venv && python3 -m pip --python .venv/bin/python 
 .venv/bin/python main.py --list [--browser auto]   # list the signed-in account's playlists and IDs
 .venv/bin/python main.py --details [N]             # fetch details/captions for up to N videos (default 200)
 .venv/bin/python -m unittest             # test suite (tests/), runs against temp files
+bash scripts/setup.sh [--local-ai]       # first-time setup for users (venv, deps, optional Ollama + model)
+.venv/bin/python local_setup.py [--pull M | --use M | --recommended]   # local AI check and model setup
 ```
 
 Dependencies: `yt-dlp`, `anthropic` (only for the Claude provider), `secretstorage` (Linux, to decrypt Chrome cookies). The system Python has no `ensurepip`, which is why the venv is created `--without-pip`. There is no linter or build step. To try things without touching the real data, set `YTKB_DB`, `YTKB_TAXONOMY` and `YTKB_SETTINGS` to other paths. `storage.py`, `classifier.py` and `llm.py` read them at import time, and `tests/__init__.py` sets them to a temp dir.
@@ -63,6 +65,12 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 - Results go in `video_ratings`. A rating never changes a video; Triage applies the Skipped status when the user accepts. `rater.estimate()` powers the cost confirmation.
 
 **AI per task**: `settings["tasks"]` maps `categorize` and `rate` to a provider (unset = the default `provider`). Always call `llm.make_completer(settings, task)`, `is_configured(settings, task)` and `describe(settings, task)` with the task. `llm.PRICES` holds approximate prices per model for estimates; local models are free and unknown models show "cost unknown".
+
+**Local AI (Phase 2.5 L3)**:
+- The Ollama provider uses the native API (`kind: "ollama"`, `/api/chat`), never `/v1`. `/v1` can't set `num_ctx`, so long prompts would be silently cut. Base URLs saved with `/v1` are migrated in `load_settings()`.
+- `llm.context_chars()` sizes the transcript budget from `num_ctx`.
+- `settings["local_only"]` blocks cloud providers in `is_configured` and in `make_completer`.
+- `local_setup.py` handles the machine check, the model recommendation (`RECOMMENDED`, by VRAM), `pull_model` (job kind `pull`) and `use_model`. It also has a CLI that `scripts/setup.sh` (Linux/macOS) and `scripts/setup.ps1` (Windows, untested) use.
 
 **Triage (`#/triage`)** is a ranked list (highest score first). It has verdict chips, Accept all skips, Undo, Rate (batch or one video), and a headline comparing time if you follow the ratings with time for everything. Rows and the library show YouTube thumbnails from `i.ytimg.com`.
 

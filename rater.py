@@ -17,7 +17,6 @@ from llm import LLMError, parse_json
 VERDICTS = ("watch", "skim", "skip")
 BLOCK_SECONDS = 30            # transcript lines are merged into blocks this long
 CHAR_BUDGET_REMOTE = 200_000  # about 50k tokens of transcript
-CHAR_BUDGET_LOCAL = 24_000    # small context windows on local models
 OUTPUT_TOKENS = 700           # rough output per rating, for cost estimates
 
 SYSTEM = (
@@ -60,7 +59,7 @@ def _date(upload_date: Optional[str]) -> str:
 
 
 def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
-                 local: bool = False, today: Optional[dt.date] = None) -> (str, str):
+                 budget: int = CHAR_BUDGET_REMOTE, today: Optional[dt.date] = None) -> (str, str):
     """Returns (prompt, basis) where basis is 'transcript' or 'metadata'."""
     today = today or dt.date.today()
     language = settings.get("language") or "English"
@@ -72,7 +71,7 @@ def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings
     chapters = "\n".join(f"[{_clock(c.get('start'))}] {c.get('title')}" for c in video.get('chapters') or [])
 
     if segments:
-        text, sampled = fit_transcript(transcript_blocks(segments), CHAR_BUDGET_LOCAL if local else CHAR_BUDGET_REMOTE)
+        text, sampled = fit_transcript(transcript_blocks(segments), budget)
         basis = "transcript"
         source = f"Transcript{' (evenly sampled excerpts)' if sampled else ''}:\n{text}"
     else:
@@ -157,8 +156,8 @@ def validate(raw: Any, duration: int) -> Dict[str, Any]:
 
 
 def rate_video(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
-               complete: Callable[[str, str], str], local: bool = False) -> Dict[str, Any]:
-    prompt, basis = build_prompt(video, segments, settings, local=local)
+               complete: Callable[[str, str], str], budget: int = CHAR_BUDGET_REMOTE) -> Dict[str, Any]:
+    prompt, basis = build_prompt(video, segments, settings, budget=budget)
     rating = validate(parse_json(complete(SYSTEM, prompt)), video.get('duration_seconds') or 0)
     return {**rating, "basis": basis, "language": settings.get("language") or "English"}
 
@@ -173,13 +172,13 @@ def estimate(video_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     import storage
 
     settings = _context(llm.load_settings())
-    local = llm.is_local(settings, "rate")
+    budget = llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE)
     videos = storage.videos_for_rating(video_ids)
     chars = with_transcript = 0
     for v in videos:
         segments = storage.get_segments(v['video_id'])
         with_transcript += bool(segments)
-        chars += len(build_prompt(v, segments, settings, local=local)[0]) + len(SYSTEM)
+        chars += len(build_prompt(v, segments, settings, budget=budget)[0]) + len(SYSTEM)
     tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos)
     return {"videos": len(videos), "with_transcript": with_transcript, "tokens_in": tokens_in, "tokens_out": tokens_out,
             "cost": llm.estimate_cost(settings, "rate", tokens_in, tokens_out),
@@ -202,7 +201,7 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     except LLMError as e:
         print(f"❌ {e}")
         return False
-    local, model = llm.is_local(settings, "rate"), llm.model_for(settings, "rate")
+    budget, model = llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE), llm.model_for(settings, "rate")
     no_transcript = sum(1 for v in videos if v.get('details_status') != 'done')
     if no_transcript:
         print(f"   {no_transcript} have no transcript, so they are rated from title and description only. "
@@ -214,7 +213,7 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
             print("⏹️ Stopped. Ratings so far are saved.")
             break
         try:
-            rating = rate_video(v, storage.get_segments(v['video_id']), settings, complete, local=local)
+            rating = rate_video(v, storage.get_segments(v['video_id']), settings, complete, budget=budget)
         except LLMError as e:
             failed += 1
             print(f"   [{n}/{len(videos)}] ⚠️ {v['title'][:60]}: {e}")
