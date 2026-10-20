@@ -88,7 +88,11 @@ Phase 0 tells you *what* is in your backlog and *how long* it takes. Phase 1 tel
 1. Skipped status (done). The first manual Triage missed the requirement and is replaced by step 3.
 2. Details queue and transcripts (F1, F2). **Done 2026-10-20.** Tested on the real library: 3/3 real videos got transcripts (283–3,190 lines) and chapters, and 5 placeholder IDs were marked unavailable. Takes about 5 s per video.
 3. **AI watch ratings and summaries (F4 + F5 revised), AI per task (F8), and a more visual UI** (thumbnails, verdict colors, better narrow-window layout). **Done 2026-10-20.** Tested end to end with a stand-in model on a copy of the library. Not yet run against a real AI.
-4. Search (F3).
+4. Search (F3). **Done 2026-10-20.**
+   - SQLite FTS5 with the **trigram** tokenizer, so it matches parts of words in any script (Hindi included); terms need 3+ characters.
+   - Indexed: titles and channels, descriptions, chapters, transcripts in ~30 s blocks, notes and AI summaries and key points. The index updates on every change.
+   - The whole real library indexes in 0.2 s.
+   - The Search page, the header box and "/" show results grouped by video. Each hit has a kind label, its time and a highlighted ~200-character snippet, and clicking it opens the video at that moment.
 5. Smarter categories (F6), then Markdown export (F7).
 
 Each step ships with tests and keeps the dashboard working.

@@ -170,6 +170,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(build_state())
         if url.path == "/api/job":
             return self._json(JOB.snapshot())
+        if url.path == "/api/search":
+            q = (qs.get("q") or [""])[0][:200]
+            kinds = [k for k in (qs.get("kinds") or [""])[0].split(",") if k] or None
+            return self._json(storage.search(q, kinds))
         if url.path == "/api/local/status":
             import local_setup
             return self._json(local_setup.status())

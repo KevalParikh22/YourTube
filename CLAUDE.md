@@ -72,6 +72,11 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 - `settings["local_only"]` blocks cloud providers in `is_configured` and in `make_completer`.
 - `local_setup.py` handles the machine check, the model recommendation (`RECOMMENDED`, by VRAM), `pull_model` (job kind `pull`) and `use_model`. It also has a CLI that `scripts/setup.sh` (Linux/macOS) and `scripts/setup.ps1` (Windows, untested) use.
 
+**Search (`#/search?q=`)**:
+- `search_docs` holds one row per searchable piece (`kind`: title, chapter, summary, notes, description, transcript; `t` = second). The FTS5 table `search_index` (trigram tokenizer, external content) follows it through insert and delete triggers.
+- `storage._reindex(cursor, ids, kinds)` must run whenever indexed text changes. It is already called from `save_playlist` (title), `update_videos` (notes), `save_details` (description, chapter, transcript) and `save_rating` (summary). `init_db` fills the index for existing databases.
+- `storage.search()` turns user text into quoted FTS terms (3+ characters; quotes stripped), weights hits by kind, groups them by video, and crops snippets with `\x02`/`\x03` markers that the client escapes and highlights. `GET /api/search?q=&kinds=`.
+
 **Setup page (`#/setup`)** renders `docs/SETUP.md` with a small escaping Markdown renderer (`md()` in index.html). `GET /download/<name>` serves only the files in `dashboard.DOWNLOADS` (setup.sh, setup.ps1, SETUP.md). Keep docs/SETUP.md in step with CLI flags, `settings.json` keys and environment variables whenever they change.
 
 **Triage (`#/triage`)** is a ranked list (highest score first). It has verdict chips, Accept all skips, Undo, Rate (batch or one video), and a headline comparing time if you follow the ratings with time for everything. Rows and the library show YouTube thumbnails from `i.ytimg.com`.

@@ -190,3 +190,64 @@ class SuggestionTest(unittest.TestCase):
         self.assertEqual(self.lib()["a"]["suggestion"]["category"], "Food")
         storage.release_category("Food", db_path=self.db)
         self.assertIsNone(self.lib()["a"]["suggestion"])
+
+
+class SearchTest(unittest.TestCase):
+    def setUp(self):
+        self.db = temp_db()
+        storage.save_playlist(playlist(), [video("a", "Graph RAG with Neo4j", "Coder"), video("b", "Cooking pasta", "Chef")], db_path=self.db)
+        storage.save_details("a", {"status": "done", "description": "Build a knowledge graph", "chapters": [{"start": 300, "title": "Docker setup"}],
+                                   "segments": [{"start": 0, "text": "hello"}, {"start": 10, "text": "we install kubernetes"},
+                                                {"start": 95, "text": "now the यह मशीन लर्निंग part"}]}, db_path=self.db)
+
+    def find(self, q, **kw):
+        return storage.search(q, db_path=self.db, **kw)
+
+    def test_finds_each_kind_with_time(self):
+        r = self.find("kube")["results"]
+        self.assertEqual([x["video_id"] for x in r], ["a"])
+        hit = r[0]["hits"][0]
+        self.assertEqual((hit["kind"], hit["t"]), ("transcript", 0))     # first 30 s block starts at 0
+        self.assertIn("\x02kube\x03", hit["snippet"].lower())
+        self.assertEqual(self.find("docker")["results"][0]["hits"][0]["t"], 300)
+        self.assertEqual(self.find("लर्निंग")["results"][0]["hits"][0]["t"], 95)
+        self.assertEqual(self.find("pasta")["results"][0]["video_id"], "b")
+        self.assertEqual(self.find("knowledge")["results"][0]["hits"][0]["kind"], "description")
+
+    def test_notes_summary_and_updates(self):
+        self.assertEqual(self.find("remember")["results"], [])
+        storage.update_videos(["b"], notes="remember the sauce", db_path=self.db)
+        self.assertEqual(self.find("remember")["results"][0]["hits"][0]["kind"], "notes")
+        storage.update_videos(["b"], notes="", db_path=self.db)
+        self.assertEqual(self.find("remember")["results"], [])
+        storage.save_rating("a", {"score": 8, "verdict": "watch", "tldr": "Explains graphs", "points": [{"t": 42, "text": "Cypher queries"}]}, db_path=self.db)
+        hit = self.find("cypher")["results"][0]["hits"][0]
+        self.assertEqual((hit["kind"], hit["t"]), ("summary", 42))
+        storage.save_details("a", {"status": "done", "segments": [{"start": 5, "text": "only this now"}]}, db_path=self.db)
+        self.assertEqual(self.find("kubernetes")["results"], [])         # old transcript left the index
+
+    def test_crop(self):
+        text = ("word " * 100) + "\x02match\x03" + (" tail" * 100)
+        out = storage._crop(text, width=60)
+        self.assertTrue(out.startswith("…") and out.endswith("…"))
+        self.assertIn("\x02match\x03", out)
+        self.assertLessEqual(len(out), 62)
+        self.assertEqual(storage._crop("short \x02hit\x03"), "short \x02hit\x03")
+        self.assertEqual(storage._crop("x" * 300 + " \x02hi" + "y" * 300, width=50).count("\x03"), 1)
+
+    def test_query_rules(self):
+        self.assertTrue(self.find("ab")["short"])
+        self.assertEqual(self.find('"graph rag"')["results"][0]["video_id"], "a")
+        self.assertEqual(self.find("graph pasta")["results"], [])         # all terms required
+        self.assertEqual(self.find('neo4j" OR "x')["results"][0]["video_id"], "a")  # quotes can't break the query
+        self.assertEqual([x["video_id"] for x in self.find("neo4j", kinds=["transcript"])["results"]], [])
+        # 2 titles + description + chapter + 2 transcript blocks (0 s and 10 s share the first 30 s block)
+        self.assertEqual(storage.rebuild_search_index(db_path=self.db), 6)
+
+    def test_existing_db_gets_index(self):
+        import sqlite3
+        conn = sqlite3.connect(self.db)
+        conn.executescript("DROP TABLE search_index; DROP TABLE search_docs;")
+        conn.close()
+        storage.init_db(self.db)
+        self.assertEqual(self.find("pasta")["results"][0]["video_id"], "b")

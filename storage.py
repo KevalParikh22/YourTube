@@ -171,6 +171,8 @@ def init_db(db_path: str = DB_PATH) -> None:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_category ON videos(category)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_playlist ON videos(playlist_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_video ON playlist_items(video_id)")
+        if _create_search_tables(cursor):
+            _reindex(cursor, [r[0] for r in cursor.execute("SELECT video_id FROM videos")])
         conn.commit()
 
 def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], db_path: str = DB_PATH) -> Dict[str, int]:
@@ -244,6 +246,7 @@ def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], d
                   AND video_id NOT IN (SELECT value FROM json_each(?))
             """, (playlist_id, json.dumps(current_ids)))
             removed = cursor.rowcount
+        _reindex(cursor, current_ids, kinds=("title",))
         conn.commit()
 
     added = len(set(current_ids) - known)
@@ -380,6 +383,8 @@ def update_videos(
             (*params, json.dumps(ids))
         )
         updated = cursor.rowcount
+        if notes is not None:
+            _reindex(cursor, ids, kinds=("notes",))
         if category is not None:
             # A hand-picked category answers any pending AI suggestion
             cursor.execute("DELETE FROM category_suggestions WHERE video_id IN (SELECT value FROM json_each(?))", (json.dumps(ids),))
@@ -602,6 +607,7 @@ def save_details(video_id: str, result: Dict[str, Any], db_path: str = DB_PATH) 
             cursor.executemany(
                 "INSERT INTO transcript_segments (video_id, start_s, dur_s, text) VALUES (?, ?, ?, ?)",
                 [(video_id, seg['start'], seg.get('dur'), seg['text']) for seg in result.get('segments') or []])
+            _reindex(cursor, [video_id], kinds=("description", "chapter", "transcript"))
         conn.commit()
 
 def get_details(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
@@ -668,4 +674,146 @@ def save_rating(video_id: str, rating: Dict[str, Any], model: str = "", db_path:
               json.dumps(rating.get('points') or [], ensure_ascii=False),
               json.dumps(rating.get('skim') or [], ensure_ascii=False),
               rating.get('basis'), rating.get('language'), model))
+        _reindex(conn.cursor(), [video_id], kinds=("summary",))
         conn.commit()
+
+# --- Search (Phase 1, F3) ------------------------------------------------------------
+# search_docs holds every searchable piece of text (title, description, chapter, ~30 s transcript
+# block, notes, AI summary) with the second it belongs to. search_index is an FTS5 index over it,
+# kept in step by triggers. The trigram tokenizer matches parts of words in any script (Hindi too)
+# but needs at least 3 characters per term.
+
+SEARCH_KINDS = ("title", "chapter", "summary", "notes", "description", "transcript")
+_KIND_WEIGHT = {"title": 3.0, "chapter": 2.0, "notes": 2.0, "summary": 1.5, "description": 1.0, "transcript": 1.0}
+_BLOCK_SECONDS = 30
+_HIT_START, _HIT_END = "\x02", "\x03"   # snippet markers; the client escapes text, then highlights
+
+def _create_search_tables(cursor: sqlite3.Cursor) -> bool:
+    """Creates the search tables; True if they were new (so the caller fills them)."""
+    exists = cursor.execute("SELECT 1 FROM sqlite_master WHERE name = 'search_docs'").fetchone()
+    cursor.executescript("""
+        CREATE TABLE IF NOT EXISTS search_docs (
+            id INTEGER PRIMARY KEY, video_id TEXT NOT NULL, kind TEXT NOT NULL, t REAL, text TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_search_docs_video ON search_docs(video_id, kind);
+        CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+            text, content='search_docs', content_rowid='id', tokenize='trigram');
+        CREATE TRIGGER IF NOT EXISTS search_docs_ai AFTER INSERT ON search_docs BEGIN
+            INSERT INTO search_index(rowid, text) VALUES (new.id, new.text); END;
+        CREATE TRIGGER IF NOT EXISTS search_docs_ad AFTER DELETE ON search_docs BEGIN
+            INSERT INTO search_index(search_index, rowid, text) VALUES ('delete', old.id, old.text); END;
+    """)
+    return not exists
+
+def _docs_for(cursor: sqlite3.Cursor, video_id: str, kind: str) -> List[tuple]:
+    """(t, text) rows of one kind for one video."""
+    if kind == "title":
+        r = cursor.execute("SELECT title, channel FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+        return [(None, f"{r[0]} · {r[1] or ''}")] if r else []
+    if kind == "notes":
+        r = cursor.execute("SELECT notes FROM videos WHERE video_id = ?", (video_id,)).fetchone()
+        return [(None, r[0])] if r and (r[0] or "").strip() else []
+    if kind in ("description", "chapter"):
+        r = cursor.execute("SELECT description, chapters FROM video_details WHERE video_id = ?", (video_id,)).fetchone()
+        if not r:
+            return []
+        if kind == "description":
+            return [(None, r[0])] if (r[0] or "").strip() else []
+        return [(c.get("start"), c.get("title")) for c in json.loads(r[1] or "[]") if c.get("title")]
+    if kind == "transcript":
+        blocks: List[list] = []
+        for start, text in cursor.execute(
+                "SELECT start_s, text FROM transcript_segments WHERE video_id = ? ORDER BY start_s", (video_id,)):
+            if blocks and start - blocks[-1][0] < _BLOCK_SECONDS:
+                blocks[-1][1] += " " + text
+            else:
+                blocks.append([start, text])
+        return [tuple(b) for b in blocks]
+    if kind == "summary":
+        r = cursor.execute("SELECT reason, tldr, points FROM video_ratings WHERE video_id = ?", (video_id,)).fetchone()
+        if not r:
+            return []
+        rows = [(None, " ".join(x for x in (r[1], r[0]) if x))]
+        rows += [(p.get("t"), p.get("text")) for p in json.loads(r[2] or "[]") if p.get("text")]
+        return [x for x in rows if (x[1] or "").strip()]
+    raise ValueError(kind)
+
+def _reindex(cursor: sqlite3.Cursor, video_ids: Iterable[str], kinds: Iterable[str] = SEARCH_KINDS) -> None:
+    kinds = tuple(kinds)
+    marks = ",".join("?" * len(kinds))
+    for vid in video_ids:
+        cursor.execute(f"DELETE FROM search_docs WHERE video_id = ? AND kind IN ({marks})", (vid, *kinds))
+        for kind in kinds:
+            cursor.executemany("INSERT INTO search_docs (video_id, kind, t, text) VALUES (?, ?, ?, ?)",
+                               [(vid, kind, t, text) for t, text in _docs_for(cursor, vid, kind)])
+
+def rebuild_search_index(db_path: str = DB_PATH) -> int:
+    """Rebuilds the whole index; returns the number of indexed pieces."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM search_docs")
+        _reindex(cursor, [r[0] for r in cursor.execute("SELECT video_id FROM videos").fetchall()])
+        conn.commit()
+        return cursor.execute("SELECT COUNT(*) FROM search_docs").fetchone()[0]
+
+def _crop(marked: str, width: int = 200) -> str:
+    """Cuts a window of about `width` characters around the first highlighted match, on word boundaries."""
+    text = " ".join((marked or "").split())
+    if len(text) <= width:
+        return text
+    first = max(0, text.find(_HIT_START))
+    start = max(0, first - width // 3)
+    end = min(len(text), start + width)
+    start = max(0, end - width)
+    if start > 0:
+        start = text.find(" ", start) + 1 or start
+    if end < len(text):
+        end = text.rfind(" ", start, end) if text.rfind(" ", start, end) > first else end
+    window = text[start:end]
+    # A cut must not leave a highlight open
+    if window.count(_HIT_START) > window.count(_HIT_END):
+        window += _HIT_END
+    return ("…" if start > 0 else "") + window + ("…" if end < len(text) else "")
+
+def _fts_query(q: str) -> Optional[str]:
+    """User text -> FTS5 query: "quoted phrases" and words, all required. Terms under 3 characters are dropped."""
+    import re
+    terms = [a or b.replace('"', '') for a, b in re.findall(r'"([^"]+)"|(\S+)', q or "")]
+    terms = [t.strip() for t in terms if len(t.strip()) >= 3]
+    return " ".join('"' + t.replace('"', '""') + '"' for t in terms) or None
+
+def search(q: str, kinds: Optional[Iterable[str]] = None, limit: int = 50, db_path: str = DB_PATH) -> Dict[str, Any]:
+    """
+    Full-text search. Returns {'results': [{'video_id', 'score', 'hits': [{'kind', 't', 'snippet'}]}], 'short': bool}.
+    Snippets mark matches with \\x02 ... \\x03. 'short' means the query had no term of 3+ characters.
+    """
+    init_db(db_path)
+    kinds = [k for k in (kinds or SEARCH_KINDS) if k in SEARCH_KINDS]
+    query = _fts_query(q)
+    if not query or not kinds:
+        return {"results": [], "short": bool((q or "").strip())}
+    marks = ",".join("?" * len(kinds))
+    with get_connection(db_path) as conn:
+        try:
+            rows = conn.execute(f"""
+                SELECT d.video_id, d.kind, d.t,
+                       highlight(search_index, 0, '{_HIT_START}', '{_HIT_END}') AS snip,
+                       bm25(search_index) AS rank
+                FROM search_index JOIN search_docs d ON d.id = search_index.rowid
+                WHERE search_index MATCH ? AND d.kind IN ({marks})
+                ORDER BY rank LIMIT 600
+            """, (query, *kinds)).fetchall()
+        except sqlite3.OperationalError:
+            return {"results": [], "short": False}
+    by_video: Dict[str, Dict[str, Any]] = {}
+    for r in rows:
+        score = -r["rank"] * _KIND_WEIGHT[r["kind"]]
+        v = by_video.setdefault(r["video_id"], {"video_id": r["video_id"], "score": 0.0, "hits": [], "matches": 0})
+        v["matches"] += 1
+        v["score"] = max(v["score"], score)
+        if len(v["hits"]) < 4:
+            v["hits"].append({"kind": r["kind"], "t": r["t"], "snippet": _crop(r["snip"])})
+    results = sorted(by_video.values(), key=lambda v: -(v["score"] + 0.05 * v["matches"]))[:limit]
+    for v in results:
+        v["hits"].sort(key=lambda h: (SEARCH_KINDS.index(h["kind"]), h["t"] if h["t"] is not None else -1))
+    return {"results": results, "short": False}
