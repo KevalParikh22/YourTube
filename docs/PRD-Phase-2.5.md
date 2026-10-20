@@ -76,7 +76,11 @@ Phase 1 learns from videos that have captions, using any AI provider. Phase 2.5 
    - Setup check on the AI page (GPU, memory, ffmpeg, Ollama and its models, faster-whisper), with one-click model download and "Use".
    - "Local only" switch, and model recommendations by GPU memory (4 GB → `qwen3.5:4b`, 3.3 GB, text and images).
    - Setup scripts for users: `scripts/setup.sh [--local-ai]` (Linux/macOS, tested on Linux) and `scripts/setup.ps1 [-LocalAI]` (Windows, not yet tested).
-   - Not yet tested against a real Ollama: Ollama was not installed when this was built.
+   - **Tested 2026-10-20 on this machine** (Ollama 0.40.6, `qwen3.5:4b` installed by `scripts/setup.sh --local-ai`):
+     - 2.25 of 3.38 GB of the model sits on the GPU; the rest runs on the CPU, because the display already uses part of the 4 GB.
+     - The first call takes about 66 s (model load). After that, about 30 s per rating with a transcript.
+     - Found and fixed: the small model wrote timestamps in minutes when asked for seconds, and copied the numbers from the prompt's example. Ratings now ask for clock strings ("1:02:30", parsed in code) and the example uses placeholders.
+     - Open: local scores bunch high (8–9 on three on-topic videos). Check this on a larger mixed playlist with interests filled in before trusting Skip verdicts from the local model.
 3. Local transcription (L1) on the shared job queue.
 4. Visual content (L2): frames, dedupe, OCR and vision, then visual segments in search and summaries.
 

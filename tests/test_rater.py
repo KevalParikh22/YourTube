@@ -43,6 +43,13 @@ class PromptTest(unittest.TestCase):
 
 
 class ValidateTest(unittest.TestCase):
+    def test_clock_strings(self):
+        self.assertEqual([rater.parse_time(x) for x in ("4:05", "1:02:30", "[12:00]", "95", 95, "0:61", "soon", None)],
+                         [245, 3750, 720, 95, 95, None, None, None])
+        r = rater.validate({"score": 6, "verdict": "skim", "points": [{"t": "1:02:30", "text": "late point"}],
+                            "skim": [{"start": "20:00", "end": "38:15", "why": "core"}]}, duration=7560)
+        self.assertEqual((r["points"][0]["t"], r["skim"][0]["start"], r["skim"][0]["end"]), (3750, 1200, 2295))
+
     def test_clamps_and_filters(self):
         r = rater.validate({"score": 14, "verdict": "WATCH", "reason": " good  stuff ",
                             "points": [{"t": 95, "text": "a"}, {"t": 99999, "text": "b"}, {"text": " "}],

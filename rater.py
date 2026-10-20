@@ -10,6 +10,7 @@ Ratings never change a video. The user accepts a verdict (e.g. "Accept all skips
 `complete(system, prompt) -> text` comes from llm.make_completer(settings, "rate").
 """
 import datetime as dt
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from llm import LLMError, parse_json
@@ -101,16 +102,32 @@ Rate how worth watching this video is for this learner, from 0 to 10, weighing:
 3. Time against value: does it earn its length, or would a summary be enough?
 4. Freshness: for fast-moving topics, penalise content that is likely outdated today.
 
-Verdict: "watch" (worth the full time), "skim" (only parts are worth it: give those time ranges), or "skip" (not worth it, or the summary covers it).
-Write reason (at most 20 words), tldr (at most 2 sentences) and points (3 to 7 key takeaways, each with the second it starts at) in {language}.
-Use only timestamps that exist in this video. Times are in seconds.
+Use the whole scale. 8 to 10: exceptional and clearly worth the full time for this learner. 5 to 7: useful, but parts or a summary may be enough.
+Below 5: weak, off-topic, padded or outdated. A typical backlog has many videos below 5.
 
-Reply with JSON:
-{{"score": 7.5, "verdict": "skim", "reason": "...", "tldr": "...",
- "points": [{{"t": 95, "text": "..."}}],
- "skim": [{{"start": 282, "end": 665, "why": "..."}}]}}"""
+Verdict: "watch" (worth the full time), "skim" (only parts are worth it: give those time ranges), or "skip" (not worth it, or the summary covers it).
+Write reason (at most 20 words), tldr (at most 2 sentences) and points (3 to 7 key takeaways) in {language}.
+Times: copy them exactly as written in the transcript or chapters, like "4:05" or "1:02:30" (hours:minutes:seconds). Only use times that appear there.
+
+Reply with JSON in this shape (replace every <...>):
+{{"score": <0-10>, "verdict": "<watch|skim|skip>", "reason": "<...>", "tldr": "<...>",
+ "points": [{{"t": "<time>", "text": "<...>"}}],
+ "skim": [{{"start": "<time>", "end": "<time>", "why": "<...>"}}]}}"""
     return prompt, basis
 
+
+def parse_time(x: Any) -> Optional[int]:
+    """'1:02:30' / '4:05' / '95' / 95 -> seconds. The prompt asks for clock strings: models mix up units with bare numbers."""
+    if isinstance(x, (int, float)) and not isinstance(x, bool):
+        return int(x)
+    text = str(x or "").strip().strip("[]")
+    if re.fullmatch(r"\d+(\.\d+)?", text):
+        return int(float(text))
+    m = re.fullmatch(r"(?:(\d+):)?(\d{1,2}):(\d{2})(?:\.\d+)?", text)
+    if not m:
+        return None
+    h, mnt, sec = int(m.group(1) or 0), int(m.group(2)), int(m.group(3))
+    return h * 3600 + mnt * 60 + sec if sec < 60 and (not m.group(1) or mnt < 60) else None
 
 def validate(raw: Any, duration: int) -> Dict[str, Any]:
     """Normalises a model reply; raises LLMError if it has no usable score or verdict."""
@@ -130,11 +147,8 @@ def validate(raw: Any, duration: int) -> Dict[str, Any]:
     limit = duration if duration > 0 else 10 ** 6
 
     def sec(x: Any) -> Optional[int]:
-        try:
-            v = int(float(x))
-        except (TypeError, ValueError):
-            return None
-        return v if 0 <= v <= limit else None
+        v = parse_time(x)
+        return v if v is not None and 0 <= v <= limit else None
 
     points = []
     for p in raw.get("points") or []:
