@@ -15,6 +15,7 @@ python3 -m venv --without-pip .venv && python3 -m pip --python .venv/bin/python 
 .venv/bin/python dashboard.py            # local dashboard at http://127.0.0.1:8765 (--port, --no-open)
 .venv/bin/python main.py "<playlist URL | ID | WL>" [--browser auto|firefox|chrome | --cookies cookies.txt] [--ai] [--no-open]
 .venv/bin/python main.py --list [--browser auto]   # list the signed-in account's playlists and IDs
+.venv/bin/python main.py --details [N]             # fetch details/captions for up to N videos (default 200)
 .venv/bin/python -m unittest             # test suite (tests/), runs against temp files
 ```
 
@@ -52,7 +53,9 @@ POSTs must send the `X-YTKB: 1` header and JSON content. The Host header must be
 
 Spec: `docs/PRD-Phase-1.md` (details queue, transcripts, search, AI summaries, Skipped status and triage). Per-video reads must be made **without cookies**: with cookies, yt-dlp full extraction fails with "The page needs to be reloaded". Cookies are only for listing playlists.
 
-Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STATUSES` (completed and skipped) don't count toward remaining time, in `metrics.py` and in the client's `isDone()`. Adding a status means adding it to `VALID_STATUSES`. `init_db()` then rebuilds the `videos` table, because SQLite can't alter a CHECK constraint. Triage (`#/triage`) steps through unwatched videos: Keep (session only), Skip, Watching, Watched, Undo. Keys: K S P W U.
+Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STATUSES` (completed and skipped) don't count toward remaining time, in `metrics.py` and in the client's `isDone()`. Adding a status means adding it to `VALID_STATUSES`. `init_db()` then rebuilds the `videos` table, because SQLite can't alter a CHECK constraint. **Video details (`enrich.py`)**: `run_enrich` goes through `storage.videos_needing_details()` (no row yet, or `failed` with fewer than 3 tries; not-done videos first). It makes **anonymous** yt-dlp reads, using Node/Deno as the JS runtime when one is installed. Requests are paced at about 3 s plus jitter, the default limit is 200 per run, and the run stops at the first bot-check or 429. Categories whose names look like music (`MUSIC_NAME`), or that are switched off in `settings.json["transcripts"]`, are never requested. Statuses in `video_details`: done, no_captions, music (YouTube category), unavailable, failed. A failed retry keeps earlier good data. Captions are stored in `transcript_segments`; the track preference is in `choose_track`. `/api/state` carries only a small `details` summary per video. The full text comes from `GET /api/video?id=`, and the job can be stopped with `POST /api/job/cancel`.
+
+Triage (`#/triage`) steps through unwatched videos: Keep (session only), Skip, Watching, Watched, Undo. Keys: K S P W U.
 
 ## Not built yet (see the research doc §5–6)
 

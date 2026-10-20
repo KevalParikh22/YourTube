@@ -102,6 +102,34 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS video_details (
+                video_id TEXT PRIMARY KEY,
+                status TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                tags TEXT DEFAULT '[]',
+                chapters TEXT DEFAULT '[]',
+                language TEXT,
+                yt_categories TEXT DEFAULT '[]',
+                caption_lang TEXT,
+                caption_kind TEXT,
+                tries INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                fetched_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(video_id) REFERENCES videos(video_id)
+            )
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS transcript_segments (
+                video_id TEXT NOT NULL,
+                start_s REAL NOT NULL,
+                dur_s REAL,
+                text TEXT NOT NULL,
+                FOREIGN KEY(video_id) REFERENCES videos(video_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_segments_video ON transcript_segments(video_id, start_s)")
+
         # Migrate databases created before these columns existed
         existing = _columns(cursor, "videos")
         for col, ddl in (
@@ -262,8 +290,14 @@ def get_library(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
                 v['sources'].append({'id': row['playlist_id'], 'position': row['position'], 'removed': row['removed']})
         suggestions = {row['video_id']: {'category': row['category'], 'confidence': row['confidence']}
                        for row in cursor.execute("SELECT video_id, category, confidence FROM category_suggestions")}
+        details = {row['video_id']: {'status': row['status'], 'caption_kind': row['caption_kind'],
+                                     'caption_lang': row['caption_lang'], 'chapters': row['n_chapters'],
+                                     'tries': row['tries']}
+                   for row in cursor.execute("SELECT video_id, status, caption_kind, caption_lang, tries, "
+                                             "json_array_length(chapters) AS n_chapters FROM video_details")}
     for v in videos.values():
         v['suggestion'] = suggestions.get(v['video_id'])
+        v['details'] = details.get(v['video_id'])
         v['in_source'] = any(not s['removed'] for s in v['sources'])
     return list(videos.values())
 
@@ -480,3 +514,81 @@ def dismiss_suggestions(video_ids: Optional[Iterable[str]] = None, db_path: str 
         cursor.execute(f"DELETE FROM category_suggestions{where}", params)
         conn.commit()
         return cursor.rowcount
+
+# --- Video details and transcripts (Phase 1) --------------------------------------
+
+def videos_needing_details(
+    video_ids: Optional[Iterable[str]] = None,
+    max_tries: int = 3,
+    db_path: str = DB_PATH
+) -> List[Dict[str, Any]]:
+    """
+    Videos with no details yet, or whose last fetch failed fewer than max_tries times.
+    With video_ids, those videos are fetched again whatever their state (an explicit request).
+    Not-done videos come first, oldest first.
+    """
+    init_db(db_path)
+    sql = """
+        SELECT v.video_id, v.title, v.category, v.status
+        FROM videos v LEFT JOIN video_details d ON d.video_id = v.video_id
+    """
+    with get_connection(db_path) as conn:
+        if video_ids is not None:
+            rows = conn.execute(sql + " WHERE v.video_id IN (SELECT value FROM json_each(?))",
+                                (json.dumps(list(video_ids)),)).fetchall()
+        else:
+            rows = conn.execute(sql + """
+                WHERE d.video_id IS NULL OR (d.status = 'failed' AND d.tries < ?)
+                ORDER BY CASE WHEN v.status IN ('completed', 'skipped') THEN 1 ELSE 0 END, v.added_at, v.rowid
+            """, (max_tries,)).fetchall()
+        return [dict(r) for r in rows]
+
+def save_details(video_id: str, result: Dict[str, Any], db_path: str = DB_PATH) -> None:
+    """Stores one fetch result (see enrich.fetch_details). Failures keep earlier good data and count tries."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        prev = cursor.execute("SELECT status, tries FROM video_details WHERE video_id = ?", (video_id,)).fetchone()
+        if result['status'] == 'failed' and prev is not None and prev['status'] not in ('failed',):
+            # A retry that failed: keep the earlier result
+            cursor.execute("UPDATE video_details SET error = ? WHERE video_id = ?", (result.get('error'), video_id))
+            conn.commit()
+            return
+        tries = (prev['tries'] if prev is not None else 0) + 1 if result['status'] == 'failed' else 0
+        cursor.execute("""
+            INSERT INTO video_details (video_id, status, description, tags, chapters, language, yt_categories,
+                                       caption_lang, caption_kind, tries, error, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(video_id) DO UPDATE SET
+                status = excluded.status, description = excluded.description, tags = excluded.tags,
+                chapters = excluded.chapters, language = excluded.language, yt_categories = excluded.yt_categories,
+                caption_lang = excluded.caption_lang, caption_kind = excluded.caption_kind,
+                tries = excluded.tries, error = excluded.error, fetched_at = CURRENT_TIMESTAMP
+        """, (
+            video_id, result['status'], result.get('description') or '',
+            json.dumps(result.get('tags') or [], ensure_ascii=False),
+            json.dumps(result.get('chapters') or [], ensure_ascii=False),
+            result.get('language'), json.dumps(result.get('yt_categories') or [], ensure_ascii=False),
+            result.get('caption_lang'), result.get('caption_kind'), tries, result.get('error'),
+        ))
+        if result['status'] != 'failed':
+            cursor.execute("DELETE FROM transcript_segments WHERE video_id = ?", (video_id,))
+            cursor.executemany(
+                "INSERT INTO transcript_segments (video_id, start_s, dur_s, text) VALUES (?, ?, ?, ?)",
+                [(video_id, seg['start'], seg.get('dur'), seg['text']) for seg in result.get('segments') or []])
+        conn.commit()
+
+def get_details(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    """Full details for one video, with its transcript segments, or None if never fetched."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT * FROM video_details WHERE video_id = ?", (video_id,)).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        for key in ('tags', 'chapters', 'yt_categories'):
+            d[key] = json.loads(d[key] or '[]')
+        d['segments'] = [dict(r) for r in conn.execute(
+            "SELECT start_s AS start, dur_s AS dur, text FROM transcript_segments WHERE video_id = ? ORDER BY start_s",
+            (video_id,))]
+        return d

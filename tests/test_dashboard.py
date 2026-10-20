@@ -86,3 +86,27 @@ class DashboardTest(unittest.TestCase):
         b = {v["video_id"]: v for v in state["videos"]}["b"]
         self.assertEqual((b["category"], b["category_source"]), ("Cooking", "ai"))
         self.call("/api/videos/update", {"ids": ["b"], "reset_category": True})
+
+    def test_video_details_endpoint(self):
+        code, _ = self.call("/api/video?id=a")
+        self.assertEqual(code, 404)
+        storage.save_details("a", {"status": "done", "segments": [{"start": 1, "dur": 1, "text": "<b>hi</b>"}],
+                                   "chapters": [], "caption_kind": "auto", "caption_lang": "en"})
+        code, r = self.call("/api/video?id=a")
+        self.assertEqual((code, r["details"]["segments"][0]["text"]), (200, "<b>hi</b>"))
+        _, state = self.call("/api/state")
+        self.assertEqual({v["video_id"]: v for v in state["videos"]}["a"]["details"]["status"], "done")
+
+    def test_transcript_switches(self):
+        code, r = self.call("/api/details/settings", {"category": "Cooking", "on": False})
+        self.assertEqual(code, 200)
+        self.assertFalse(r["transcripts"]["Cooking"])
+        code, r = self.call("/api/details/settings", {"after_sync": True})
+        self.assertTrue(r["details_after_sync"])
+        self.call("/api/details/settings", {"category": "Cooking", "on": True, "after_sync": False})
+
+    def test_fetch_rejects_bad_ids(self):
+        self.assertEqual(self.call("/api/details/fetch", {"ids": "a"})[0], 400)
+
+    def test_cancel_without_job(self):
+        self.assertEqual(self.call("/api/job/cancel", {})[1], {"ok": False})

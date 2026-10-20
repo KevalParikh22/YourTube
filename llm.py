@@ -63,6 +63,8 @@ def default_settings() -> Dict[str, Any]:
         "presets": [],            # category names the AI must keep as-is
         "category_notes": {},     # name -> one-line description used in prompts
         "proposal": None,         # pending AI-proposed category set awaiting review
+        "transcripts": {},        # category -> fetch transcripts? (overrides the music-name default)
+        "details_after_sync": False,
     }
 
 def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:

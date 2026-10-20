@@ -33,6 +33,16 @@ class Job:
         self.state = {"running": False, "ok": None, "log": "", "kind": None, "label": None,
                       "started_at": None, "finished_at": None}
         self._buf = io.StringIO()
+        self._stop = threading.Event()
+
+    def stop_requested(self):
+        return self._stop.is_set()
+
+    def request_stop(self):
+        if self.state["running"]:
+            self._stop.set()
+            return True
+        return False
 
     def snapshot(self):
         snap = dict(self.state)
@@ -45,6 +55,7 @@ class Job:
             if self.state["running"]:
                 return False
             self._buf = io.StringIO()
+            self._stop.clear()
             self.state = {"running": True, "ok": None, "log": "", "kind": kind, "label": label,
                           "started_at": datetime.now().isoformat(timespec="seconds"), "finished_at": None}
         threading.Thread(target=self._run, args=(fn,), daemon=True).start()
@@ -63,19 +74,34 @@ class Job:
 def _sync(url, browser, cookies_file):
     from main import run_pipeline  # deferred so the dashboard starts even if yt-dlp is missing
     settings = llm.load_settings()
-    return run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False,
-                        ai_suggest=settings["auto_after_sync"] and llm.is_configured(settings))
+    ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False,
+                      ai_suggest=settings["auto_after_sync"] and llm.is_configured(settings))
+    if ok and settings.get("details_after_sync"):
+        from enrich import run_enrich
+        print()
+        run_enrich(limit=AFTER_SYNC_DETAILS_LIMIT, should_stop=JOB.stop_requested)  # a failure here doesn't fail the sync
+    return ok
+
+AFTER_SYNC_DETAILS_LIMIT = 50
 
 JOB = Job()
 
+def _transcript_categories(settings):
+    from enrich import transcripts_wanted
+    names = set(load_taxonomy()) | {v["category"] for v in storage.get_all_videos(include_removed=True)}
+    return {n: transcripts_wanted(n, settings) for n in sorted(names)}
+
 def build_state():
+    settings = llm.load_settings()
     return {
         "playlists": storage.get_playlists(),
         "videos": storage.get_library(),
         "taxonomy": load_taxonomy(),
         "fallback_category": FALLBACK_CATEGORY,
         "job": JOB.snapshot(),
-        "ai": llm.public_settings(llm.load_settings()),
+        "ai": llm.public_settings(settings),
+        "transcripts": _transcript_categories(settings),
+        "details_after_sync": bool(settings.get("details_after_sync")),
         "platform": sys.platform,
     }
 
@@ -127,6 +153,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(build_state())
         if url.path == "/api/job":
             return self._json(JOB.snapshot())
+        if url.path == "/api/video":
+            vid = (qs.get("id") or [""])[0]
+            details = storage.get_details(vid)
+            return self._json({"details": details}) if details is not None else self._error("No details yet", 404)
         if url.path == "/api/export":
             fmt = (qs.get("format") or ["csv"])[0]
             videos = storage.get_all_videos(None if playlist == "all" else playlist, include_removed=True)
@@ -188,8 +218,9 @@ class Handler(BaseHTTPRequestHandler):
                 n = storage.rename_category(old, new)
                 settings = llm.load_settings()
                 settings["presets"] = [new if p == old else p for p in settings["presets"]]
-                if old in settings["category_notes"]:
-                    settings["category_notes"][new] = settings["category_notes"].pop(old)
+                for key in ("category_notes", "transcripts"):
+                    if old in settings.get(key, {}):
+                        settings[key][new] = settings[key].pop(old)
                 llm.save_settings(settings)
                 return self._json({"ok": True, "updated": n})
 
@@ -202,6 +233,7 @@ class Handler(BaseHTTPRequestHandler):
                 settings = llm.load_settings()
                 settings["presets"] = [p for p in settings["presets"] if p != name]
                 settings["category_notes"].pop(name, None)
+                settings.get("transcripts", {}).pop(name, None)
                 llm.save_settings(settings)
                 return self._json({"ok": True, "moved": n})
 
@@ -229,6 +261,30 @@ class Handler(BaseHTTPRequestHandler):
 
             if path.startswith("/api/ai/") or path == "/api/presets":
                 return self._ai(path, body)
+
+            if path == "/api/job/cancel":
+                return self._json({"ok": JOB.request_stop()})
+
+            if path == "/api/details/fetch":
+                from enrich import run_enrich
+                ids = body.get("ids")
+                if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
+                    return self._error("ids must be a list of video IDs")
+                if not JOB.start("details", "Fetch video details",
+                                 lambda: run_enrich(video_ids=ids, should_stop=JOB.stop_requested)):
+                    return self._error("Another task is already running", 409)
+                return self._json({"ok": True})
+
+            if path == "/api/details/settings":
+                settings = llm.load_settings()
+                if "after_sync" in body:
+                    settings["details_after_sync"] = bool(body["after_sync"])
+                name = _clean(body.get("category"))
+                if name:
+                    settings.setdefault("transcripts", {})[name] = bool(body.get("on"))
+                llm.save_settings(settings)
+                return self._json({"ok": True, "transcripts": _transcript_categories(settings),
+                                   "details_after_sync": bool(settings.get("details_after_sync"))})
         except ValueError as e:
             return self._error(str(e))
         except llm.LLMError as e:

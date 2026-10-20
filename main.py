@@ -139,9 +139,16 @@ def main():
     parser.add_argument("--cookies", "-c", help="Path to cookies.txt file")
     parser.add_argument("--no-open", action="store_true", help="Do not open HTML report in browser automatically")
     parser.add_argument("--list", action="store_true", help="List the playlists on your signed-in account, with their IDs")
+    parser.add_argument("--details", type=int, nargs="?", const=200, metavar="N",
+                        help="Fetch descriptions, chapters and captions for up to N videos that need them (default 200)")
     parser.add_argument("--ai", action="store_true", help="After syncing, ask the configured AI for category suggestions on unsorted videos")
     
     args = parser.parse_args()
+
+    if args.details is not None:
+        from enrich import run_enrich
+        run_enrich(limit=max(1, args.details))
+        return
 
     if args.list:
         from extractor import list_my_playlists

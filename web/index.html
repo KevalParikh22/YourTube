@@ -240,6 +240,16 @@
   .btn-dark kbd { color: inherit; border-color: color-mix(in srgb, var(--bg) 40%, transparent); }
   .st-skip { fill: none; stroke: var(--ink-3); stroke-width: 1.5; stroke-linecap: round; }
 
+  /* ---------- video details ---------- */
+  .det-counts { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--ink-2); }
+  .det-counts b { display: block; font-family: var(--serif); font-weight: 500; font-size: 22px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .chap, .tline { all: unset; cursor: pointer; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; padding: 3px 6px; margin: 0 -6px; border-radius: 4px; font-size: 13px; line-height: 1.45; }
+  .chap:hover, .tline:hover { background: var(--sunken); }
+  .chap time, .tline time { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 12.5px; }
+  .drawer details summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); font-weight: 500; }
+  .desc-text { white-space: pre-wrap; font-size: 13px; color: var(--ink-2); margin: 8px 0 0; max-height: 260px; overflow: auto; overflow-wrap: anywhere; }
+  .transcript { max-height: 360px; overflow: auto; margin-top: 8px; }
+
   /* ---------- drawer ---------- */
   .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 15, .28); }
   .drawer {
@@ -331,7 +341,9 @@ const JOB_TEXT = {
   sync: ['Reading playlist. Large playlists take a minute.', 'Playlist synced', 'Sync failed. See the log.'],
   discover: ['Asking the AI to propose categories…', 'Categories proposed. Review them below.', 'AI run failed. See the log.'],
   suggest: ['Asking the AI to sort videos…', 'Suggestions ready to review', 'AI run failed. See the log.'],
+  details: ['Fetching video details, one video every few seconds…', 'Video details fetched', 'Details run stopped early. See the log.'],
 };
+const DETAIL_LABEL = { done: 'Transcript', no_captions: 'No captions', music: 'Music, no transcript', unavailable: 'Unavailable', failed: 'Failed, will retry' };
 
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -348,7 +360,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   triage: { cat: '', order: 'order', kept: new Set(), undo: [] },
-  drawer: null, polling: false,
+  drawer: null, polling: false, detailCache: {},
 };
 
 /* ---------------- helpers ---------------- */
@@ -441,6 +453,10 @@ const statusIcon = s => s === 'completed'
   : s === 'in_progress'
     ? '<svg viewBox="0 0 20 20"><circle class="st-ring" cx="10" cy="10" r="8"/><path class="st-half" d="M10 3.5a6.5 6.5 0 0 1 0 13z"/></svg>'
     : '<svg viewBox="0 0 20 20"><circle class="st-ring" cx="10" cy="10" r="8"/></svg>';
+
+const wantsTranscript = v => S.data.transcripts[v.category] !== false;
+const needsDetails = v => wantsTranscript(v) && (!v.details || (v.details.status === 'failed' && v.details.tries < 3));
+const clock = sec => { sec = Math.floor(sec || 0); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = String(sec % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
 
 /* ---------------- routing & load ---------------- */
 const route = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || '');
@@ -772,6 +788,8 @@ function viewSources() {
     <div id="job"></div>
   </section>
 
+  ${viewDetailsCard()}
+
   <section class="section">
     <h2 class="h">Your playlists</h2>
     ${pls.length ? `<div class="tbl-wrap"><table class="tbl">
@@ -787,6 +805,31 @@ function viewSources() {
       </tr>`).join('')}</tbody></table></div>` : '<p class="note">No playlists yet. Add one above.</p>'}
   </section>`;
 }
+function viewDetailsCard() {
+  const vs = videos(), counts = {};
+  for (const v of vs) if (v.details) counts[v.details.status] = (counts[v.details.status] || 0) + 1;
+  const need = vs.filter(needsDetails).length, off = vs.filter(v => !wantsTranscript(v)).length, running = !!S.data.job.running;
+  return `
+  <section class="section card">
+    <h2 class="h">Video details and transcripts</h2>
+    <p class="note">Descriptions, chapters and captions make videos searchable and let the AI summarize them. They are read
+      <b>without your sign-in</b>, one video every few seconds, so YouTube doesn't flag the traffic. Music categories are left out (switch per category on the Categories page).</p>
+    <div class="det-counts">
+      <span><b>${counts.done || 0}</b>with transcript</span>
+      <span><b>${counts.no_captions || 0}</b>no captions</span>
+      <span><b>${(counts.music || 0) + off}</b>music / left out</span>
+      <span><b>${counts.unavailable || 0}</b>unavailable</span>
+      <span><b>${need}</b>still to fetch</span>
+    </div>
+    <div class="actions">
+      <button class="btn btn-dark btn-sm" data-act="details-fetch" data-job-btn ${running || !need ? 'disabled' : ''}>${need ? `Fetch details for ${plural(Math.min(need, 200), 'video')}` : 'All fetched'}</button>
+      ${need > 200 ? `<span class="faint" style="font-size:12.5px">200 per run (about ${Math.round(200 * 5 / 60)} min). Run again for the rest.</span>`
+        : need ? `<span class="faint" style="font-size:12.5px">About ${Math.max(1, Math.round(need * 5 / 60))} min</span>` : ''}
+    </div>
+    <label class="check" style="margin-top:14px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
+      <span>After each sync, fetch details for new videos (up to 50)</span></label>
+  </section>`;
+}
 function fmtDate(s) {
   if (!s) return '';
   const d = new Date(s.replace(' ', 'T') + 'Z');
@@ -800,10 +843,10 @@ function updateJob() {
   const btn = $('#run');
   if (btn) { btn.disabled = !!job.running; btn.textContent = job.running ? 'Working…' : 'Sync'; }
   for (const b of $$('[data-job-btn]')) b.disabled = !!job.running;
-  const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind) : job.kind === 'sync' || !job.kind;
+  const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind) : ['sync', 'details'].includes(job.kind) || !job.kind;
   if (!mine || (!job.log && !job.running)) { box.innerHTML = ''; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}</span>`
+  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
     : `<span class="status-line">${job.ok ? 'Finished' : '<span class="warn-text">Failed</span>'} · ${esc(fmtLocal(job.finished_at))}</span>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div><pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
@@ -822,7 +865,11 @@ async function pollJob() {
       await sleep(1000);
     }
   } catch (e) { toast(e.message, true); } finally { S.polling = false; }
-  if (job) { const t = JOB_TEXT[job.kind] || JOB_TEXT.sync; toast(job.ok ? t[1] : t[2], !job.ok); await load(); }
+  if (job) {
+    const t = JOB_TEXT[job.kind] || JOB_TEXT.sync;
+    if (job.kind === 'details' || job.kind === 'sync') S.detailCache = {};  // details may have changed
+    toast(job.ok ? t[1] : t[2], !job.ok); await load();
+  }
 }
 async function startAi(path, body = {}) {
   try {
@@ -879,7 +926,8 @@ function viewCategories() {
     ${Object.keys(tax).map(n => `<div class="cat-row">
       <div><input type="text" value="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
         <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div>
-        <label class="keep" title="The AI keeps this category exactly as it is"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Keep</label></div>
+        <label class="keep" title="The AI keeps this category exactly as it is"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Keep</label>
+        <label class="keep" title="Fetch captions for videos in this category" style="margin-left:12px"><input type="checkbox" data-change="transcripts" data-name="${esc(n)}" ${S.data.transcripts[n] !== false ? 'checked' : ''}> Transcripts</label></div>
       <div><textarea class="kw" data-name="${esc(n)}" rows="2" aria-label="Keywords for ${esc(n)}" placeholder="keywords, separated, by commas">${esc(tax[n].join(', '))}</textarea>
         ${notes[n] ? `<div class="desc">${esc(notes[n])}</div>` : ''}</div>
       <div><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
@@ -1034,9 +1082,39 @@ function renderDrawer() {
       <div><label class="field-label" for="d-notes">Notes</label>
         <textarea id="d-notes" rows="6" placeholder="Takeaways, timestamps, follow-ups…">${esc(v.notes || '')}</textarea>
         <div class="kv-line">Notes save when you click away.</div></div>
+      <div id="d-details">${drawerDetails(v)}</div>
       <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
     </div>
   </aside>`;
+}
+function drawerDetails(v) {
+  const det = v.details, cached = S.detailCache[v.video_id], full = cached === 'loading' ? null : cached;
+  const fetchBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="details-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>${label}</button>`;
+  if (!det) return `<span class="field-label">Details</span><div class="kv-line">Not fetched yet. ${fetchBtn('Fetch now')}</div>`;
+  const head = det.status === 'done'
+    ? `${det.caption_kind === 'manual' ? 'Captions' : 'Auto captions'} (${esc(det.caption_lang || '?')})${det.chapters ? ` · ${plural(det.chapters, 'chapter')}` : ''}`
+    : `${esc(DETAIL_LABEL[det.status] || det.status)}${det.chapters ? ` · ${plural(det.chapters, 'chapter')}` : ''}`;
+  if (!full) {
+    if (det.status !== 'unavailable') loadDetails(v.video_id);
+    return `<span class="field-label">Details</span><div class="kv-line">${head}${det.status === 'unavailable' || det.status === 'failed' ? ` · ${fetchBtn('Try again')}` : ''}</div>`;
+  }
+  return `<span class="field-label">Details</span><div class="kv-line">${head} · ${fetchBtn('Refresh')}</div>
+    ${full.chapters.length ? `<div style="margin-top:10px">${full.chapters.map(c => `<button class="chap" data-act="seek" data-t="${Math.floor(c.start)}"><time>${clock(c.start)}</time><span>${esc(c.title)}</span></button>`).join('')}</div>` : ''}
+    ${full.description ? `<details style="margin-top:12px"><summary>Description</summary><p class="desc-text">${esc(full.description)}</p></details>` : ''}
+    ${full.segments.length ? `<details style="margin-top:10px"><summary>Transcript · ${plural(full.segments.length, 'line')}</summary>
+      <div class="transcript">${full.segments.map(g => `<button class="tline" data-act="seek" data-t="${Math.floor(g.start)}"><time>${clock(g.start)}</time><span>${esc(g.text)}</span></button>`).join('')}</div></details>` : ''}`;
+}
+async function loadDetails(id) {
+  if (S.detailCache[id] === 'loading') return;
+  S.detailCache[id] = 'loading';
+  try {
+    S.detailCache[id] = (await api(`/api/video?id=${encodeURIComponent(id)}`)).details;
+  } catch (e) { delete S.detailCache[id]; return; }
+  if (S.drawer === id && $('#d-details')) $('#d-details').innerHTML = drawerDetails(byId(id));
+}
+function seek(t) {
+  const f = $('.drawer .embed iframe'), v = S.drawer && byId(S.drawer);
+  if (f && v) f.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(v.video_id)}?rel=0&autoplay=1&start=${Math.max(0, t | 0)}`;
 }
 const catNote = v => v.category_locked
   ? `${v.category_source === 'ai' ? 'Accepted from an AI suggestion.' : 'Set by hand.'} <button class="btn-text" style="height:auto;padding:0;font-size:12.5px" data-act="reset-cat" data-id="${esc(v.video_id)}">Sort automatically instead</button>`
@@ -1107,6 +1185,18 @@ document.addEventListener('click', async e => {
     }
     case 'more': S.limit += 150; renderList(); break;
     case 'tri': triage(id, el.dataset.do); break;
+    case 'seek': seek(+el.dataset.t); break;
+    case 'details-fetch': case 'details-one': {
+      try {
+        await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : {});
+        if (act === 'details-one') delete S.detailCache[id];
+        S.data.job = { running: true, log: '', kind: 'details' };
+        if (act === 'details-fetch') updateJob(); else toast('Fetching details…');
+        pollJob();
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'job-stop': try { await api('/api/job/cancel', {}); toast('Stopping after the current video…'); } catch (err) { toast(err.message, true); } break;
     case 'tri-undo': triageUndo(); break;
     case 'tri-reset': S.triage.kept.clear(); S.triage.undo = []; refresh(); break;
     case 'session-done': {
@@ -1229,6 +1319,12 @@ document.addEventListener('change', async e => {
     case 't-order': S.triage.order = el.value; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
     case 'ai-provider': S.ai.provider = el.value; S.ai.key = ''; refresh(); break;
+    case 'transcripts': case 'details-after-sync':
+      try {
+        const r = await api('/api/details/settings', ch === 'transcripts' ? { category: el.dataset.name, on: el.checked } : { after_sync: el.checked });
+        S.data.transcripts = r.transcripts; S.data.details_after_sync = r.details_after_sync;
+      } catch (err) { el.checked = !el.checked; toast(err.message, true); }
+      break;
     case 'preset':
       try { const r = await api('/api/presets', { name: el.dataset.name, preset: el.checked }); S.data.ai.presets = r.presets; }
       catch (err) { el.checked = !el.checked; toast(err.message, true); }
