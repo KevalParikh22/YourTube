@@ -182,3 +182,23 @@ These are the PRD §10 questions, updated:
 2. **Category strategy**: *Recommendation: Hybrid.* Keep the editable keyword taxonomy as the fast baseline, and add the P1 LLM step that proposes categories for unmatched videos, which you approve in the dashboard.
 3. **Write-back**: is playing via queue links enough, or do you want real `[YT-KB]` playlists on your account? The answer decides whether S6 is built in Phase 0 or dropped.
 4. **LLM provider** for P1: Gemini Flash (per the PRD) or Claude. Either works. This choice affects API keys and cost.
+
+---
+
+## 9. Future: public release and user sign-in (deferred, decided 2026-10-20)
+
+**Decision:** YT KB stays **local-first and single-user** for now. Each person runs their own copy, and it keeps reading YouTube through **browser cookies** (or `cookies.txt`). There is no user login, because nothing is shared: the database, cookies and API keys never leave the user's computer. Public release is deferred.
+
+**Why not a hosted service with login:** a hosted version would have to hold every user's YouTube session cookies, which are as powerful as a password. It would also break Google's terms, and the official Data API cannot read Watch Later, the main use case. If a hosted or multi-user version is ever wanted, it needs Google OAuth plus the Data API (no Watch Later, 10k units/day quota) instead of cookies.
+
+**Checklist for when we publish** (done 2026-10-20, repo audit found no secrets ever committed):
+- [ ] Set the commit author to a GitHub noreply address and rewrite existing commits **before the first push**. They currently carry a personal email.
+- [ ] Add a LICENSE (MIT suggested; compatible with yt-dlp and anthropic).
+- [ ] README disclaimer: unofficial and not affiliated with YouTube or Google; uses yt-dlp, which YouTube changes can break; your own account at your own risk; read-only.
+- [ ] `SECURITY.md`: how cookies and API keys are handled. Note that `settings.json` permissions aren't enforced on NTFS/FAT drives, so offer environment variables as the alternative.
+- [ ] Dashboard access token, for shared machines: a random token in the URL, required on every `/api/*` call, on top of the existing Host and `X-YTKB` checks.
+- [ ] Bundle fonts or use system fonts, so the dashboard works offline and makes no Google Fonts request.
+- [ ] Remove notes about the author's own machine from `CLAUDE.md` and `docs/`.
+- [ ] Install notes per OS: Linux secretstorage; Windows Chromium app-bound encryption; macOS keychain prompt.
+- [ ] CI that runs `python -m unittest`.
+- [ ] Make the cost of the default AI model clear (Claude Opus 5.5), or show an estimate before large runs.
