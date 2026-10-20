@@ -544,6 +544,30 @@ def dismiss_suggestions(video_ids: Optional[Iterable[str]] = None, db_path: str 
         conn.commit()
         return cursor.rowcount
 
+def ai_context(video_ids: Iterable[str], excerpt_chars: int = 1000, db_path: str = DB_PATH) -> Dict[str, Dict[str, str]]:
+    """
+    Extra text that helps the AI sort videos: {video_id: {'description', 'summary', 'excerpt'}}.
+    'summary' is the AI rating's TL;DR; 'excerpt' is the opening of the transcript. Missing pieces are ''.
+    """
+    ids = list(video_ids)
+    init_db(db_path)
+    out = {vid: {"description": "", "summary": "", "excerpt": ""} for vid in ids}
+    with get_connection(db_path) as conn:
+        q = "SELECT value FROM json_each(?)"
+        for r in conn.execute(f"SELECT video_id, description FROM video_details WHERE video_id IN ({q})", (json.dumps(ids),)):
+            out[r['video_id']]["description"] = r['description'] or ""
+        for r in conn.execute(f"SELECT video_id, tldr FROM video_ratings WHERE video_id IN ({q})", (json.dumps(ids),)):
+            out[r['video_id']]["summary"] = r['tldr'] or ""
+        for vid in ids:
+            parts, size = [], 0
+            for (text,) in conn.execute("SELECT text FROM transcript_segments WHERE video_id = ? ORDER BY start_s", (vid,)):
+                parts.append(text)
+                size += len(text) + 1
+                if size > excerpt_chars:
+                    break
+            out[vid]["excerpt"] = " ".join(parts)[:excerpt_chars]
+    return out
+
 # --- Video details and transcripts (Phase 1) --------------------------------------
 
 def videos_needing_details(

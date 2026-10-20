@@ -15,6 +15,9 @@ Complete = Callable[[str, str], str]
 
 SAMPLE_LIMIT = 600   # titles shown to the model when proposing categories
 BATCH_SIZE = 50
+BATCH_CHARS = 60_000  # most text per suggestion batch (smaller for local models, see run_suggest)
+DESC_CHARS = 300      # description characters shown per video
+EXCERPT_CHARS = 1000  # opening transcript characters shown per video
 
 DISCOVER_SYSTEM = (
     "You organise a person's YouTube watch-later backlog into a small set of clear topic "
@@ -28,6 +31,34 @@ ASSIGN_SYSTEM = (
 
 def _line(v: Dict[str, Any]) -> str:
     return f"{(v.get('title') or '').strip()} | {(v.get('channel') or '').strip()}"
+
+def _flat(text: Any, limit: int) -> str:
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit].rsplit(" ", 1)[0] + "…"
+
+def _item(i: int, v: Dict[str, Any]) -> str:
+    """One numbered video for the suggest prompt: title | channel, plus summary, description and opening words if known."""
+    lines = [f"{i}. {_line(v)}"]
+    if v.get("summary"):
+        lines.append(f"   Summary: {_flat(v['summary'], 400)}")
+    if v.get("description"):
+        lines.append(f"   Description: {_flat(v['description'], DESC_CHARS)}")
+    if v.get("excerpt") and not v.get("summary"):
+        lines.append(f"   Opening words: {_flat(v['excerpt'], EXCERPT_CHARS)}")
+    return "\n".join(lines)
+
+def _pack(videos: List[Dict[str, Any]], max_items: int, max_chars: int) -> List[List[Dict[str, Any]]]:
+    """Splits videos into batches of at most max_items and roughly max_chars of prompt text each."""
+    batches: List[List[Dict[str, Any]]] = []
+    size = 0
+    for v in videos:
+        n = len(_item(0, v)) + 1
+        if not batches or len(batches[-1]) >= max_items or (size + n > max_chars and batches[-1]):
+            batches.append([])
+            size = 0
+        batches[-1].append(v)
+        size += n
+    return batches
 
 def _sample(videos: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
     if len(videos) <= limit:
@@ -114,9 +145,11 @@ def assign_categories(
     notes: Optional[Dict[str, str]] = None,
     batch_size: int = BATCH_SIZE,
     log: Callable[[str], None] = print,
+    max_chars: int = BATCH_CHARS,
 ) -> Dict[str, Any]:
     """
     Suggests one category per video, in batches. Unknown answers fall back to the catch-all.
+    Videos may carry 'summary', 'description' and 'excerpt' (see storage.ai_context) for better guesses.
     Returns {'suggestions': [{'video_id', 'category', 'confidence'}], 'failed_batches': n}.
     """
     names = [c for c in categories if c and c != FALLBACK_CATEGORY]
@@ -129,16 +162,17 @@ def assign_categories(
 
     suggestions: Dict[str, Dict[str, Any]] = {}
     failed = 0
-    batches = [videos[i:i + batch_size] for i in range(0, len(videos), batch_size)]
+    batches = _pack(videos, batch_size, max(2_000, max_chars - len(cat_text)))
     for n, batch in enumerate(batches, 1):
         log(f"   🤖 Batch {n}/{len(batches)} ({len(batch)} videos)…")
         prompt = f"""Categories:
 {cat_text}
 
-Videos (number. title | channel):
-{chr(10).join(f"{i}. {_line(v)}" for i, v in enumerate(batch, 1))}
+Videos (number. title | channel, then a summary, description or opening words when known):
+{chr(10).join(_item(i, v) for i, v in enumerate(batch, 1))}
 
 Give every video exactly one category from the list, written exactly as listed, and your confidence from 0 to 1.
+Judge by what the video is about (summary, description, opening words), not just title keywords.
 Reply with JSON:
 {{"items": [{{"i": 1, "category": "...", "confidence": 0.9}}]}}"""
         try:
@@ -184,10 +218,15 @@ def run_suggest(scope: str = "unsorted") -> bool:
         print("   Nothing to sort: no unlocked videos without a pending suggestion.")
         return True
     taxonomy = load_taxonomy()
+    context = storage.ai_context([v['video_id'] for v in videos], EXCERPT_CHARS)
+    videos = [{**v, **context.get(v['video_id'], {})} for v in videos]
+    known = sum(1 for v in videos if v.get("summary") or v.get("description") or v.get("excerpt"))
     try:
         complete = llm.make_completer(settings, "categorize")
-        print(f"   Sorting {len(videos)} videos into {len(taxonomy)} categories…")
-        result = assign_categories(videos, list(taxonomy), complete, notes=settings.get("category_notes"))
+        print(f"   Sorting {len(videos)} videos into {len(taxonomy)} categories"
+              + (f"; {known} with a summary, description or transcript" if known else "; titles only (fetch details for better results)") + "…")
+        result = assign_categories(videos, list(taxonomy), complete, notes=settings.get("category_notes"),
+                                   max_chars=min(BATCH_CHARS, llm.context_chars(settings, "categorize")))
     except LLMError as e:
         print(f"❌ {e}")
         return False

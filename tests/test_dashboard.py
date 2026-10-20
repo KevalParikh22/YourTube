@@ -156,3 +156,16 @@ class DashboardTest(unittest.TestCase):
         for bad in ("/download/settings.json", "/download/../llm.py", "/download/%2e%2e/yt_kb.db", "/download/"):
             self.assertEqual(self.raw(bad)[0], 404, bad)
 
+
+    def test_markdown_export(self):
+        code, headers, body = self.raw("/api/export/markdown?id=a")
+        self.assertEqual(code, 200)
+        self.assertIn("attachment", headers["Content-Disposition"])
+        self.assertTrue(body.decode().startswith("---\ntitle:"))
+        self.assertEqual(self.raw("/api/export/markdown?id=nope")[0], 404)
+        self.assertEqual(self.call("/api/export/markdown", {"ids": []})[0], 400)
+        req = urllib.request.Request(self.base + "/api/export/markdown", data=json.dumps({"ids": ["a", "b"]}).encode(),
+                                     headers={"X-YTKB": "1", "Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req) as r:
+            self.assertEqual(r.headers["Content-Type"], "application/zip")
+            self.assertEqual(r.read()[:2], b"PK")

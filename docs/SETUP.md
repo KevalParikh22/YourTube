@@ -169,7 +169,8 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 | Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment | — |
 | Category suggestions after sync | AI → About you → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
-| Export your library | Open http://127.0.0.1:8765/api/export?format=csv (or `format=json`) | `curl -o library.csv "http://127.0.0.1:8765/api/export?format=csv"` (dashboard running) |
+| Export notes for Obsidian / note apps (Markdown) | Library → Export → Notes (.zip), the selection bar's **Export notes**, or **Export note** in a video's panel | — |
+| Export your library | Library → Export → CSV or JSON | `curl -o library.csv "http://127.0.0.1:8765/api/export?format=csv"` (dashboard running) |
 
 ---
 

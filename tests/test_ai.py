@@ -122,3 +122,39 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(llm.public_settings(s)["providers"]["gemini"]["key_source"], "env")
         finally:
             del os.environ["GEMINI_API_KEY"]
+
+
+class ContextTest(unittest.TestCase):
+    def test_prompt_carries_context(self):
+        videos = [{"video_id": "a", "title": "Episode 12", "channel": "Show", "summary": "How to tune LoRA adapters"},
+                  {"video_id": "b", "title": "Untitled", "channel": "", "description": "A recipe\n\nfor  pasta " + "x " * 400,
+                   "excerpt": "Today we boil water"},
+                  {"video_id": "c", "title": "Bare", "channel": "Ch"}]
+        complete = fake('{"items": []}')
+        assign_categories(videos, ["AI", "Cooking"], complete, log=lambda m: None)
+        p = complete.calls[0]
+        self.assertIn("1. Episode 12 | Show\n   Summary: How to tune LoRA adapters", p)
+        self.assertIn("   Description: A recipe for pasta", p)
+        self.assertIn("   Opening words: Today we boil water", p)
+        self.assertIn("3. Bare | Ch\n", p)
+        self.assertLess(p.count("x "), 160)   # description cut to ~300 characters
+
+    def test_batches_fit_the_budget(self):
+        import ai_classifier
+        videos = [{"video_id": str(i), "title": f"T{i}", "channel": "", "excerpt": "word " * 200} for i in range(10)]
+        batches = ai_classifier._pack(videos, max_items=50, max_chars=3000)
+        self.assertEqual(sum(len(b) for b in batches), 10)
+        self.assertTrue(all(len(b) <= 3 for b in batches))
+        self.assertEqual([len(b) for b in ai_classifier._pack(videos, max_items=4, max_chars=10**6)], [4, 4, 2])
+
+    def test_storage_context(self):
+        import storage
+        from tests.helpers import playlist, temp_db, video
+        db = temp_db()
+        storage.save_playlist(playlist(), [video("a"), video("b")], db_path=db)
+        storage.save_details("a", {"status": "done", "description": "desc",
+                                   "segments": [{"start": i, "text": "abcdefghi"} for i in range(200)]}, db_path=db)
+        storage.save_rating("a", {"score": 5, "verdict": "skim", "tldr": "short"}, db_path=db)
+        ctx = storage.ai_context(["a", "b"], excerpt_chars=50, db_path=db)
+        self.assertEqual((ctx["a"]["description"], ctx["a"]["summary"], len(ctx["a"]["excerpt"])), ("desc", "short", 50))
+        self.assertEqual(ctx["b"], {"description": "", "summary": "", "excerpt": ""})

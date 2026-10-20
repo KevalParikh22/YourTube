@@ -21,7 +21,7 @@ from urllib.parse import urlparse, parse_qs
 import storage
 import llm
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
-from exporter import videos_to_csv
+from exporter import videos_to_csv, video_markdown, markdown_zip, safe_filename
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(ROOT_DIR, "web")
@@ -170,6 +170,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(build_state())
         if url.path == "/api/job":
             return self._json(JOB.snapshot())
+        if url.path == "/api/export/markdown":
+            vid = (qs.get("id") or [""])[0]
+            v = next((x for x in storage.get_library() if x["video_id"] == vid), None)
+            if v is None:
+                return self._error("Unknown video", 404)
+            name = safe_filename(v["title"]) + ".md"
+            return self._send(200, video_markdown(v, storage.get_details(vid)), "text/markdown; charset=utf-8",
+                              extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/search":
             q = (qs.get("q") or [""])[0][:200]
             kinds = [k for k in (qs.get("kinds") or [""])[0].split(",") if k] or None
@@ -285,6 +293,17 @@ class Handler(BaseHTTPRequestHandler):
 
             if path.startswith("/api/ai/") or path == "/api/presets":
                 return self._ai(path, body)
+
+            if path == "/api/export/markdown":
+                ids = body.get("ids")
+                if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+                    return self._error("ids must be a non-empty list of video IDs")
+                wanted = set(ids)
+                videos = [v for v in storage.get_library() if v["video_id"] in wanted]
+                data = markdown_zip(videos, {v["video_id"]: storage.get_details(v["video_id"]) for v in videos})
+                stamp = datetime.now().strftime("%Y%m%d")
+                return self._send(200, data, "application/zip",
+                                  extra_headers={"Content-Disposition": f'attachment; filename="yt_kb_notes_{stamp}.zip"'})
 
             if path == "/api/job/cancel":
                 return self._json({"ok": JOB.request_stop()})
@@ -476,6 +495,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "dismissed": n})
 
         return self._error("Not found", 404)
+
+def _attachment(name):
+    """Content-Disposition for a possibly non-ASCII file name (RFC 6266 / 5987)."""
+    from urllib.parse import quote
+    ascii_name = name.encode("ascii", "replace").decode().replace("?", "_").replace('"', "'")
+    return f'attachment; filename="{ascii_name}"; filename*=UTF-8\'\'{quote(name)}'
 
 def _clean(value):
     return value.strip() if isinstance(value, str) else value

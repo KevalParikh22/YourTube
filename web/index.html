@@ -305,6 +305,14 @@
   .codeblock .copy { position: absolute; top: 6px; right: 6px; }
   @media (max-width: 760px) { .dl-grid { grid-template-columns: minmax(0, 1fr); } }
 
+  /* ---------- export ---------- */
+  .export { position: relative; }
+  .export summary { list-style: none; }
+  .export summary::-webkit-details-marker { display: none; }
+  .export-pop { position: absolute; right: 0; top: 34px; z-index: 6; min-width: 280px; background: var(--raised); border: 1px solid var(--line-strong);
+    border-radius: 8px; padding: 6px; display: flex; flex-direction: column; align-items: stretch; box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
+  .export-pop .btn-text { justify-content: flex-start; height: 32px; padding: 0 8px; }
+
   /* ---------- search ---------- */
   #gsearch { width: 220px; height: 32px; }
   #gsearch-btn { display: none; font-size: 18px; text-decoration: none; }
@@ -681,7 +689,7 @@ function renderList() {
   box.innerHTML = `
     ${q.trim().length >= 3 ? `<p class="hint" style="margin:10px 0 0"><a href="#/search?q=${encodeURIComponent(q.trim())}">Search inside transcripts, chapters and summaries for “${esc(q.trim())}” →</a></p>` : ''}
     ${S.sel.size ? selBar() : status === 'suggested' ? sugSum(list) : `<div class="list-sum"><span>${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
-      <span class="play-links">${playLinks(list)}</span></div>`}
+      <span class="play-links">${list.length ? exportMenu() : ''}${playLinks(list)}</span></div>`}
     ${list.length ? `<ul class="rows ${S.sel.size ? 'selecting' : ''}">${list.slice(0, S.limit).map(row).join('')}</ul>`
       : `<div class="empty">Nothing here${q ? ' matches your search' : ''}.</div>`}
     ${list.length > S.limit ? `<div class="more"><button class="btn" data-act="more">Show ${list.length - S.limit} more</button></div>` : ''}`;
@@ -715,6 +723,25 @@ function sugSum(list) {
       <button class="btn btn-dark btn-sm" data-act="sug-accept-list">Accept ${list.length === 1 ? '' : 'all '}${list.length}</button>
       <button class="btn btn-sm" data-act="sug-dismiss-list">Dismiss ${list.length === 1 ? '' : 'all'}</button></span></div>`;
 }
+function exportMenu() {
+  const src = S.view.src ? `&playlist=${encodeURIComponent(S.view.src)}` : '';
+  return `<details class="export"><summary class="btn btn-sm">Export</summary><div class="export-pop">
+    <button class="btn-text" data-act="export-notes" data-scope="list">Notes for these ${plural(S.visible.length, 'video')} (Markdown .zip)</button>
+    <a class="btn-text" href="/api/export?format=csv${src}" download>Spreadsheet (CSV)${S.view.src ? ', this playlist' : ', whole library'}</a>
+    <a class="btn-text" href="/api/export?format=json${src}" download>Data (JSON)${S.view.src ? ', this playlist' : ', whole library'}</a>
+  </div></details>`;
+}
+async function exportNotes(ids) {
+  if (!ids.length) return;
+  try {
+    const r = await fetch('/api/export/markdown', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-YTKB': '1' }, body: JSON.stringify({ ids }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Export failed (${r.status})`);
+    const name = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'yt_kb_notes.zip';
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await r.blob()), download: name });
+    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    toast(`Exported ${plural(ids.length, 'note')}`);
+  } catch (e) { toast(e.message, true); }
+}
 function selBar() {
   const sel = videos().filter(v => S.sel.has(v.video_id));
   return `<div class="selbar">
@@ -729,6 +756,7 @@ function selBar() {
     ${queueUrls(sel).map((u, i, a) => `<a class="btn-text" href="${esc(u)}" target="_blank" rel="noopener">Play${a.length > 1 ? ` ${i + 1}/${a.length}` : ''}</a>`).join('')}
     <span class="grow"></span>
     ${S.sel.size < S.visible.length ? `<button class="btn-text" data-act="sel-all">Select all ${S.visible.length}</button>` : ''}
+    <button class="btn-text" data-act="export-notes" data-scope="sel">Export notes</button>
     <button class="btn-text" data-act="sel-clear">Clear</button>
   </div>`;
 }
@@ -1419,6 +1447,7 @@ function renderDrawer() {
       <button class="btn icon-btn" data-act="step" data-dir="-1" ${i > 0 ? '' : 'disabled'} aria-label="Previous video">↑</button>
       <button class="btn icon-btn" data-act="step" data-dir="1" ${i >= 0 && i < S.visible.length - 1 ? '' : 'disabled'} aria-label="Next video">↓</button>
       <span class="grow">${i >= 0 ? `${i + 1} of ${S.visible.length}` : ''}</span>
+      <a class="btn-text" href="/api/export/markdown?id=${encodeURIComponent(v.video_id)}" download title="Download this video's notes, summary and key points as Markdown">Export note</a>
       <a class="btn-text" href="${esc(v.url)}" target="_blank" rel="noopener">Open on YouTube ↗</a>
       <button class="btn icon-btn" data-act="close" aria-label="Close">✕</button>
     </div>
@@ -1557,6 +1586,7 @@ document.addEventListener('click', async e => {
     }
     case 'more': S.limit += 150; renderList(); break;
     case 'seek': seek(+el.dataset.t); break;
+    case 'export-notes': el.closest('details')?.removeAttribute('open'); exportNotes(el.dataset.scope === 'sel' ? [...S.sel] : S.visible.map(v => v.video_id)); break;
     case 'tri-verdict': S.triage.verdict = el.dataset.v; refresh(); break;
     case 's-kind': S.search.kind = el.dataset.v; S.search.res = null; refresh(); runSearch(); break;
     case 'tri-set': setStatuses([id], el.dataset.status); break;

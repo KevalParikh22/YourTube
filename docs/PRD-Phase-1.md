@@ -1,6 +1,6 @@
 # PRD: Phase 1 — From organizing to learning
 
-**Status:** v0.2, decisions agreed (2026-10-20) · **Builds on:** Phase 0 (ingest, categories, AI suggestions, planner, dashboard)
+**Status:** Complete (2026-10-21). Built in steps 1–5 below. · **Builds on:** Phase 0 (ingest, categories, AI suggestions, planner, dashboard)
 
 Phase 0 tells you *what* is in your backlog and *how long* it takes. Phase 1 tells you *what each video says*, so you can search it, triage it and learn from it without watching everything at 2×.
 
@@ -93,7 +93,9 @@ Phase 0 tells you *what* is in your backlog and *how long* it takes. Phase 1 tel
    - Indexed: titles and channels, descriptions, chapters, transcripts in ~30 s blocks, notes and AI summaries and key points. The index updates on every change.
    - The whole real library indexes in 0.2 s.
    - The Search page, the header box and "/" show results grouped by video. Each hit has a kind label, its time and a highlighted ~200-character snippet, and clicking it opens the video at that moment.
-5. Smarter categories (F6), then Markdown export (F7).
+5. Smarter categories (F6), then Markdown export (F7). **Done 2026-10-21. Phase 1 complete.**
+   - F6: category suggestions send each video's AI summary, the first ~300 characters of its description and the first ~1,000 characters of its transcript. Batches are packed to fit the model's context (smaller for local models). Real run with `qwen3.5:4b`: 8 videos in one batch, 22 s.
+   - F7: one note per video with Obsidian front matter, verdict, summary, key points, skim ranges and chapters as timestamped links, and the user's notes. No full transcripts. Downloads: one note from the video panel, or a zip (`YT KB/<Category>/<Title>.md` plus a category index note) for the current Library view or the selected videos. CSV and JSON export are now in the Library's Export menu too.
 
 Each step ships with tests and keeps the dashboard working.
 
