@@ -79,14 +79,12 @@ def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
     return s
 
 def save_settings(settings: Dict[str, Any], path: str = SETTINGS_PATH) -> None:
+    # Holds API keys: create the file owner-only from the start, not chmod it afterwards
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump(settings, f, indent=2, ensure_ascii=False)
     os.replace(tmp, path)
-    try:
-        os.chmod(path, 0o600)  # holds API keys
-    except OSError:
-        pass
 
 def _api_key(provider: str, cfg: Dict[str, Any]) -> str:
     env = PROVIDERS[provider].get("env")
