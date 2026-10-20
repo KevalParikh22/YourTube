@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YT KB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #faf9f7;
+    --raised: #ffffff;
+    --sunken: #f2f0ec;
+    --line: #e7e4df;
+    --line-strong: #d6d2cb;
+    --ink: #1d1c1a;
+    --ink-2: #57534d;
+    --ink-3: #8c877f;
+    --accent: #b5522b;
+    --accent-ink: #ffffff;
+    --done: #3f7a54;
+    --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+    --serif: "Newsreader", Georgia, "Times New Roman", serif;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151413; --raised: #1c1b19; --sunken: #242220; --line: #2b2926; --line-strong: #3a3733;
+      --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #7f7a72;
+      --accent: #e0805a; --accent-ink: #1a1009; --done: #7fbf93;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151413; --raised: #1c1b19; --sunken: #242220; --line: #2b2926; --line-strong: #3a3733;
+    --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #7f7a72;
+    --accent: #e0805a; --accent-ink: #1a1009; --done: #7fbf93;
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg); color: var(--ink);
+    font: 14px/1.55 var(--sans); font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  button { font: inherit; color: inherit; }
+  code { font: 12.5px ui-monospace, Consolas, monospace; background: var(--sunken); padding: 1px 5px; border-radius: 4px; }
+  .num { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--ink-2); }
+  .faint { color: var(--ink-3); }
+  [hidden] { display: none !important; }
+
+  /* ---------- header ---------- */
+  .bar {
+    position: sticky; top: 0; z-index: 30; background: color-mix(in srgb, var(--bg) 92%, transparent);
+    backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
+  }
+  .bar-in { max-width: 1160px; margin: 0 auto; padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 28px; }
+  .logo { font-family: var(--serif); font-size: 20px; font-weight: 500; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
+  .tabs { display: flex; gap: 22px; height: 100%; }
+  .tabs a {
+    display: flex; align-items: center; height: 100%; text-decoration: none; color: var(--ink-3); font-weight: 500;
+    border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
+  }
+  .tabs a:hover { color: var(--ink); }
+  .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); }
+  .bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+
+  /* ---------- controls ---------- */
+  select, input[type="text"], input[type="search"], input[type="number"], textarea {
+    font: inherit; color: var(--ink); background: var(--raised); border: 1px solid var(--line-strong);
+    border-radius: 6px; height: 34px; padding: 0 10px; min-width: 0;
+  }
+  textarea { height: auto; padding: 8px 10px; width: 100%; resize: vertical; line-height: 1.5; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--ink-2); box-shadow: 0 0 0 3px var(--sunken); }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 6px;
+    border: 1px solid var(--line-strong); background: var(--raised); font-weight: 500; font-size: 13.5px;
+    cursor: pointer; white-space: nowrap; text-decoration: none;
+  }
+  .btn:hover { border-color: var(--ink-3); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn-dark { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  .btn-dark:hover { border-color: var(--ink); opacity: .9; }
+  .btn-text { border: 0; background: none; padding: 0 6px; height: 28px; color: var(--ink-2); cursor: pointer; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; }
+  .btn-text:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
+  .btn-sm { height: 28px; padding: 0 10px; font-size: 12.5px; }
+  .icon-btn { width: 34px; padding: 0; justify-content: center; border-color: transparent; background: none; }
+  .icon-btn:hover { background: var(--sunken); border-color: transparent; }
+  .warn-text { color: var(--accent); }
+
+  /* ---------- page ---------- */
+  .page { max-width: 1160px; margin: 0 auto; padding: 40px 32px 96px; }
+  .eyebrow { font-size: 12.5px; color: var(--ink-3); font-weight: 500; letter-spacing: .02em; }
+  .display { font-family: var(--serif); font-weight: 400; font-size: 44px; line-height: 1.1; letter-spacing: -.02em; margin: 6px 0 8px; }
+  .display em { font-style: normal; color: var(--ink-3); font-size: 22px; letter-spacing: 0; margin-left: 8px; }
+  .lede { margin: 0; color: var(--ink-2); font-size: 15px; }
+  .progress { height: 3px; background: var(--line); border-radius: 2px; margin-top: 22px; overflow: hidden; display: flex; }
+  .progress i { display: block; background: var(--done); }
+  .progress i + i { background: color-mix(in srgb, var(--done) 40%, transparent); }
+  h2.h { font-family: var(--serif); font-weight: 500; font-size: 22px; letter-spacing: -.01em; margin: 0 0 4px; }
+  .section { margin-top: 48px; }
+  .note { font-size: 13px; color: var(--ink-2); margin: 0; }
+
+  /* ---------- library ---------- */
+  .lib { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; margin-top: 40px; align-items: start; }
+  .rail { position: sticky; top: 80px; display: flex; flex-direction: column; gap: 28px; }
+  .rail h4 { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .rail a {
+    display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; margin: 0 -8px; border-radius: 5px;
+    text-decoration: none; color: var(--ink-2);
+  }
+  .rail a:hover { background: var(--sunken); color: var(--ink); }
+  .rail a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
+  .rail a .lbl { flex: 1; min-width: 0; line-height: 1.35; padding: 1px 0; }
+  .rail a .c { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .rail-pick { display: none; }
+
+  .list-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+  .list-head input[type="search"] { flex: 1 1 220px; }
+  .list-sum { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 52px; padding: 10px 0; font-size: 13px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
+  .play-links { display: flex; gap: 6px; flex-wrap: wrap; }
+  .selbar {
+    position: sticky; top: 64px; z-index: 5; display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-height: 52px;
+    background: var(--ink); color: var(--bg); padding: 6px 8px 6px 14px; border-radius: 8px; margin: 8px 0;
+  }
+  .selbar .btn-text { color: color-mix(in srgb, var(--bg) 72%, transparent); }
+  .selbar .btn-text:hover { color: var(--bg); }
+  .selbar select { height: 28px; background: transparent; color: var(--bg); border-color: color-mix(in srgb, var(--bg) 30%, transparent); font-size: 12.5px; margin: 0 4px; }
+  .selbar select option { color: var(--ink); background: var(--raised); }
+  .selbar strong { margin-right: 10px; font-weight: 600; }
+  .selbar .grow { flex: 1; }
+
+  .rows { list-style: none; margin: 0; padding: 0; }
+  .row { display: grid; grid-template-columns: 18px 26px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 4px; border-bottom: 1px solid var(--line); }
+  .row .pick { opacity: 0; margin: 0; cursor: pointer; accent-color: var(--ink); }
+  .row:hover .pick, .row .pick:checked, .selecting .row .pick { opacity: 1; }
+  .row-main { all: unset; cursor: pointer; min-width: 0; display: block; }
+  .row-title { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-main:hover .row-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ink-3); }
+  .row-meta { display: block; font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+  .row-meta .gone { color: var(--accent); }
+  .row-time { text-align: right; font-variant-numeric: tabular-nums; font-size: 13.5px; white-space: nowrap; }
+  .row-time small { display: block; font-size: 11.5px; color: var(--ink-3); }
+  .row.done .row-title { color: var(--ink-3); font-weight: 400; }
+  .row.is-sel { background: var(--sunken); }
+
+  .st { all: unset; cursor: pointer; width: 26px; height: 26px; display: grid; place-items: center; border-radius: 50%; }
+  .st:hover { background: var(--sunken); }
+  .st:focus-visible { outline: 2px solid var(--accent); }
+  .st svg { width: 18px; height: 18px; }
+  .st-ring { fill: none; stroke: var(--ink-3); stroke-width: 1.5; }
+  .st-half { fill: var(--ink-2); }
+  .st-fill { fill: var(--done); }
+  .st-check { fill: none; stroke: var(--raised); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  .more { padding: 20px 0; text-align: center; }
+  .empty { padding: 56px 0; text-align: center; color: var(--ink-2); }
+  .empty h2 { font-family: var(--serif); font-weight: 500; font-size: 26px; color: var(--ink); margin: 0 0 6px; }
+  .empty .btn { margin-top: 18px; }
+
+  /* ---------- tables ---------- */
+  .tbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 16px; }
+  .tbl th { text-align: left; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); padding: 0 12px 10px 0; border-bottom: 1px solid var(--line-strong); }
+  .tbl td { padding: 12px 12px 12px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .tbl .r { text-align: right; }
+  .tbl tfoot td { font-weight: 600; border-bottom: 0; }
+  .tbl a { text-decoration: none; }
+  .tbl a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .tbl-wrap { overflow-x: auto; }
+
+  /* ---------- plan ---------- */
+  .sentence { font-family: var(--serif); font-size: 22px; line-height: 2; color: var(--ink-2); margin: 10px 0 0; }
+  .sentence input, .sentence select {
+    font: inherit; font-size: 20px; color: var(--ink); height: 36px; padding: 0 6px; border: 0;
+    border-bottom: 1.5px solid var(--ink-3); border-radius: 0; background: transparent; text-align: center;
+  }
+  .sentence input[type="number"] { width: 72px; }
+  .sentence select { text-align: left; max-width: 280px; }
+  .sentence input:focus, .sentence select:focus { box-shadow: none; border-bottom-color: var(--accent); }
+  .meter { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; margin: 8px 0 4px; }
+  .meter i { display: block; height: 100%; background: var(--accent); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
+
+  /* ---------- playlists ---------- */
+  .card { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
+  .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px auto; gap: 10px; margin-top: 14px; }
+  .field-label { display: block; font-size: 12.5px; color: var(--ink-2); margin-bottom: 5px; font-weight: 500; }
+  .hint { font-size: 12.5px; color: var(--ink-3); margin: 10px 0 0; }
+  .log {
+    background: var(--sunken); border-radius: 6px; padding: 12px 14px; max-height: 300px; overflow: auto; margin: 10px 0 0;
+    font: 12px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; color: var(--ink-2);
+  }
+  .status-line { font-size: 13px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 8px; }
+  .spin { width: 12px; height: 12px; border: 1.5px solid var(--line-strong); border-top-color: var(--ink); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .policy { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; margin-top: 20px; }
+  .policy b { display: block; font-weight: 600; margin-bottom: 4px; }
+  .policy p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+
+  /* ---------- categories ---------- */
+  .cat-row { display: grid; grid-template-columns: 240px minmax(0, 1fr) 120px; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .cat-row input[type="text"] { width: 100%; font-weight: 500; }
+  .cat-row .meta { font-size: 12.5px; color: var(--ink-3); margin-top: 6px; }
+  .cat-row .meta a { color: var(--ink-2); }
+  .cat-row > div:last-child { text-align: right; }
+
+  /* ---------- drawer ---------- */
+  .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 15, .28); }
+  .drawer {
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(500px, 100vw); overflow-y: auto;
+    background: var(--raised); border-left: 1px solid var(--line); box-shadow: -20px 0 40px rgba(0, 0, 0, .08);
+  }
+  .drawer-top { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 4px; padding: 10px 14px; background: var(--raised); border-bottom: 1px solid var(--line); }
+  .drawer-top .grow { flex: 1; font-size: 12.5px; color: var(--ink-3); padding-left: 6px; }
+  .drawer-body { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 22px; }
+  .embed { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
+  .embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+  .drawer h3 { font-family: var(--serif); font-weight: 500; font-size: 22px; line-height: 1.25; margin: 0; letter-spacing: -.01em; }
+  .drawer .by { color: var(--ink-2); margin-top: 6px; font-size: 13.5px; }
+  .speeds { display: flex; gap: 18px; font-size: 13px; color: var(--ink-3); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+  .speeds b { color: var(--ink); font-weight: 500; }
+  .speeds .on b { color: var(--accent); }
+  .seg { display: flex; border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; }
+  .seg button { flex: 1; border: 0; background: none; height: 34px; cursor: pointer; color: var(--ink-2); font-weight: 500; font-size: 13px; }
+  .seg button + button { border-left: 1px solid var(--line-strong); }
+  .seg button.on { background: var(--ink); color: var(--bg); }
+  .kv-line { font-size: 12.5px; color: var(--ink-3); margin-top: 6px; }
+
+  #toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translate(-50%, 12px); opacity: 0; z-index: 60;
+    background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 8px; font-size: 13px;
+    transition: opacity .16s, transform .16s; pointer-events: none; max-width: calc(100vw - 32px);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%, 0); }
+  #toast.bad { background: var(--accent); color: var(--accent-ink); }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 900px) {
+    .lib { grid-template-columns: minmax(0, 1fr); gap: 20px; margin-top: 28px; }
+    .rail { position: static; gap: 12px; }
+    .rail-group.collapsible { display: none; }
+    .rail-group.views { display: flex; gap: 4px; overflow-x: auto; }
+    .rail-group.views h4 { display: none; }
+    .rail-group.views a { margin: 0; white-space: nowrap; border: 1px solid var(--line); }
+    .rail-pick { display: flex; gap: 8px; }
+    .rail-pick select { flex: 1; }
+    .policy { grid-template-columns: 1fr; gap: 16px; }
+    .cat-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    .cat-row > div:last-child { text-align: left; }
+    .form-grid { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .bar-in { padding: 0 16px; gap: 16px; }
+    .logo { display: none; }
+    .tabs { gap: 16px; overflow-x: auto; }
+    .page { padding: 28px 16px 72px; }
+    .display { font-size: 34px; }
+    .display em { display: block; margin: 4px 0 0; font-size: 18px; }
+    .sentence { font-size: 18px; }
+    .row { grid-template-columns: 26px minmax(0, 1fr) auto; }
+    .row .pick { display: none; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <a class="logo" href="#/">YT KB</a>
+    <nav class="tabs" id="tabs"></nav>
+    <div class="bar-right">
+      <select id="speed" aria-label="Playback speed"></select>
+      <button class="btn icon-btn" id="theme" aria-label="Theme"></button>
+    </div>
+  </div>
+</header>
+<main class="page" id="view"><div class="empty">Loading…</div></main>
+<div id="drawer"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script>
+'use strict';
+const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
+const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched' };
+const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched' };
+const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['all', 'Everything'], ['gone', 'Not in a playlist']];
+const TABS = [['', 'Library'], ['plan', 'Plan'], ['sources', 'Playlists'], ['categories', 'Categories']];
+
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* unavailable */ } },
+};
+const S = {
+  data: null,
+  speed: SPEEDS.includes(+store.get('ytkb.speed')) ? +store.get('ytkb.speed') : 2,
+  theme: store.get('ytkb.theme') || 'auto',
+  view: { status: 'todo', cat: '', src: '', q: '', sort: 'order' },
+  sel: new Set(), limit: 150, visible: [],
+  plan: { mins: +store.get('ytkb.plan.mins') || 60, days: +store.get('ytkb.plan.days') || 5 },
+  session: { cat: '', mins: 45, order: 'order' },
+  ingest: { url: '', access: store.get('ytkb.access') || 'public', cookies: store.get('ytkb.cookies') || '' },
+  drawer: null, polling: false,
+};
+
+/* ---------------- helpers ---------------- */
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const sx = s => `${s}×`;
+const plural = (n, w) => `${n} ${n === 1 ? w : /[^aeiou]y$/.test(w) ? w.slice(0, -1) + 'ies' : w + 's'}`;
+function fmt(sec) {
+  sec = Math.round(sec || 0);
+  const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+  if (h) return `${h}h ${m}m`;
+  if (m) return `${m}m`;
+  return sec ? `${s}s` : '0m';
+}
+function stats(list) {
+  let total = 0, rem = 0, done = 0, prog = 0, unknown = 0;
+  for (const v of list) {
+    const d = v.duration_seconds || 0;
+    total += d;
+    if (v.status === 'completed') done++; else rem += d;
+    if (v.status === 'in_progress') prog++;
+    if (!d) unknown++;
+  }
+  return { n: list.length, total, rem, done, prog, left: list.length - done, unknown };
+}
+async function api(path, body) {
+  const opts = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-YTKB': '1' }, body: JSON.stringify(body) };
+  const r = await fetch(path, opts);
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
+  return j;
+}
+let toastT;
+function toast(msg, bad) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = 'show' + (bad ? ' bad' : '');
+  clearTimeout(toastT);
+  toastT = setTimeout(() => { t.className = bad ? 'bad' : ''; }, 2600);
+}
+const videos = () => S.data.videos;
+const byId = id => videos().find(v => v.video_id === id);
+const FALLBACK = () => S.data.fallback_category;
+const playlistName = id => (S.data.playlists.find(p => p.id === id) || {}).title || id;
+const srcEntry = (v, src) => v.sources.find(s => s.id === src);
+const isGone = (v, src) => src ? !!srcEntry(v, src)?.removed : (!v.in_source && v.sources.length > 0);
+function orderKey(v, src) {
+  if (src) return srcEntry(v, src)?.position ?? 1e9;
+  const order = S.data.playlists.map(p => p.id);
+  const first = v.sources.find(s => !s.removed) || v.sources[0];
+  if (!first) return 1e12;
+  return Math.max(0, order.indexOf(first.id)) * 1e6 + (first.position ?? 0);
+}
+function sortList(list, sort, src) {
+  const by = {
+    order: (a, b) => orderKey(a, src) - orderKey(b, src),
+    shortest: (a, b) => (a.duration_seconds || 1e9) - (b.duration_seconds || 1e9),
+    longest: (a, b) => (b.duration_seconds || 0) - (a.duration_seconds || 0),
+    title: (a, b) => a.title.localeCompare(b.title),
+    channel: (a, b) => (a.channel || '').localeCompare(b.channel || ''),
+  }[sort];
+  return by ? [...list].sort(by) : list;
+}
+function categoryNames() {
+  const names = new Set([...Object.keys(S.data.taxonomy), ...videos().map(v => v.category)]);
+  names.delete('Uncategorized');
+  return [...names].sort((a, b) => (a === FALLBACK()) - (b === FALLBACK()) || a.localeCompare(b));
+}
+function queueUrls(list) {
+  const ids = list.map(v => v.video_id), out = [];
+  for (let i = 0; i < ids.length; i += 50) out.push('https://www.youtube.com/watch_videos?video_ids=' + ids.slice(i, i + 50).map(encodeURIComponent).join(','));
+  return out;
+}
+function playLinks(list, label = 'Play') {
+  const todo = list.filter(v => v.status !== 'completed');
+  const urls = queueUrls(todo);
+  if (!urls.length) return '';
+  if (urls.length === 1) return `<a class="btn btn-dark btn-sm" href="${esc(urls[0])}" target="_blank" rel="noopener">▶ ${label}</a>`;
+  return urls.map((u, i) => `<a class="btn ${i ? '' : 'btn-dark '}btn-sm" href="${esc(u)}" target="_blank" rel="noopener"
+    title="A YouTube queue holds up to 50 videos">${i ? '' : `▶ ${label} `}${i * 50 + 1}–${Math.min((i + 1) * 50, todo.length)}</a>`).join('');
+}
+const statusIcon = s => s === 'completed'
+  ? '<svg viewBox="0 0 20 20"><circle class="st-fill" cx="10" cy="10" r="8.5"/><path class="st-check" d="M6.5 10.2l2.4 2.4 4.6-5"/></svg>'
+  : s === 'in_progress'
+    ? '<svg viewBox="0 0 20 20"><circle class="st-ring" cx="10" cy="10" r="8"/><path class="st-half" d="M10 3.5a6.5 6.5 0 0 1 0 13z"/></svg>'
+    : '<svg viewBox="0 0 20 20"><circle class="st-ring" cx="10" cy="10" r="8"/></svg>';
+
+/* ---------------- routing & load ---------------- */
+const route = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || '');
+async function load() {
+  try {
+    S.data = await api('/api/state');
+  } catch (e) {
+    $('#view').innerHTML = `<div class="empty"><h2>The local server isn't running</h2>Start it with <code>python dashboard.py</code>, then reload this page.<p class="faint">${esc(e.message)}</p></div>`;
+    return;
+  }
+  if (S.view.src && !S.data.playlists.some(p => p.id === S.view.src)) S.view.src = '';
+  const ids = new Set(videos().map(v => v.video_id));
+  for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
+  render();
+  if (S.data.job.running) pollJob();
+}
+function render() { renderBar(); renderView(); renderDrawer(); }
+function refresh() { const y = scrollY; renderView(); scrollTo(0, y); }
+function renderBar() {
+  const r = route();
+  $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${l}</a>`).join('');
+  $('#speed').innerHTML = SPEEDS.map(s => `<option value="${s}" ${s === S.speed ? 'selected' : ''}>${sx(s)} speed</option>`).join('');
+  $('#theme').textContent = { auto: '◐', light: '○', dark: '●' }[S.theme];
+  $('#theme').title = `Theme: ${S.theme}`;
+}
+function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
+function renderView() {
+  const r = route(), v = $('#view');
+  if (r === 'plan') v.innerHTML = videos().length ? viewPlan() : emptyState();
+  else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
+  else if (r === 'categories') v.innerHTML = viewCategories();
+  else { v.innerHTML = videos().length ? viewLibrary() : emptyState(); renderList(); }
+}
+const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a YouTube playlist to get started. YT KB only reads it and never changes it.<br><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
+
+/* ---------------- library ---------------- */
+function statusFilter(v, status, src) {
+  switch (status) {
+    case 'todo': return v.status !== 'completed';
+    case 'in_progress': return v.status === 'in_progress';
+    case 'completed': return v.status === 'completed';
+    case 'gone': return isGone(v, src);
+    default: return true;
+  }
+}
+function viewLibrary() {
+  const { cat, src, status } = S.view;
+  const inSrc = videos().filter(v => !src || srcEntry(v, src));
+  const scope = inSrc.filter(v => !cat || v.category === cat);
+  const st = stats(scope);
+  const scopeName = [src ? playlistName(src) : (S.data.playlists.length > 1 ? 'All playlists' : 'Library'), cat].filter(Boolean).join(' · ');
+  const catCounts = {};
+  for (const v of inSrc) if (statusFilter(v, status, src)) catCounts[v.category] = (catCounts[v.category] || 0) + 1;
+  const viewCounts = Object.fromEntries(VIEWS.map(([k]) => [k, scope.filter(v => statusFilter(v, k, src)).length]));
+  const pct = st.n ? Math.round((st.done / st.n) * 100) : 0;
+  const cats = categoryNames().filter(c => catCounts[c] || c === cat);
+
+  return `
+  <section>
+    <div class="eyebrow">${esc(scopeName)}</div>
+    <h1 class="display num">${fmt(st.rem / S.speed)}<em>left at ${sx(S.speed)}</em></h1>
+    <p class="lede">${st.left} of ${plural(st.n, 'video')} to go · ${fmt(st.rem)} at normal speed · ${pct}% watched</p>
+    <div class="progress"><i style="width:${st.n ? (st.done / st.n) * 100 : 0}%"></i><i style="width:${st.n ? (st.prog / st.n) * 100 : 0}%"></i></div>
+  </section>
+
+  <div class="lib">
+    <aside class="rail">
+      <div class="rail-group views">
+        <h4>Show</h4>
+        ${VIEWS.filter(([k]) => k !== 'gone' || viewCounts.gone || status === 'gone').map(([k, l]) =>
+          `<a href="#/" data-act="v-status" data-v="${k}" class="${status === k ? 'on' : ''}"><span class="lbl">${l}</span><span class="c">${viewCounts[k]}</span></a>`).join('')}
+      </div>
+      <div class="rail-group collapsible">
+        <h4>Categories</h4>
+        <a href="#/" data-act="v-cat" data-v="" class="${!cat ? 'on' : ''}"><span class="lbl">All categories</span></a>
+        ${cats.map(c => `<a href="#/" data-act="v-cat" data-v="${esc(c)}" class="${cat === c ? 'on' : ''}"><span class="lbl">${esc(c)}</span><span class="c">${catCounts[c] || 0}</span></a>`).join('')}
+      </div>
+      ${S.data.playlists.length > 1 || src ? `<div class="rail-group collapsible">
+        <h4>Playlists</h4>
+        <a href="#/" data-act="v-src" data-v="" class="${!src ? 'on' : ''}"><span class="lbl">All playlists</span></a>
+        ${S.data.playlists.map(p => `<a href="#/" data-act="v-src" data-v="${esc(p.id)}" class="${src === p.id ? 'on' : ''}"><span class="lbl">${esc(p.title)}</span><span class="c">${p.active_videos || 0}</span></a>`).join('')}
+      </div>` : ''}
+      <div class="rail-group rail-pick">
+        <select data-change="v-cat" aria-label="Category"><option value="">All categories</option>
+          ${categoryNames().map(c => `<option value="${esc(c)}" ${cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        ${S.data.playlists.length > 1 ? `<select data-change="v-src" aria-label="Playlist"><option value="">All playlists</option>
+          ${S.data.playlists.map(p => `<option value="${esc(p.id)}" ${src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>` : ''}
+      </div>
+    </aside>
+    <div>
+      <div class="list-head">
+        <input type="search" id="q" placeholder="Search titles, channels and notes" value="${esc(S.view.q)}" aria-label="Search">
+        <select data-change="v-sort" aria-label="Sort">
+          ${[['order', 'Playlist order'], ['shortest', 'Shortest first'], ['longest', 'Longest first'], ['title', 'Title'], ['channel', 'Channel']]
+            .map(([k, l]) => `<option value="${k}" ${S.view.sort === k ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
+      <div id="list"></div>
+    </div>
+  </div>`;
+}
+function renderList() {
+  const box = $('#list');
+  if (!box) return;
+  const { status, src, cat, q, sort } = S.view;
+  let list = videos().filter(v => (!src || srcEntry(v, src)) && (!cat || v.category === cat) && statusFilter(v, status, src));
+  if (q) {
+    const needle = q.toLowerCase();
+    list = list.filter(v => `${v.title} ${v.channel || ''} ${v.notes || ''}`.toLowerCase().includes(needle));
+  }
+  list = sortList(list, sort, src);
+  S.visible = list;
+  const st = stats(list);
+  box.innerHTML = `
+    ${S.sel.size ? selBar() : `<div class="list-sum"><span>${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
+      <span class="play-links">${playLinks(list)}</span></div>`}
+    ${list.length ? `<ul class="rows ${S.sel.size ? 'selecting' : ''}">${list.slice(0, S.limit).map(row).join('')}</ul>`
+      : `<div class="empty">Nothing here${q ? ' matches your search' : ''}.</div>`}
+    ${list.length > S.limit ? `<div class="more"><button class="btn" data-act="more">Show ${list.length - S.limit} more</button></div>` : ''}`;
+}
+function row(v) {
+  const d = v.duration_seconds || 0;
+  const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : esc(v.category),
+    isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '']
+    .filter(Boolean).join(' · ');
+  return `<li class="row ${v.status === 'completed' ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
+    <input type="checkbox" class="pick" data-act="pick" data-id="${esc(v.video_id)}" ${S.sel.has(v.video_id) ? 'checked' : ''} aria-label="Select">
+    <button class="st" data-act="cycle" data-id="${esc(v.video_id)}" title="${STATUS_LABEL[v.status]}. Click to change." aria-label="Status: ${STATUS_LABEL[v.status]}">${statusIcon(v.status)}</button>
+    <button class="row-main" data-act="open" data-id="${esc(v.video_id)}"><span class="row-title">${esc(v.title)}</span><span class="row-meta">${meta}</span></button>
+    <span class="row-time">${d ? fmt(d / S.speed) : '—'}${d && S.speed !== 1 ? `<small>${fmt(d)} at 1×</small>` : ''}</span>
+  </li>`;
+}
+function selBar() {
+  const sel = videos().filter(v => S.sel.has(v.video_id));
+  return `<div class="selbar">
+    <strong>${S.sel.size} selected</strong>
+    <button class="btn-text" data-act="bulk" data-status="completed">Mark watched</button>
+    <button class="btn-text" data-act="bulk" data-status="in_progress">In progress</button>
+    <button class="btn-text" data-act="bulk" data-status="unwatched">Unwatched</button>
+    <select data-change="bulk-cat" aria-label="Move to category"><option value="">Move to…</option>
+      ${categoryNames().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}<option value="__new">New category…</option></select>
+    ${queueUrls(sel).map((u, i, a) => `<a class="btn-text" href="${esc(u)}" target="_blank" rel="noopener">Play${a.length > 1 ? ` ${i + 1}/${a.length}` : ''}</a>`).join('')}
+    <span class="grow"></span>
+    ${S.sel.size < S.visible.length ? `<button class="btn-text" data-act="sel-all">Select all ${S.visible.length}</button>` : ''}
+    <button class="btn-text" data-act="sel-clear">Clear</button>
+  </div>`;
+}
+
+/* ---------------- plan ---------------- */
+function viewPlan() {
+  const p = S.plan, perDay = Math.max(5, p.mins) * 60, days = Math.min(7, Math.max(1, p.days));
+  const finish = sd => {
+    if (!sd) return 'Done';
+    const d = new Date();
+    d.setDate(d.getDate() + Math.ceil((sd / days) * 7));
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  };
+  const rows = categoryNames().map(c => ({ c, st: stats(videos().filter(v => v.category === c)) }))
+    .filter(r => r.st.n).map(r => ({ ...r, sd: Math.ceil(r.st.rem / S.speed / perDay) })).sort((a, b) => a.st.rem - b.st.rem);
+  const all = stats(videos()), allDays = Math.ceil(all.rem / S.speed / perDay);
+  const s = buildSession(), used = s.picked.reduce((a, v) => a + v.duration_seconds / S.speed, 0);
+  return `
+  <section>
+    <div class="eyebrow">Plan</div>
+    <h1 class="display">${allDays ? `Done by ${finish(allDays)}` : 'All watched'}<em>${allDays ? plural(allDays, 'study day') : ''}</em></h1>
+    <p class="sentence">I can watch <input type="number" min="5" step="5" value="${p.mins}" data-change="p-mins" aria-label="Minutes per day"> minutes a day,
+      <input type="number" min="1" max="7" value="${p.days}" data-change="p-days" aria-label="Days per week"> days a week, at
+      <select data-change="speed" aria-label="Speed">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select> speed.</p>
+  </section>
+
+  <section class="section">
+    <h2 class="h">By category</h2>
+    <p class="note">How long each category takes on its own. Dates count from today.</p>
+    <div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Category</th><th class="r">Left</th><th class="r">Time at ${sx(S.speed)}</th><th class="r">Study days</th><th class="r">Done by</th></tr></thead>
+      <tbody>${rows.map(({ c, st, sd }) => `<tr><td><a href="#/" data-act="v-cat" data-v="${esc(c)}">${esc(c)}</a></td>
+        <td class="r">${st.left}</td><td class="r">${fmt(st.rem / S.speed)}</td><td class="r">${sd || '–'}</td><td class="r">${finish(sd)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td>Everything</td><td class="r">${all.left}</td><td class="r">${fmt(all.rem / S.speed)}</td><td class="r">${allDays}</td><td class="r">${finish(allDays)}</td></tr></tfoot>
+    </table></div>
+  </section>
+
+  <section class="section">
+    <h2 class="h">Today's session</h2>
+    <p class="sentence">Fill <input type="number" min="5" step="5" value="${S.session.mins}" data-change="s-mins" aria-label="Session minutes"> minutes from
+      <select data-change="s-cat" aria-label="Category"><option value="">any category</option>${categoryNames().map(c => `<option value="${esc(c)}" ${S.session.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>,
+      <select data-change="s-order" aria-label="Order">${[['order', 'in playlist order'], ['shortest', 'shortest first'], ['longest', 'longest first'], ['progress', 'unfinished first']]
+        .map(([k, l]) => `<option value="${k}" ${S.session.order === k ? 'selected' : ''}>${l}</option>`).join('')}</select>.</p>
+    <div style="margin-top:20px">
+      <div class="note">${plural(s.picked.length, 'video')} · ${fmt(used)} of ${S.session.mins}m</div>
+      <div class="meter"><i style="width:${Math.min(100, (used / (S.session.mins * 60)) * 100)}%"></i></div>
+      ${s.picked.length ? `<ul class="rows">${s.picked.map(row).join('')}</ul>
+        <div class="actions">${playLinks(s.picked, 'Play session')}
+          <button class="btn btn-sm" data-act="session-done" data-ids="${esc(s.picked.map(v => v.video_id).join(','))}">Mark all watched</button></div>`
+        : `<p class="note" style="margin-top:12px">${s.pool ? 'No single video fits. Try more minutes or a faster speed.' : 'Nothing left to watch here.'}</p>`}
+    </div>
+  </section>`;
+}
+function buildSession() {
+  const s = S.session;
+  let pool = videos().filter(v => v.status !== 'completed' && v.duration_seconds > 0 && (!s.cat || v.category === s.cat));
+  pool = s.order === 'progress'
+    ? sortList(pool, 'order').sort((a, b) => (b.status === 'in_progress') - (a.status === 'in_progress'))
+    : sortList(pool, s.order);
+  const budget = Math.max(5, s.mins) * 60;
+  let used = 0;
+  const picked = [];
+  for (const v of pool) {
+    const t = v.duration_seconds / S.speed;
+    if (used + t <= budget) { picked.push(v); used += t; }
+  }
+  return { picked, pool: pool.length };
+}
+
+/* ---------------- playlists ---------------- */
+function viewSources() {
+  const g = S.ingest, job = S.data.job, pls = S.data.playlists;
+  const chromium = /^(chrome|edge|brave)$/.test(g.access);
+  return `
+  <section>
+    <div class="eyebrow">Playlists</div>
+    <h1 class="display">${plural(pls.length, 'playlist')}<em>${plural(videos().length, 'video')} in your library</em></h1>
+    <div class="policy">
+      <div><b>Read-only</b><p>YT KB only reads your playlists. It never adds, removes or reorders anything on YouTube.</p></div>
+      <div><b>Add as many as you like</b><p>A video saved in two playlists shows up once in your library and keeps a single status.</p></div>
+      <div><b>Kept until you've watched it</b><p>If you remove a video on YouTube, it stays here as "no longer in playlist" until you mark it watched.</p></div>
+    </div>
+  </section>
+
+  <section class="section card">
+    <h2 class="h">Add or sync a playlist</h2>
+    <div class="form-grid">
+      <div><label class="field-label" for="i-url">Playlist link or ID</label>
+        <input id="i-url" type="text" data-input="i-url" value="${esc(g.url)}" placeholder="youtube.com/playlist?list=…   or WL for Watch Later" style="width:100%"></div>
+      <div><label class="field-label" for="i-access">Sign-in</label>
+        <select id="i-access" data-change="i-access" style="width:100%">
+          ${[['public', 'None (public or unlisted)'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['edge', 'Use my Edge login'], ['brave', 'Use my Brave login'], ['cookies', 'cookies.txt file']]
+            .map(([k, l]) => `<option value="${k}" ${g.access === k ? 'selected' : ''}>${l}</option>`).join('')}
+        </select></div>
+      <div style="align-self:end"><button class="btn btn-dark" id="run" data-act="ingest" ${job.running ? 'disabled' : ''}>${job.running ? 'Syncing…' : 'Sync'}</button></div>
+    </div>
+    ${g.access === 'cookies' ? `<div style="margin-top:12px"><label class="field-label" for="i-cookies">Path to cookies.txt</label>
+      <input id="i-cookies" type="text" data-input="i-cookies" value="${esc(g.cookies)}" placeholder="C:\\Users\\you\\cookies.txt" style="width:100%"></div>` : ''}
+    <p class="hint">${chromium
+      ? '<span class="warn-text">On Windows, Chrome-based browsers usually block reading their login.</span> If the sync fails, use Firefox or a cookies.txt export.'
+      : 'Private playlists and Watch Later need a sign-in. Syncing again keeps your statuses, notes and categories.'}</p>
+    <div id="job"></div>
+  </section>
+
+  <section class="section">
+    <h2 class="h">Your playlists</h2>
+    ${pls.length ? `<div class="tbl-wrap"><table class="tbl">
+      <thead><tr><th>Playlist</th><th class="r">Videos</th><th class="r">Watch time</th><th>Last synced</th><th></th></tr></thead>
+      <tbody>${pls.map(p => `<tr>
+        <td><a href="#/" data-act="v-src" data-v="${esc(p.id)}" style="font-weight:500">${esc(p.title)}</a>
+          ${p.removed_videos ? `<div class="faint" style="font-size:12.5px">${p.removed_videos} removed on YouTube, kept in library</div>` : ''}</td>
+        <td class="r">${p.active_videos || 0}</td>
+        <td class="r">${fmt(p.duration_seconds)}</td>
+        <td class="muted">${esc(fmtDate(p.updated_at))}</td>
+        <td class="r" style="white-space:nowrap"><button class="btn btn-sm" data-act="resync" data-url="${esc(p.original_url || p.id)}" ${job.running ? 'disabled' : ''}>Sync</button>
+          ${/^[\w-]+$/.test(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}</td>
+      </tr>`).join('')}</tbody></table></div>` : '<p class="note">No playlists yet. Add one above.</p>'}
+  </section>`;
+}
+function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T') + 'Z');
+  return isNaN(d) ? s : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+function updateJob() {
+  const box = $('#job'), job = S.data.job;
+  if (!box) return;
+  const btn = $('#run');
+  if (btn) { btn.disabled = !!job.running; btn.textContent = job.running ? 'Syncing…' : 'Sync'; }
+  if (!job.log && !job.running) { box.innerHTML = ''; return; }
+  const head = job.running ? '<span class="status-line"><span class="spin"></span>Reading playlist. Large playlists take a minute.</span>'
+    : `<span class="status-line">${job.ok ? 'Last sync finished' : '<span class="warn-text">Last sync failed</span>'} · ${esc(fmtDate((job.finished_at || '').replace('T', ' ')) || '')}</span>`;
+  box.innerHTML = `<div style="margin-top:18px">${head}</div><pre class="log">${esc(job.log || '')}</pre>`;
+  const log = $('.log', box);
+  log.scrollTop = log.scrollHeight;
+}
+async function pollJob() {
+  if (S.polling) return;
+  S.polling = true;
+  let job;
+  try {
+    for (;;) {
+      job = await api('/api/job');
+      S.data.job = job;
+      updateJob();
+      if (!job.running) break;
+      await sleep(1000);
+    }
+  } catch (e) { toast(e.message, true); } finally { S.polling = false; }
+  if (job) { toast(job.ok ? 'Playlist synced' : 'Sync failed. See the log.', !job.ok); await load(); }
+}
+async function runIngest(url) {
+  const g = S.ingest;
+  const browser = /^(firefox|chrome|edge|brave)$/.test(g.access) ? g.access : null;
+  try {
+    await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies });
+    S.data.job = { running: true, log: '' };
+    updateJob();
+    pollJob();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* ---------------- categories ---------------- */
+function viewCategories() {
+  const counts = {};
+  for (const v of videos()) counts[v.category] = (counts[v.category] || 0) + 1;
+  const tax = S.data.taxonomy;
+  const manual = Object.keys(counts).filter(c => !(c in tax) && c !== FALLBACK() && c !== 'Uncategorized');
+  const fb = (counts[FALLBACK()] || 0) + (counts.Uncategorized || 0);
+  return `
+  <section>
+    <div class="eyebrow">Categories</div>
+    <h1 class="display">${plural(Object.keys(tax).length + manual.length, 'category')}<em>${fb ? `${fb} unsorted` : 'everything sorted'}</em></h1>
+    <p class="lede" style="max-width:640px">Videos are sorted by matching these keywords against their title and channel. A video you move by hand stays where you put it.</p>
+    <div class="actions">
+      <button class="btn btn-dark btn-sm" data-act="reclassify">Save and re-sort</button>
+      <button class="btn btn-sm" data-act="add-cat">Add category</button>
+      ${fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
+    </div>
+  </section>
+  <section class="section">
+    ${Object.keys(tax).map(n => `<div class="cat-row">
+      <div><input type="text" value="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
+        <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div></div>
+      <textarea class="kw" data-name="${esc(n)}" rows="2" aria-label="Keywords for ${esc(n)}" placeholder="keywords, separated, by commas">${esc(tax[n].join(', '))}</textarea>
+      <div><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
+    </div>`).join('')}
+    ${manual.map(n => `<div class="cat-row">
+      <div><b style="font-weight:500">${esc(n)}</b><div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n], 'video')}</a> · set by hand</div></div>
+      <p class="note" style="padding-top:6px">No keywords yet. Only holds videos you moved here yourself.</p>
+      <div><button class="btn-text" data-act="adopt-cat" data-name="${esc(n)}">Add keywords</button><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
+    </div>`).join('')}
+  </section>`;
+}
+function collectTax() {
+  const t = {};
+  for (const ta of $$('.kw')) t[ta.dataset.name] = ta.value.split(',').map(s => s.trim()).filter(Boolean);
+  return t;
+}
+async function saveTax(t) { S.data.taxonomy = (await api('/api/taxonomy', { taxonomy: t })).taxonomy; }
+
+/* ---------------- drawer ---------------- */
+function renderDrawer() {
+  const box = $('#drawer'), v = S.drawer && byId(S.drawer);
+  if (!v) { box.innerHTML = ''; S.drawer = null; return; }
+  const d = v.duration_seconds || 0;
+  const i = S.visible.findIndex(x => x.video_id === v.video_id);
+  const cats = categoryNames();
+  if (!cats.includes(v.category)) cats.unshift(v.category);
+  box.innerHTML = `
+  <div class="scrim" data-act="close"></div>
+  <aside class="drawer" role="dialog" aria-label="Video details">
+    <div class="drawer-top">
+      <button class="btn icon-btn" data-act="step" data-dir="-1" ${i > 0 ? '' : 'disabled'} aria-label="Previous video">↑</button>
+      <button class="btn icon-btn" data-act="step" data-dir="1" ${i >= 0 && i < S.visible.length - 1 ? '' : 'disabled'} aria-label="Next video">↓</button>
+      <span class="grow">${i >= 0 ? `${i + 1} of ${S.visible.length}` : ''}</span>
+      <a class="btn-text" href="${esc(v.url)}" target="_blank" rel="noopener">Open on YouTube ↗</a>
+      <button class="btn icon-btn" data-act="close" aria-label="Close">✕</button>
+    </div>
+    <div class="drawer-body">
+      <div class="embed"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(v.video_id)}?rel=0" title="${esc(v.title)}"
+        referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>
+      <div><h3>${esc(v.title)}</h3><div class="by">${esc(v.channel || 'Unknown channel')}</div></div>
+      <div class="speeds">${d ? SPEEDS.map(s => `<span class="${s === S.speed ? 'on' : ''}">${sx(s)} <b>${fmt(d / s)}</b></span>`).join('') : 'No duration available'}</div>
+      <div><span class="field-label">Status</span>
+        <div class="seg" id="d-status">${Object.entries(STATUS_LABEL).map(([k, l]) => `<button data-act="set-status" data-id="${esc(v.video_id)}" data-status="${k}" class="${v.status === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+      <div><label class="field-label" for="d-cat">Category</label>
+        <select id="d-cat" data-change="d-cat" data-id="${esc(v.video_id)}" style="width:100%">${cats.map(c => `<option value="${esc(c)}" ${c === v.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}<option value="__new">New category…</option></select>
+        <div class="kv-line" id="d-cat-note">${catNote(v)}</div></div>
+      <div><label class="field-label" for="d-notes">Notes</label>
+        <textarea id="d-notes" rows="6" placeholder="Takeaways, timestamps, follow-ups…">${esc(v.notes || '')}</textarea>
+        <div class="kv-line">Notes save when you click away.</div></div>
+      <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
+    </div>
+  </aside>`;
+}
+const catNote = v => v.category_locked
+  ? `Set by hand. <button class="btn-text" style="height:auto;padding:0;font-size:12.5px" data-act="reset-cat" data-id="${esc(v.video_id)}">Sort automatically instead</button>`
+  : 'Sorted automatically by keywords.';
+function syncDrawer() {
+  const v = S.drawer && byId(S.drawer);
+  if (!v || !$('#d-status')) return;
+  for (const b of $$('#d-status button')) b.classList.toggle('on', b.dataset.status === v.status);
+  $('#d-cat').value = v.category;
+  $('#d-cat-note').innerHTML = catNote(v);
+}
+function saveNotes() {
+  const ta = $('#d-notes'), v = S.drawer && byId(S.drawer);
+  if (ta && v && ta.value !== (v.notes || '')) update([v.video_id], { notes: ta.value });
+}
+function openDrawer(id) { saveNotes(); S.drawer = id; renderDrawer(); }
+function closeDrawer() { saveNotes(); S.drawer = null; renderDrawer(); }
+
+/* ---------------- updates ---------------- */
+async function update(ids, patch) {
+  if (!ids.length) return;
+  for (const id of ids) {
+    const v = byId(id);
+    if (!v) continue;
+    Object.assign(v, patch);
+    if (patch.category !== undefined) v.category_locked = 1;
+  }
+  refresh(); syncDrawer();
+  try { await api('/api/videos/update', { ids, ...patch }); } catch (e) { toast(e.message, true); await load(); }
+}
+function askName() {
+  const n = (prompt('Name for the new category:') || '').trim();
+  return n && n !== '__new' ? n : null;
+}
+function setView(patch) {
+  Object.assign(S.view, patch);
+  S.sel.clear(); S.limit = 150;
+  if (route() !== '') location.hash = '#/';
+  else refresh();
+  scrollTo(0, 0);
+}
+
+/* ---------------- events ---------------- */
+document.addEventListener('click', async e => {
+  const el = e.target.closest('[data-act]');
+  if (!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+  if (el.tagName === 'A' && el.getAttribute('href') === '#/') e.preventDefault();
+  switch (act) {
+    case 'v-status': setView({ status: el.dataset.v }); break;
+    case 'v-cat': setView({ cat: el.dataset.v, status: S.view.status === 'gone' ? 'todo' : S.view.status }); break;
+    case 'v-src': setView({ src: el.dataset.v }); break;
+    case 'cycle': { const v = byId(id); if (v) update([id], { status: NEXT[v.status] || 'in_progress' }); break; }
+    case 'set-status': update([id], { status: el.dataset.status }); break;
+    case 'open': openDrawer(id); break;
+    case 'close': closeDrawer(); break;
+    case 'step': { const i = S.visible.findIndex(x => x.video_id === S.drawer) + +el.dataset.dir; if (S.visible[i]) openDrawer(S.visible[i].video_id); break; }
+    case 'pick': if (el.checked) S.sel.add(id); else S.sel.delete(id); renderList(); break;
+    case 'sel-all': S.visible.forEach(v => S.sel.add(v.video_id)); renderList(); break;
+    case 'sel-clear': S.sel.clear(); renderList(); break;
+    case 'bulk': {
+      const ids = [...S.sel]; S.sel.clear();
+      await update(ids, { status: el.dataset.status });
+      toast(`${plural(ids.length, 'video')} marked ${STATUS_LABEL[el.dataset.status].toLowerCase()}`);
+      break;
+    }
+    case 'more': S.limit += 150; renderList(); break;
+    case 'session-done': {
+      const ids = el.dataset.ids.split(',').filter(Boolean);
+      if (confirm(`Mark ${plural(ids.length, 'video')} as watched?`)) { await update(ids, { status: 'completed' }); toast('Session marked watched'); }
+      break;
+    }
+    case 'reset-cat':
+      try { await api('/api/videos/update', { ids: [id], reset_category: true }); await load(); syncDrawer(); toast('Sorted automatically'); } catch (err) { toast(err.message, true); }
+      break;
+    case 'ingest': {
+      const url = S.ingest.url.trim();
+      if (!url) { toast('Paste a playlist link first', true); $('#i-url')?.focus(); break; }
+      runIngest(url);
+      break;
+    }
+    case 'resync': S.ingest.url = el.dataset.url; runIngest(el.dataset.url); refresh(); break;
+    case 'add-cat': {
+      const n = askName();
+      if (!n) break;
+      const t = collectTax();
+      if (n in t) { toast('That category already exists', true); break; }
+      t[n] = [];
+      try { await saveTax(t); refresh(); toast(`Added "${n}". Now give it some keywords.`); } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'adopt-cat': { const t = collectTax(); t[el.dataset.name] = []; try { await saveTax(t); refresh(); } catch (err) { toast(err.message, true); } break; }
+    case 'reclassify':
+      try { await saveTax(collectTax()); const r = await api('/api/reclassify', {}); await load(); toast(`Saved. ${plural(r.changed, 'video')} moved.`); } catch (err) { toast(err.message, true); }
+      break;
+    case 'del-cat': {
+      const n = el.dataset.name;
+      if (!confirm(`Delete "${n}"? Its videos go back to automatic sorting. No videos are deleted.`)) break;
+      try { if ($$('.kw').length) await saveTax(collectTax()); await api('/api/categories/delete', { name: n }); await load(); toast('Category deleted'); } catch (err) { toast(err.message, true); }
+      break;
+    }
+  }
+});
+document.addEventListener('change', async e => {
+  const el = e.target, ch = el.dataset.change;
+  if (el.id === 'speed' || ch === 'speed') {
+    S.speed = +el.value; store.set('ytkb.speed', S.speed);
+    renderBar(); refresh(); if (S.drawer) renderDrawer();
+    return;
+  }
+  switch (ch) {
+    case 'v-sort': S.view.sort = el.value; renderList(); break;
+    case 'v-cat': setView({ cat: el.value }); break;
+    case 'v-src': setView({ src: el.value }); break;
+    case 'bulk-cat': {
+      let c = el.value;
+      if (!c) break;
+      if (c === '__new') c = askName();
+      if (!c) { el.value = ''; break; }
+      const ids = [...S.sel]; S.sel.clear();
+      await update(ids, { category: c }); toast(`${plural(ids.length, 'video')} moved to ${c}`);
+      break;
+    }
+    case 'd-cat': {
+      let c = el.value;
+      if (c === '__new') c = askName();
+      if (!c) { el.value = byId(el.dataset.id)?.category; break; }
+      update([el.dataset.id], { category: c });
+      break;
+    }
+    case 'p-mins': S.plan.mins = Math.max(5, +el.value || 60); store.set('ytkb.plan.mins', S.plan.mins); refresh(); break;
+    case 'p-days': S.plan.days = Math.min(7, Math.max(1, +el.value || 5)); store.set('ytkb.plan.days', S.plan.days); refresh(); break;
+    case 's-mins': S.session.mins = Math.max(5, +el.value || 45); refresh(); break;
+    case 's-cat': S.session.cat = el.value; refresh(); break;
+    case 's-order': S.session.order = el.value; refresh(); break;
+    case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
+    case 'rename': {
+      const old = el.dataset.old, n = el.value.trim();
+      if (!n || n === old) { el.value = old; break; }
+      try { await saveTax(collectTax()); await api('/api/categories/rename', { old, new: n }); if (S.view.cat === old) S.view.cat = n; await load(); toast('Renamed'); }
+      catch (err) { el.value = old; toast(err.message, true); }
+      break;
+    }
+  }
+});
+let qT;
+document.addEventListener('input', e => {
+  const el = e.target;
+  if (el.id === 'q') { S.view.q = el.value; clearTimeout(qT); qT = setTimeout(() => { S.limit = 150; renderList(); }, 120); }
+  else if (el.dataset.input === 'i-url') S.ingest.url = el.value;
+  else if (el.dataset.input === 'i-cookies') { S.ingest.cookies = el.value; store.set('ytkb.cookies', el.value); }
+});
+document.addEventListener('focusout', e => { if (e.target.id === 'd-notes') saveNotes(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.drawer) { closeDrawer(); return; }
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
+  if (e.key === '/' && $('#q')) { e.preventDefault(); $('#q').focus(); }
+  if (S.drawer && (e.key === 'j' || e.key === 'k')) $(`[data-act="step"][data-dir="${e.key === 'j' ? 1 : -1}"]`)?.click();
+});
+$('#theme').addEventListener('click', () => {
+  S.theme = { auto: 'light', light: 'dark', dark: 'auto' }[S.theme];
+  store.set('ytkb.theme', S.theme); applyTheme(); renderBar();
+});
+addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); renderBar(); renderView(); scrollTo(0, 0); } });
+
+applyTheme();
+load();
+</script>
+</body>
+</html>
