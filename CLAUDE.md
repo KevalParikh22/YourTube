@@ -48,6 +48,10 @@ Every stage passes around a list of plain video dicts with the keys `video_id, t
 
 POSTs must send the `X-YTKB: 1` header and JSON content. The Host header must be localhost. Together these act as CSRF and DNS-rebinding protection; keep them. Syncs and AI runs share one background `Job` slot (`kind`: sync/discover/suggest), with stdout captured into the job log. When `auto_after_sync` is on, a sync also asks for suggestions on unsorted videos. The client computes metrics itself (mirroring `metrics.py`) from the video list in `/api/state`. Setting a category through the API locks it; `reset_category` unlocks it and re-classifies.
 
+## Phase 1 (in progress)
+
+Spec: `docs/PRD-Phase-1.md` (details queue, transcripts, search, AI summaries, Skipped status and triage). Per-video reads must be made **without cookies**: with cookies, yt-dlp full extraction fails with "The page needs to be reloaded". Cookies are only for listing playlists.
+
 ## Not built yet (see the research doc §5–6)
 
 - Writing `[YT-KB]` playlists back via the Data API: 50 units per insert against a 10k/day quota, so it needs a paced multi-day queue, and the source playlist must be hard-blocked from every write. The user hasn't decided whether they want it.
