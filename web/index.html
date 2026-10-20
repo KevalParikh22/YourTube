@@ -283,6 +283,28 @@
   .desc-text { white-space: pre-wrap; font-size: 13px; color: var(--ink-2); margin: 8px 0 0; max-height: 260px; overflow: auto; overflow-wrap: anywhere; }
   .transcript { max-height: 360px; overflow: auto; margin-top: 8px; }
 
+  /* ---------- setup guide ---------- */
+  .dl-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
+  .dl { display: block; text-decoration: none; border: 1px solid var(--line-strong); border-radius: 10px; padding: 16px; background: var(--raised); }
+  .dl:hover { border-color: var(--ink-3); }
+  .dl b { display: block; font-weight: 600; }
+  .dl span { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 4px; }
+  .guide { max-width: 860px; margin-top: 40px; }
+  .guide h1 { display: none; }
+  .guide h2 { font-family: var(--serif); font-weight: 500; font-size: 24px; margin: 44px 0 8px; letter-spacing: -.01em; }
+  .guide h3 { font-size: 15px; margin: 26px 0 6px; }
+  .guide p, .guide li { color: var(--ink-2); line-height: 1.65; }
+  .guide hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
+  .guide ul, .guide ol { padding-left: 22px; }
+  .guide code { overflow-wrap: anywhere; }
+  .guide .tbl td, .guide .tbl th { font-size: 13px; }
+  .guide a { color: var(--accent); }
+  .codeblock { position: relative; margin: 12px 0; }
+  .codeblock pre { background: var(--sunken); border-radius: 8px; padding: 14px 80px 14px 16px; overflow-x: auto; margin: 0;
+    font: 12.5px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace; color: var(--ink); }
+  .codeblock .copy { position: absolute; top: 6px; right: 6px; }
+  @media (max-width: 760px) { .dl-grid { grid-template-columns: minmax(0, 1fr); } }
+
   /* ---------- drawer ---------- */
   .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 15, .28); }
   .drawer {
@@ -375,7 +397,7 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['', 'Library'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['ai', 'AI']];
+const TABS = [['', 'Library'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['ai', 'AI'], ['setup', 'Setup']];
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
 const JOB_TEXT = {
@@ -403,7 +425,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   triage: { verdict: 'all', cat: '', undo: [] },
-  drawer: null, polling: false, detailCache: {}, local: null,
+  drawer: null, polling: false, detailCache: {}, local: null, guide: null,
 };
 
 /* ---------------- helpers ---------------- */
@@ -543,6 +565,7 @@ function renderView() {
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
   else if (r === 'ai') { v.innerHTML = viewAI(); updateJob(); if (!S.local) loadLocal(); }
+  else if (r === 'setup') { v.innerHTML = viewSetup(); if (!S.guide) loadGuide(); }
   else { v.innerHTML = videos().length ? viewLibrary() : emptyState(); renderList(); }
 }
 const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a YouTube playlist to get started. YT KB only reads it and never changes it.<br><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
@@ -1068,6 +1091,80 @@ function collectProposal() {
   return { categories, remove: $$('#proposal .p-drop').filter(x => x.checked).map(x => x.value) };
 }
 
+/* ---------------- setup guide ---------------- */
+async function loadGuide() {
+  try {
+    const r = await fetch('/docs/setup');
+    S.guide = r.ok ? await r.text() : `Could not load the guide (${r.status}).`;
+  } catch (e) { S.guide = 'Could not load the guide: ' + e.message; }
+  if (route() === 'setup') refresh();
+}
+function viewSetup() {
+  const win = S.data.platform === 'win32';
+  return `
+  <section>
+    <div class="eyebrow">Setup</div>
+    <h1 class="display">Install and configure<em>scripts, commands and settings</em></h1>
+    <p class="lede" style="max-width:700px">Download the setup script, put it in the YT KB folder (the one with <code>dashboard.py</code>) and run it.
+      It installs the app, and with the local AI option also Ollama and a model that fits the computer. It asks before installing anything system-wide.</p>
+    <div class="dl-grid">
+      <a class="dl" href="/download/setup.sh" download><b>⬇ setup.sh</b><span>Linux and macOS · <code>bash setup.sh --local-ai</code></span></a>
+      <a class="dl" href="/download/setup.ps1" download><b>⬇ setup.ps1</b><span>Windows PowerShell · <code>-LocalAI</code> · not yet tested</span></a>
+      <a class="dl" href="/download/SETUP.md" download><b>⬇ SETUP.md</b><span>This full guide as a Markdown file</span></a>
+    </div>
+    ${win ? '<p class="hint">You are on Windows: use setup.ps1.</p>' : ''}
+  </section>
+  <article class="guide">${S.guide ? md(S.guide) : '<p class="note">Loading the guide…</p>'}</article>`;
+}
+// Small Markdown renderer for docs/SETUP.md: headings, code blocks, tables, lists, rules, paragraphs.
+// Text is escaped before any markup is added, so the guide can't inject HTML.
+function md(src) {
+  const inline = t => {
+    // Code spans become placeholders first, so bold or links around them still match
+    const codes = [];
+    let h = esc(t).replace(/`([^`]+)`/g, (m, c) => `\u0000${codes.push(c) - 1}\u0000`);
+    h = h.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+      .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:]|$)/g, '$1<i>$2</i>')
+      .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+|#[^)\s]*)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/(^|[\s(])(https?:\/\/[^\s<)]*[^\s<).,:;])/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+    return h.replace(/\u0000(\d+)\u0000/g, (m, n) => `<code>${codes[n]}</code>`);
+  };
+  const lines = src.replace(/\r/g, '').split('\n'), out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^```/.test(line)) {
+      const code = [];
+      for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
+      i++;
+      out.push(`<div class="codeblock"><pre>${esc(code.join('\n'))}</pre><button class="btn btn-sm copy" data-act="copy-code">Copy</button></div>`);
+      continue;
+    }
+    if (/^#{1,3} /.test(line)) { const n = line.match(/^#+/)[0].length; out.push(`<h${n}>${inline(line.slice(n + 1))}</h${n}>`); i++; continue; }
+    if (/^---+\s*$/.test(line)) { out.push('<hr>'); i++; continue; }
+    if (/^\|/.test(line)) {
+      const rows = [];
+      for (; i < lines.length && /^\|/.test(lines[i]); i++) rows.push(lines[i]);
+      const cells = r => r.replace(/^\||\|\s*$/g, '').split('|').map(c => c.trim());
+      const body = rows.filter((r, k) => k !== 1 || !/^\|[\s:|-]+\|?\s*$/.test(r));
+      out.push(`<div class="tbl-wrap"><table class="tbl"><thead><tr>${cells(body[0]).map(c => `<th>${inline(c)}</th>`).join('')}</tr></thead>
+        <tbody>${body.slice(1).map(r => `<tr>${cells(r).map(c => `<td>${inline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`);
+      continue;
+    }
+    if (/^\s*([-*]|\d+\.) /.test(line)) {
+      const ordered = /^\s*\d+\./.test(line), items = [];
+      for (; i < lines.length && /^\s*([-*]|\d+\.) /.test(lines[i]); i++) items.push(lines[i].replace(/^\s*([-*]|\d+\.) /, ''));
+      out.push(`<${ordered ? 'ol' : 'ul'}>${items.map(t => `<li>${inline(t)}</li>`).join('')}</${ordered ? 'ol' : 'ul'}>`);
+      continue;
+    }
+    if (!line.trim()) { i++; continue; }
+    const para = [];
+    for (; i < lines.length && lines[i].trim() && !/^(```|#{1,3} |\||---|\s*([-*]|\d+\.) )/.test(lines[i]); i++) para.push(lines[i]);
+    out.push(`<p>${inline(para.join(' '))}</p>`);
+  }
+  return out.join('\n');
+}
+
 /* ---------------- AI settings ---------------- */
 const LANGUAGES = ['English', 'Hindi', 'Gujarati', 'Marathi', 'Bengali', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Punjabi', 'Urdu',
   'Spanish', 'French', 'German', 'Portuguese', 'Japanese', 'Korean', 'Chinese', 'Arabic'];
@@ -1139,7 +1236,7 @@ function viewLocal() {
   <section class="section card">
     <h2 class="h">Local AI on this computer</h2>
     <p class="note">Runs models on your own machine with Ollama: free, private and works offline. Run the whole setup in one go with
-      <code>bash scripts/setup.sh --local-ai</code> (Windows: <code>scripts\\setup.ps1 -LocalAI</code>).</p>
+      <code>bash scripts/setup.sh --local-ai</code> (Windows: <code>scripts\\setup.ps1 -LocalAI</code>). <a href="#/setup">Setup guide and downloads →</a></p>
     <div style="margin-top:8px">
       ${row(L.gpu.ok, 'GPU', L.gpu.detail)}
       ${row(L.memory.ok, 'Memory', L.memory.detail)}
@@ -1437,6 +1534,11 @@ document.addEventListener('click', async e => {
       try { await api('/api/ai/proposal/dismiss', {}); await load(); } catch (err) { toast(err.message, true); }
       break;
     case 'local-check': S.local = null; refresh(); loadLocal(); break;
+    case 'copy-code': {
+      const text = el.parentElement.querySelector('pre').textContent;
+      try { await navigator.clipboard.writeText(text); toast('Copied'); } catch (err) { toast('Copy failed: select the text instead', true); }
+      break;
+    }
     case 'local-pull': {
       const model = el.dataset.model || $('#local-model')?.value.trim();
       if (!model) { toast('Type a model name first', true); break; }

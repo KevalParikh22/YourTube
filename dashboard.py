@@ -23,7 +23,14 @@ import llm
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
 from exporter import videos_to_csv
 
-WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+WEB_DIR = os.path.join(ROOT_DIR, "web")
+# The only files /download/ serves (name -> path, content type); nothing else on disk is reachable
+DOWNLOADS = {
+    "setup.sh": (os.path.join(ROOT_DIR, "scripts", "setup.sh"), "text/x-shellscript; charset=utf-8"),
+    "setup.ps1": (os.path.join(ROOT_DIR, "scripts", "setup.ps1"), "text/plain; charset=utf-8"),
+    "SETUP.md": (os.path.join(ROOT_DIR, "docs", "SETUP.md"), "text/markdown; charset=utf-8"),
+}
 ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 
@@ -150,6 +157,15 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/", "/index.html"):
             with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
+        if url.path.startswith("/download/") or url.path == "/docs/setup":
+            name = "SETUP.md" if url.path == "/docs/setup" else url.path[len("/download/"):]
+            if name not in DOWNLOADS:
+                return self._error("Not found", 404)
+            path, ctype = DOWNLOADS[name]
+            with open(path, "rb") as f:
+                data = f.read()
+            headers = {"Content-Disposition": f'attachment; filename="{name}"'} if url.path.startswith("/download/") else None
+            return self._send(200, data, ctype, extra_headers=headers)
         if url.path == "/api/state":
             return self._json(build_state())
         if url.path == "/api/job":

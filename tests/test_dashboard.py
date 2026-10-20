@@ -135,3 +135,24 @@ class DashboardTest(unittest.TestCase):
         self.assertTrue(r["ai"]["local_only"])
         self.call("/api/ai/settings", {"local_only": False, "edit": "ollama", "config": {"num_ctx": 8192}})
 
+    def raw(self, path):
+        req = urllib.request.Request(self.base + path)
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, r.headers, r.read()
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, e.headers, b""
+
+    def test_downloads_are_whitelisted(self):
+        code, headers, body = self.raw("/download/setup.sh")
+        self.assertEqual(code, 200)
+        self.assertIn('attachment; filename="setup.sh"', headers["Content-Disposition"])
+        self.assertTrue(body.startswith(b"#!/usr/bin/env bash"))
+        code, headers, body = self.raw("/docs/setup")
+        self.assertEqual(code, 200)
+        self.assertIsNone(headers["Content-Disposition"])
+        self.assertTrue(body.startswith(b"# YT KB setup guide"))
+        for bad in ("/download/settings.json", "/download/../llm.py", "/download/%2e%2e/yt_kb.db", "/download/"):
+            self.assertEqual(self.raw(bad)[0], 404, bad)
+

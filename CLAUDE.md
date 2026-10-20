@@ -17,7 +17,7 @@ python3 -m venv --without-pip .venv && python3 -m pip --python .venv/bin/python 
 .venv/bin/python main.py --list [--browser auto]   # list the signed-in account's playlists and IDs
 .venv/bin/python main.py --details [N]             # fetch details/captions for up to N videos (default 200)
 .venv/bin/python -m unittest             # test suite (tests/), runs against temp files
-bash scripts/setup.sh [--local-ai]       # first-time setup for users (venv, deps, optional Ollama + model)
+bash scripts/setup.sh [--local-ai]       # first-time setup for users (venv, deps, optional Ollama + model); guide: docs/SETUP.md
 .venv/bin/python local_setup.py [--pull M | --use M | --recommended]   # local AI check and model setup
 ```
 
@@ -71,6 +71,8 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 - `llm.context_chars()` sizes the transcript budget from `num_ctx`.
 - `settings["local_only"]` blocks cloud providers in `is_configured` and in `make_completer`.
 - `local_setup.py` handles the machine check, the model recommendation (`RECOMMENDED`, by VRAM), `pull_model` (job kind `pull`) and `use_model`. It also has a CLI that `scripts/setup.sh` (Linux/macOS) and `scripts/setup.ps1` (Windows, untested) use.
+
+**Setup page (`#/setup`)** renders `docs/SETUP.md` with a small escaping Markdown renderer (`md()` in index.html). `GET /download/<name>` serves only the files in `dashboard.DOWNLOADS` (setup.sh, setup.ps1, SETUP.md). Keep docs/SETUP.md in step with CLI flags, `settings.json` keys and environment variables whenever they change.
 
 **Triage (`#/triage`)** is a ranked list (highest score first). It has verdict chips, Accept all skips, Undo, Rate (batch or one video), and a headline comparing time if you follow the ratings with time for everything. Rows and the library show YouTube thumbnails from `i.ytimg.com`.
 

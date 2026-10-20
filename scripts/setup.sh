@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
-# YT KB setup for Linux and macOS.
+# YT KB setup for Linux and macOS. Full guide: docs/SETUP.md
 #   bash scripts/setup.sh            # app only: Python environment and dependencies
 #   bash scripts/setup.sh --local-ai # also local AI: Ollama plus a model sized for this computer
-#
+#   options: -y/--yes (no questions), YTKB_MODEL=name (choose the model)
 # Safe to run again: every step checks first and skips what is already done.
 # It asks before installing anything system-wide (Ollama's installer may ask for your password).
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# Find the YT KB folder: where you run it from, next to this script, or one level up (scripts/)
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ROOT=""
+for d in "$PWD" "$HERE" "$(dirname "$HERE")"; do
+  if [ -f "$d/dashboard.py" ] && [ -f "$d/requirements.txt" ]; then ROOT="$d"; break; fi
+done
+[ -n "$ROOT" ] || { echo "Run this inside the YT KB folder (the one with dashboard.py), e.g.: cd ~/yt-kb && bash setup.sh"; exit 1; }
+cd "$ROOT"
 LOCAL_AI=0; ASSUME_YES=0
 for arg in "$@"; do
   case "$arg" in
     --local-ai) LOCAL_AI=1 ;;
     -y|--yes)   ASSUME_YES=1 ;;
-    -h|--help)  sed -n '2,8p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,7p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg"; exit 2 ;;
   esac
 done

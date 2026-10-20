@@ -16,6 +16,10 @@ A non-destructive ingestion, classification, and watch-time optimization engine 
 
 ## 🚀 Quick Start
 
+> **Full setup guide:** [`docs/SETUP.md`](docs/SETUP.md) covers every command, option and setting. It is also shown on the dashboard's **Setup** page, which has download links for the setup scripts.
+>
+> One-step setup: `bash scripts/setup.sh --local-ai` (Linux/macOS) or `scripts\setup.ps1 -LocalAI` (Windows, untested).
+
 ### 0. Install
 ```bash
 python3 -m venv .venv            # on Debian/Ubuntu without python3-venv: python3 -m venv --without-pip .venv
