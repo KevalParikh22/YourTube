@@ -49,13 +49,28 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(self.call("/api/state", headers={"Host": "evil.example"})[0], 403)
 
     def test_ai_settings_hide_key(self):
-        code, r = self.call("/api/ai/settings", {"provider": "anthropic", "config": {"model": "claude-opus-5-5", "api_key": "sk-test"}})
+        code, r = self.call("/api/ai/settings", {"provider": "anthropic", "edit": "anthropic",
+                                                  "config": {"model": "claude-opus-5-5", "api_key": "sk-test"}})
         self.assertEqual(code, 200)
         self.assertNotIn("sk-test", json.dumps(r))
         self.assertEqual(r["ai"]["providers"]["anthropic"]["key_source"], "saved")
-        code, r = self.call("/api/ai/settings", {"provider": "anthropic", "config": {"api_key": "__clear__"}})
+        code, r = self.call("/api/ai/settings", {"edit": "anthropic", "config": {"api_key": "__clear__"}})
         self.assertIsNone(r["ai"]["providers"]["anthropic"]["key_source"])
         self.call("/api/ai/settings", {"provider": "none"})
+
+    def test_task_routing(self):
+        self.call("/api/ai/settings", {"provider": "anthropic", "edit": "anthropic", "config": {"api_key": "sk-x"},
+                                       "tasks": {"rate": "ollama", "categorize": None, "bogus": "ollama"}})
+        code, r = self.call("/api/ai/settings", {"edit": "ollama", "config": {"model": "llama3.1:8b"},
+                                                  "interests": "  RAG, agents  ", "language": "Hindi"})
+        ai = r["ai"]
+        self.assertEqual(ai["tasks"], {"categorize": None, "rate": "ollama"})
+        self.assertEqual((ai["interests"], ai["language"]), ("RAG, agents", "Hindi"))
+        self.assertEqual(ai["ready_for"], {"categorize": True, "rate": True})
+        self.assertIn("Ollama", ai["uses"]["rate"])
+        self.assertIn("Claude", ai["uses"]["categorize"])
+        self.call("/api/ai/settings", {"provider": "none", "tasks": {"rate": None}, "edit": "anthropic",
+                                       "config": {"api_key": "__clear__"}, "language": "English", "interests": ""})
 
     def test_ai_requires_provider(self):
         self.call("/api/ai/settings", {"provider": "none"})

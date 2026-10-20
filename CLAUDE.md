@@ -55,7 +55,16 @@ Spec: `docs/PRD-Phase-1.md` (details queue, transcripts, search, AI summaries, S
 
 Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STATUSES` (completed and skipped) don't count toward remaining time, in `metrics.py` and in the client's `isDone()`. Adding a status means adding it to `VALID_STATUSES`. `init_db()` then rebuilds the `videos` table, because SQLite can't alter a CHECK constraint. **Video details (`enrich.py`)**: `run_enrich` goes through `storage.videos_needing_details()` (no row yet, or `failed` with fewer than 3 tries; not-done videos first). It makes **anonymous** yt-dlp reads, using Node/Deno as the JS runtime when one is installed. Requests are paced at about 3 s plus jitter, the default limit is 200 per run, and the run stops at the first bot-check or 429. Categories whose names look like music (`MUSIC_NAME`), or that are switched off in `settings.json["transcripts"]`, are never requested. Statuses in `video_details`: done, no_captions, music (YouTube category), unavailable, failed. A failed retry keeps earlier good data. Captions are stored in `transcript_segments`; the track preference is in `choose_track`. `/api/state` carries only a small `details` summary per video. The full text comes from `GET /api/video?id=`, and the job can be stopped with `POST /api/job/cancel`.
 
-Triage (`#/triage`) steps through unwatched videos: Keep (session only), Skip, Watching, Watched, Undo. Keys: K S P W U.
+**AI watch ratings (`rater.py`)**:
+- `run_rate` makes one call per unwatched, unrated video. It returns a score (0–10), a verdict (watch/skim/skip), a reason, skim ranges, a TL;DR and timestamped points, written in `settings["language"]`.
+- The prompt weighs depth and quality, fit with `settings["interests"]` and the categories (Keep presets marked), time against value, and freshness (`video_details.upload_date` against today).
+- It uses the transcript (merged into 30 s blocks, sampled to fit a character budget that is smaller for local models) or falls back to metadata only (`basis`).
+- `validate()` clamps the reply and drops timestamps outside the video.
+- Results go in `video_ratings`. A rating never changes a video; Triage applies the Skipped status when the user accepts. `rater.estimate()` powers the cost confirmation.
+
+**AI per task**: `settings["tasks"]` maps `categorize` and `rate` to a provider (unset = the default `provider`). Always call `llm.make_completer(settings, task)`, `is_configured(settings, task)` and `describe(settings, task)` with the task. `llm.PRICES` holds approximate prices per model for estimates; local models are free and unknown models show "cost unknown".
+
+**Triage (`#/triage`)** is a ranked list (highest score first). It has verdict chips, Accept all skips, Undo, Rate (batch or one video), and a headline comparing time if you follow the ratings with time for everything. Rows and the library show YouTube thumbnails from `i.ytimg.com`.
 
 ## Not built yet (see the research doc §5–6)
 

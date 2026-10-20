@@ -53,9 +53,22 @@ Phase 0 tells you *what* is in your backlog and *how long* it takes. Phase 1 tel
 - **Cost guardrail:** before a batch, show the number of videos, the estimated input tokens (transcript characters ÷ 4) and an approximate price for the selected model; it runs only after the user confirms. Results are cached and not regenerated unless asked.
 - Long transcripts are split into chunks for small local models.
 
-### F5 — Triage
-- A new status, **Skipped** ("not interested"). It counts as done for remaining time, can be undone, and never deletes anything (closes the "Archive" idea from Phase 0 AC 1.6).
-- A Triage view that steps through unwatched videos one at a time: summary and verdict, then **Watch** / **Skim** / **Skip**.
+### F5 — Triage: AI watch ratings (revised 2026-10-20)
+- **The AI rates every video; the user only confirms or overrides.** The user does not sort videos by hand.
+- **Rating** per video:
+  - a score from 0 to 10;
+  - a verdict of **Watch**, **Skim** or **Skip**;
+  - a one-line reason;
+  - for Skim, the time ranges worth watching;
+  - a TL;DR and key points with timestamps. This is the F4 summary, produced in the same call.
+- **What the rating weighs:** content depth and quality (substance or hype), fit with the user's interests (categories, Keep presets and a free-text "My interests" setting), time against value (is a summary enough?), and freshness (penalize outdated tech, using the upload date).
+- **Input:** transcript and chapters when available, otherwise title, channel, description and duration (marked as a "metadata-only" rating). Written in the user's preferred language.
+- **Triage page = a ranked list:** thumbnail, score, verdict badge, reason and duration at the chosen speed. Filter chips for Watch / Skim / Skip / Unrated. **Accept all skips** applies the new **Skipped** status in bulk, and every change can be undone. The header compares watch time for "only the Watch videos" with "everything".
+- **Skipped** status (done in step 1): counts as done for remaining time and never deletes anything.
+- **Cost guardrail:** before a rating batch, show the number of videos, estimated input tokens and approximate price for the chosen model.
+
+### F8 — AI per task (added 2026-10-20)
+- The user configures any number of providers (cloud or local) and picks which one does each job: a **default**, **categories** (propose and suggest) and **ratings and summaries**. Each job falls back to the default.
 
 ### F6 — Smarter AI categories
 - The Phase 0 suggest step can include the description and the first ~1,000 characters of the transcript, when details are available.
@@ -72,10 +85,10 @@ Phase 0 tells you *what* is in your backlog and *how long* it takes. Phase 1 tel
 
 ## 6. Build order (proposed)
 
-1. Skipped status and Triage (small, immediately useful). **Done 2026-10-20.**
+1. Skipped status (done). The first manual Triage missed the requirement and is replaced by step 3.
 2. Details queue and transcripts (F1, F2). **Done 2026-10-20.** Tested on the real library: 3/3 real videos got transcripts (283–3,190 lines) and chapters, and 5 placeholder IDs were marked unavailable. Takes about 5 s per video.
-3. Search (F3).
-4. Summaries with cost guardrail (F4), then triage verdicts.
+3. **AI watch ratings and summaries (F4 + F5 revised), AI per task (F8), and a more visual UI** (thumbnails, verdict colors, better narrow-window layout). **Done 2026-10-20.** Tested end to end with a stand-in model on a copy of the library. Not yet run against a real AI.
+4. Search (F3).
 5. Smarter categories (F6), then Markdown export (F7).
 
 Each step ships with tests and keeps the dashboard working.

@@ -124,6 +124,7 @@ def fetch_details(ydl: yt_dlp.YoutubeDL, video_id: str) -> Dict[str, Any]:
         'chapters': [{'start': c.get('start_time') or 0, 'title': c.get('title') or ""} for c in info.get('chapters') or []],
         'language': info.get('language'),
         'yt_categories': info.get('categories') or [],
+        'upload_date': info.get('upload_date'),   # YYYYMMDD, used to judge freshness
         'segments': [],
     }
     if "Music" in details['yt_categories']:

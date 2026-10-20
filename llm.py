@@ -43,6 +43,15 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
     },
 }
 
+# Jobs that can each use their own provider; unset ones use the default ("provider")
+TASKS = {"categorize": "Categories", "rate": "Ratings and summaries"}
+
+# Approximate USD per 1M tokens (input, output), for cost estimates only
+PRICES = {
+    "claude-opus-5-5": (4.00, 20.00), "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50),
+    "gemini-2.5-pro": (1.25, 10.00), "gemini-2.5-flash": (0.30, 2.50), "gemini-2.5-flash-lite": (0.10, 0.40),
+}
+
 # Claude models that accept server-side refusal fallbacks
 _FALLBACK_MODELS = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
 TIMEOUT = 300  # local models can be slow on a large batch
@@ -65,6 +74,9 @@ def default_settings() -> Dict[str, Any]:
         "proposal": None,         # pending AI-proposed category set awaiting review
         "transcripts": {},        # category -> fetch transcripts? (overrides the music-name default)
         "details_after_sync": False,
+        "tasks": {},              # task -> provider, overriding the default for that job
+        "interests": "",          # free text: what the user wants to learn, used by ratings
+        "language": "English",    # language for summaries and rating reasons
     }
 
 def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
@@ -104,15 +116,27 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
             "env": env, "models": p["models"], "model": cfg.get("model", ""),
             "base_url": cfg.get("base_url", ""), "key_source": key_source,
         }
+        providers[k]["ready"] = _provider_ready(settings, k)
     return {
         "provider": settings["provider"], "auto_after_sync": settings["auto_after_sync"],
         "providers": providers, "presets": settings["presets"],
         "category_notes": settings["category_notes"], "proposal": settings["proposal"],
+        "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS,
+        "interests": settings["interests"], "language": settings["language"],
         "ready": is_configured(settings),
+        "ready_for": {t: is_configured(settings, t) for t in TASKS},
+        "uses": {t: describe(settings, t) for t in TASKS},
     }
 
-def is_configured(settings: Dict[str, Any]) -> bool:
-    provider = settings.get("provider")
+def provider_for(settings: Dict[str, Any], task: Optional[str] = None) -> Optional[str]:
+    """The provider a job uses: its own choice if set and known, else the default."""
+    chosen = (settings.get("tasks") or {}).get(task) if task else None
+    return chosen if chosen in PROVIDERS else settings.get("provider")
+
+def is_configured(settings: Dict[str, Any], task: Optional[str] = None) -> bool:
+    return _provider_ready(settings, provider_for(settings, task))
+
+def _provider_ready(settings: Dict[str, Any], provider: Optional[str]) -> bool:
     if provider not in PROVIDERS:
         return False
     cfg = settings["providers"].get(provider, {})
@@ -124,11 +148,27 @@ def is_configured(settings: Dict[str, Any]) -> bool:
         return False
     return True
 
-def describe(settings: Dict[str, Any]) -> str:
-    provider = settings.get("provider")
+def describe(settings: Dict[str, Any], task: Optional[str] = None) -> str:
+    provider = provider_for(settings, task)
     if provider not in PROVIDERS:
         return "no AI provider"
     return f"{PROVIDERS[provider]['label']} · {settings['providers'][provider].get('model')}"
+
+def model_for(settings: Dict[str, Any], task: Optional[str] = None) -> str:
+    provider = provider_for(settings, task)
+    return settings["providers"].get(provider, {}).get("model", "") if provider in PROVIDERS else ""
+
+def is_local(settings: Dict[str, Any], task: Optional[str] = None) -> bool:
+    return bool(PROVIDERS.get(provider_for(settings, task) or "", {}).get("local"))
+
+def estimate_cost(settings: Dict[str, Any], task: str, tokens_in: int, tokens_out: int) -> Optional[float]:
+    """Approximate USD for a run, 0 for local models, None when the model's price is unknown."""
+    if is_local(settings, task):
+        return 0.0
+    price = PRICES.get(model_for(settings, task))
+    if not price:
+        return None
+    return round(tokens_in / 1e6 * price[0] + tokens_out / 1e6 * price[1], 4)
 
 
 # --- HTTP helper ---------------------------------------------------------------
@@ -218,9 +258,9 @@ def _openai(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
 
 _CALLS = {"anthropic": _anthropic, "gemini": _gemini, "openai": _openai}
 
-def make_completer(settings: Dict[str, Any]) -> Callable[[str, str], str]:
-    """Returns complete(system, prompt) -> text for the selected provider."""
-    provider = settings.get("provider")
+def make_completer(settings: Dict[str, Any], task: Optional[str] = None) -> Callable[[str, str], str]:
+    """Returns complete(system, prompt) -> text for the provider this task uses."""
+    provider = provider_for(settings, task)
     if provider not in PROVIDERS:
         raise LLMError("Choose an AI provider first (AI page in the dashboard)")
     cfg = dict(settings["providers"].get(provider, {}))

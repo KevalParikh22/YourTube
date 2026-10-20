@@ -179,19 +179,19 @@ def run_suggest(scope: str = "unsorted") -> bool:
 
     settings = llm.load_settings()
     videos = storage.videos_for_ai(scope)
-    print(f"🤖 AI suggestions with {llm.describe(settings)}")
+    print(f"🤖 AI suggestions with {llm.describe(settings, 'categorize')}")
     if not videos:
         print("   Nothing to sort: no unlocked videos without a pending suggestion.")
         return True
     taxonomy = load_taxonomy()
     try:
-        complete = llm.make_completer(settings)
+        complete = llm.make_completer(settings, "categorize")
         print(f"   Sorting {len(videos)} videos into {len(taxonomy)} categories…")
         result = assign_categories(videos, list(taxonomy), complete, notes=settings.get("category_notes"))
     except LLMError as e:
         print(f"❌ {e}")
         return False
-    model = settings["providers"][settings["provider"]].get("model", "")
+    model = llm.model_for(settings, "categorize")
     stored = storage.save_suggestions(result["suggestions"], model=model)
     same = len(result["suggestions"]) - stored
     print(f"✅ {stored} suggestion{'' if stored == 1 else 's'} ready for review"
@@ -209,16 +209,16 @@ def run_discover(max_categories: int = 12) -> bool:
 
     settings = llm.load_settings()
     videos = [v for v in storage.get_library() if v.get("status") not in storage.DONE_STATUSES] or storage.get_library()
-    print(f"🤖 Proposing categories with {llm.describe(settings)} from {len(videos)} videos…")
+    print(f"🤖 Proposing categories with {llm.describe(settings, 'categorize')} from {len(videos)} videos…")
     try:
-        complete = llm.make_completer(settings)
+        complete = llm.make_completer(settings, "categorize")
         cats = discover_categories(videos, complete, presets=settings.get("presets"),
                                    taxonomy=load_taxonomy(), max_categories=max_categories)
     except LLMError as e:
         print(f"❌ {e}")
         return False
     settings = llm.load_settings()  # re-read: the user may have saved settings meanwhile
-    settings["proposal"] = {"categories": cats, "model": llm.describe(settings)}
+    settings["proposal"] = {"categories": cats, "model": llm.describe(settings, "categorize")}
     llm.save_settings(settings)
     print(f"✅ Proposed {len(cats)} categories. Review them on the Categories page.")
     return True

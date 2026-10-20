@@ -129,6 +129,24 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_segments_video ON transcript_segments(video_id, start_s)")
+        if "upload_date" not in _columns(cursor, "video_details"):
+            cursor.execute("ALTER TABLE video_details ADD COLUMN upload_date TEXT")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS video_ratings (
+                video_id TEXT PRIMARY KEY,
+                score REAL NOT NULL,
+                verdict TEXT NOT NULL CHECK(verdict IN ('watch', 'skim', 'skip')),
+                reason TEXT DEFAULT '',
+                tldr TEXT DEFAULT '',
+                points TEXT DEFAULT '[]',
+                skim TEXT DEFAULT '[]',
+                basis TEXT,
+                language TEXT,
+                model TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(video_id) REFERENCES videos(video_id)
+            )
+        """)
 
         # Migrate databases created before these columns existed
         existing = _columns(cursor, "videos")
@@ -295,7 +313,13 @@ def get_library(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
                                      'tries': row['tries']}
                    for row in cursor.execute("SELECT video_id, status, caption_kind, caption_lang, tries, "
                                              "json_array_length(chapters) AS n_chapters FROM video_details")}
+        ratings = {}
+        for row in cursor.execute("SELECT * FROM video_ratings"):
+            r = dict(row)
+            r['points'], r['skim'] = json.loads(r['points'] or '[]'), json.loads(r['skim'] or '[]')
+            ratings[r.pop('video_id')] = r
     for v in videos.values():
+        v['rating'] = ratings.get(v['video_id'])
         v['suggestion'] = suggestions.get(v['video_id'])
         v['details'] = details.get(v['video_id'])
         v['in_source'] = any(not s['removed'] for s in v['sources'])
@@ -557,19 +581,21 @@ def save_details(video_id: str, result: Dict[str, Any], db_path: str = DB_PATH) 
         tries = (prev['tries'] if prev is not None else 0) + 1 if result['status'] == 'failed' else 0
         cursor.execute("""
             INSERT INTO video_details (video_id, status, description, tags, chapters, language, yt_categories,
-                                       caption_lang, caption_kind, tries, error, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                                       caption_lang, caption_kind, tries, error, upload_date, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(video_id) DO UPDATE SET
                 status = excluded.status, description = excluded.description, tags = excluded.tags,
                 chapters = excluded.chapters, language = excluded.language, yt_categories = excluded.yt_categories,
                 caption_lang = excluded.caption_lang, caption_kind = excluded.caption_kind,
-                tries = excluded.tries, error = excluded.error, fetched_at = CURRENT_TIMESTAMP
+                tries = excluded.tries, error = excluded.error, upload_date = excluded.upload_date,
+                fetched_at = CURRENT_TIMESTAMP
         """, (
             video_id, result['status'], result.get('description') or '',
             json.dumps(result.get('tags') or [], ensure_ascii=False),
             json.dumps(result.get('chapters') or [], ensure_ascii=False),
             result.get('language'), json.dumps(result.get('yt_categories') or [], ensure_ascii=False),
             result.get('caption_lang'), result.get('caption_kind'), tries, result.get('error'),
+            result.get('upload_date'),
         ))
         if result['status'] != 'failed':
             cursor.execute("DELETE FROM transcript_segments WHERE video_id = ?", (video_id,))
@@ -592,3 +618,54 @@ def get_details(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
             "SELECT start_s AS start, dur_s AS dur, text FROM transcript_segments WHERE video_id = ? ORDER BY start_s",
             (video_id,))]
         return d
+
+# --- AI watch ratings (Phase 1) -----------------------------------------------------
+
+def videos_for_rating(video_ids: Optional[Iterable[str]] = None, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Videos to rate with what the rater needs (details may be missing).
+    Without video_ids: videos not yet done and not yet rated. With video_ids: exactly those (re-rate).
+    """
+    init_db(db_path)
+    sql = """
+        SELECT v.video_id, v.title, v.channel, v.duration_seconds, v.category, v.status,
+               d.status AS details_status, d.description, d.chapters, d.upload_date
+        FROM videos v LEFT JOIN video_details d ON d.video_id = v.video_id
+    """
+    with get_connection(db_path) as conn:
+        if video_ids is not None:
+            rows = conn.execute(sql + " WHERE v.video_id IN (SELECT value FROM json_each(?))",
+                                (json.dumps(list(video_ids)),)).fetchall()
+        else:
+            rows = conn.execute(sql + """
+                WHERE v.status NOT IN ('completed', 'skipped')
+                  AND v.video_id NOT IN (SELECT video_id FROM video_ratings)
+                ORDER BY v.added_at, v.rowid
+            """).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d['chapters'] = json.loads(d['chapters'] or '[]')
+            out.append(d)
+        return out
+
+def get_segments(video_id: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    with get_connection(db_path) as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT start_s AS start, text FROM transcript_segments WHERE video_id = ? ORDER BY start_s", (video_id,))]
+
+def save_rating(video_id: str, rating: Dict[str, Any], model: str = "", db_path: str = DB_PATH) -> None:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("""
+            INSERT INTO video_ratings (video_id, score, verdict, reason, tldr, points, skim, basis, language, model, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(video_id) DO UPDATE SET
+                score = excluded.score, verdict = excluded.verdict, reason = excluded.reason, tldr = excluded.tldr,
+                points = excluded.points, skim = excluded.skim, basis = excluded.basis, language = excluded.language,
+                model = excluded.model, created_at = CURRENT_TIMESTAMP
+        """, (video_id, rating['score'], rating['verdict'], rating.get('reason', ''), rating.get('tldr', ''),
+              json.dumps(rating.get('points') or [], ensure_ascii=False),
+              json.dumps(rating.get('skim') or [], ensure_ascii=False),
+              rating.get('basis'), rating.get('language'), model))
+        conn.commit()

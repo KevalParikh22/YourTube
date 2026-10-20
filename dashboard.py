@@ -75,7 +75,7 @@ def _sync(url, browser, cookies_file):
     from main import run_pipeline  # deferred so the dashboard starts even if yt-dlp is missing
     settings = llm.load_settings()
     ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False,
-                      ai_suggest=settings["auto_after_sync"] and llm.is_configured(settings))
+                      ai_suggest=settings["auto_after_sync"] and llm.is_configured(settings, "categorize"))
     if ok and settings.get("details_after_sync"):
         from enrich import run_enrich
         print()
@@ -275,6 +275,19 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("Another task is already running", 409)
                 return self._json({"ok": True})
 
+            if path in ("/api/rate", "/api/rate/estimate"):
+                import rater
+                ids = body.get("ids")
+                if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
+                    return self._error("ids must be a list of video IDs")
+                if path == "/api/rate/estimate":
+                    return self._json(rater.estimate(ids))
+                if not llm.is_configured(llm.load_settings(), "rate"):
+                    return self._error("Choose an AI for ratings on the AI page first")
+                if not JOB.start("rate", "Rate videos", lambda: rater.run_rate(ids, should_stop=JOB.stop_requested)):
+                    return self._error("Another task is already running", 409)
+                return self._json({"ok": True})
+
             if path == "/api/details/settings":
                 settings = llm.load_settings()
                 if "after_sync" in body:
@@ -297,15 +310,17 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/ai/settings":
             settings = llm.load_settings()
-            provider = body.get("provider", settings["provider"])
-            if provider != "none" and provider not in llm.PROVIDERS:
-                return self._error("Unknown provider")
-            settings["provider"] = provider
-            if "auto_after_sync" in body:
-                settings["auto_after_sync"] = bool(body["auto_after_sync"])
-            cfg = body.get("config")
-            if provider in llm.PROVIDERS and isinstance(cfg, dict):
-                target = settings["providers"][provider]
+            # Default provider ("none" turns AI off)
+            if "provider" in body:
+                if body["provider"] != "none" and body["provider"] not in llm.PROVIDERS:
+                    return self._error("Unknown provider")
+                settings["provider"] = body["provider"]
+            # One provider's own configuration
+            edit, cfg = body.get("edit"), body.get("config")
+            if edit is not None:
+                if edit not in llm.PROVIDERS or not isinstance(cfg, dict):
+                    return self._error("Unknown provider")
+                target = settings["providers"][edit]
                 for k in ("model", "base_url"):
                     if isinstance(cfg.get(k), str):
                         target[k] = cfg[k].strip()
@@ -314,11 +329,26 @@ class Handler(BaseHTTPRequestHandler):
                     target["api_key"] = ""
                 elif isinstance(key, str) and key.strip():
                     target["api_key"] = key.strip()
+            # Which provider does which job (None = the default)
+            if isinstance(body.get("tasks"), dict):
+                for task, provider in body["tasks"].items():
+                    if task in llm.TASKS and (provider is None or provider in llm.PROVIDERS):
+                        settings["tasks"][task] = provider
+            if "auto_after_sync" in body:
+                settings["auto_after_sync"] = bool(body["auto_after_sync"])
+            if isinstance(body.get("interests"), str):
+                settings["interests"] = body["interests"].strip()[:2000]
+            if isinstance(body.get("language"), str) and body["language"].strip():
+                settings["language"] = body["language"].strip()[:40]
             llm.save_settings(settings)
             return self._json({"ok": True, "ai": llm.public_settings(settings)})
 
         if path == "/api/ai/test":
-            reply = llm.make_completer(llm.load_settings())(
+            settings = llm.load_settings()
+            provider = body.get("provider") or settings["provider"]
+            if provider not in llm.PROVIDERS:
+                return self._error("Unknown provider")
+            reply = llm.make_completer({**settings, "provider": provider, "tasks": {}})(
                 "Reply with JSON only.", 'Reply with {"ok": true} and nothing else.')
             llm.parse_json(reply)
             return self._json({"ok": True})
@@ -339,7 +369,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"ok": True, "presets": presets})
 
         if path in ("/api/ai/discover", "/api/ai/suggest"):
-            if not llm.is_configured(llm.load_settings()):
+            if not llm.is_configured(llm.load_settings(), "categorize"):
                 return self._error("Set up an AI provider on the AI page first")
             if path == "/api/ai/discover":
                 started = JOB.start("discover", "Propose categories", run_discover)
