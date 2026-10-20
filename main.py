@@ -17,7 +17,8 @@ def run_pipeline(
     playlist_url: str,
     browser_cookies: str = None,
     cookies_file: str = None,
-    open_browser: bool = True
+    open_browser: bool = True,
+    ai_suggest: bool = False
 ):
     print("\n" + "="*60)
     print("  ⚡ YouTube Knowledge Base (YT KB) — Phase 0 Pipeline")
@@ -40,13 +41,16 @@ def run_pipeline(
     except Exception as e:
         print(f"\n❌ Ingestion error: {e}")
         print("\n💡 Troubleshooting Tips:")
-        print("   1. If your playlist is private (or Watch Later), pass a logged-in browser: --browser firefox")
+        print("   1. If your playlist is private (or Watch Later), use a signed-in browser: --browser auto")
+        print("      On Linux, Chrome needs the 'secretstorage' package (pip install -r requirements.txt).")
         print("      On Windows, Chrome/Edge cookies are app-bound encrypted and often can't be read;")
         print("      use Firefox or export a cookies.txt and pass --cookies cookies.txt instead.")
         print("   2. Or set the YouTube playlist visibility to 'Unlisted' so it requires no cookies.")
         return False
         
     videos = data['videos']
+    if browser_cookies == 'auto' and data.get('browser'):
+        print(f"   🔎 Found a YouTube sign-in in: {data['browser']}")
     print(f"   ✅ Successfully extracted {len(videos)} videos (0 bytes downloaded, non-destructive).")
     if data.get('skipped_unavailable'):
         print(f"   ⚠️ Skipped {data['skipped_unavailable']} private/deleted/unavailable entries.")
@@ -62,6 +66,10 @@ def run_pipeline(
     counts = save_playlist(data, videos)
     print(f"   ✅ Saved: {counts['added']} new, {counts['updated']} refreshed, "
           f"{counts['removed']} no longer in source (kept locally, flagged as removed).")
+    if ai_suggest:
+        print()
+        from ai_classifier import run_suggest
+        run_suggest("unsorted")  # suggestions only; a failure here doesn't fail the sync
     # Reload so manual categories and existing watch statuses are reflected in the reports
     classified_videos = get_all_videos(data['id'])
     
@@ -110,26 +118,25 @@ def interactive_mode():
         return
         
     print("\nIs this playlist Private?")
-    print("  1. Yes, it's Private (Read session from browser: Chrome/Edge/Firefox/Brave)")
+    print("  1. Yes, it's Private or Watch Later (use the sign-in from my browser)")
     print("  2. No, it's Unlisted or Public (No browser cookies needed)")
     choice = input("Select option (1 or 2, default is 2): ").strip()
     
     browser = None
     if choice == "1":
-        print("\nWhich browser are you logged into YouTube on?")
-        print("  Options: chrome, edge, firefox, brave, opera")
-        browser_input = input("Enter browser name (e.g. chrome or edge): ").strip().lower()
-        if browser_input:
-            browser = browser_input
+        print("\nWhich browser are you signed in to YouTube with?")
+        print("  Options: auto (detect), firefox, chrome, chromium, brave, edge, opera")
+        browser = input("Browser (default auto): ").strip().lower() or "auto"
             
     run_pipeline(playlist_url=playlist_url, browser_cookies=browser)
 
 def main():
     parser = argparse.ArgumentParser(description="YouTube Knowledge Base (YT KB) - Phase 0")
     parser.add_argument("url", nargs="?", help="YouTube playlist URL or ID")
-    parser.add_argument("--browser", "-b", help="Browser to read session cookies from (chrome, edge, firefox, brave)")
+    parser.add_argument("--browser", "-b", help="Browser to read session cookies from: auto (detect), firefox, chrome, brave, edge")
     parser.add_argument("--cookies", "-c", help="Path to cookies.txt file")
     parser.add_argument("--no-open", action="store_true", help="Do not open HTML report in browser automatically")
+    parser.add_argument("--ai", action="store_true", help="After syncing, ask the configured AI for category suggestions on unsorted videos")
     
     args = parser.parse_args()
     
@@ -138,7 +145,8 @@ def main():
             playlist_url=args.url,
             browser_cookies=args.browser,
             cookies_file=args.cookies,
-            open_browser=not args.no_open
+            open_browser=not args.no_open,
+            ai_suggest=args.ai
         )
     else:
         interactive_mode()

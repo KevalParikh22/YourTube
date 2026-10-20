@@ -7,6 +7,28 @@ import yt_dlp
 from typing import Dict, Any, List, Optional
 
 WATCH_LATER_ALIASES = {"wl", "watch later", "watchlater", ":ytwatchlater"}
+# Order tried by browser="auto". Firefox first: its cookies never need a keyring.
+AUTO_BROWSERS = ("firefox", "chrome", "chromium", "brave", "edge", "vivaldi", "opera")
+_LOGIN_COOKIES = {"SID", "__Secure-3PSID", "LOGIN_INFO"}
+
+class _QuietLogger:
+    def debug(self, msg): pass
+    def info(self, msg): pass
+    def warning(self, msg, only_once=False): pass
+    def error(self, msg): pass
+
+def detect_browser() -> Optional[str]:
+    """Returns the first installed browser that is signed in to YouTube, or None."""
+    from yt_dlp.cookies import extract_cookies_from_browser
+    for browser in AUTO_BROWSERS:
+        try:
+            jar = extract_cookies_from_browser(browser, logger=_QuietLogger())
+        except Exception:
+            continue  # not installed, locked or undecryptable
+        names = {c.name for c in jar if c.domain.endswith("youtube.com") and c.value}
+        if names & _LOGIN_COOKIES:
+            return browser
+    return None
 
 def normalize_playlist_url(playlist_url: str) -> str:
     """Accepts a full URL, a bare playlist ID, or 'WL' / 'watch later'."""
@@ -27,7 +49,8 @@ def extract_playlist_metadata(
     Non-destructive: No videos are downloaded; zero quota API units consumed.
     
     :param playlist_url: YouTube playlist URL or ID.
-    :param browser_cookies: Name of browser to read session cookies from ('chrome', 'edge', 'firefox', 'brave').
+    :param browser_cookies: Browser to read session cookies from ('firefox', 'chrome', ...),
+                            or 'auto' to use the first browser signed in to YouTube.
     :param cookies_file: Path to a cookies.txt file if preferred.
     :return: Dictionary containing playlist info and parsed video list.
     """
@@ -39,6 +62,11 @@ def extract_playlist_metadata(
         'ignoreerrors': True,  # Skip deleted or unavailable videos without crashing
     }
     
+    if browser_cookies and browser_cookies.lower() == 'auto':
+        browser_cookies = detect_browser()
+        if not browser_cookies:
+            raise ValueError("No browser signed in to YouTube was found. Sign in to YouTube in "
+                             "Firefox or Chrome, or use a cookies.txt file.")
     if browser_cookies:
         ydl_opts['cookiesfrombrowser'] = (browser_cookies.lower(),)
     elif cookies_file:
@@ -95,5 +123,6 @@ def extract_playlist_metadata(
         'url': playlist_url,
         'total_extracted': len(parsed_videos),
         'skipped_unavailable': skipped_unavailable,
+        'browser': browser_cookies,
         'videos': parsed_videos
     }

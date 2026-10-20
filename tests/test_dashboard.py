@@ -1,0 +1,88 @@
+"""End-to-end checks of the dashboard API against a temporary database."""
+import json
+import threading
+import unittest
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
+
+import dashboard
+import llm
+import storage
+from tests.helpers import playlist, video
+
+
+class DashboardTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        storage.save_playlist(playlist(), [video("a", "Pasta recipe", category="Cooking"),
+                                           video("b", "Mystery", category=storage.FALLBACK_CATEGORY)])
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), dashboard.Handler)
+        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+
+    def call(self, path, body=None, headers=None):
+        hdrs = {"X-YTKB": "1", "Content-Type": "application/json"} if body is not None else {}
+        hdrs.update(headers or {})
+        req = urllib.request.Request(self.base + path, data=None if body is None else json.dumps(body).encode(),
+                                     headers=hdrs, method="GET" if body is None else "POST")
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, json.loads(e.read() or b"{}")
+
+    def test_state(self):
+        code, state = self.call("/api/state")
+        self.assertEqual(code, 200)
+        self.assertEqual(len(state["videos"]), 2)
+        self.assertIn("ai", state)
+        self.assertFalse(state["ai"]["ready"])
+
+    def test_csrf_and_host_checks(self):
+        self.assertEqual(self.call("/api/reclassify", {}, {"X-YTKB": "0"})[0], 403)
+        self.assertEqual(self.call("/api/state", headers={"Host": "evil.example"})[0], 403)
+
+    def test_ai_settings_hide_key(self):
+        code, r = self.call("/api/ai/settings", {"provider": "anthropic", "config": {"model": "claude-opus-5-5", "api_key": "sk-test"}})
+        self.assertEqual(code, 200)
+        self.assertNotIn("sk-test", json.dumps(r))
+        self.assertEqual(r["ai"]["providers"]["anthropic"]["key_source"], "saved")
+        code, r = self.call("/api/ai/settings", {"provider": "anthropic", "config": {"api_key": "__clear__"}})
+        self.assertIsNone(r["ai"]["providers"]["anthropic"]["key_source"])
+        self.call("/api/ai/settings", {"provider": "none"})
+
+    def test_ai_requires_provider(self):
+        self.call("/api/ai/settings", {"provider": "none"})
+        code, r = self.call("/api/ai/suggest", {"scope": "unsorted"})
+        self.assertEqual(code, 400)
+
+    def test_presets_and_proposal_apply(self):
+        self.call("/api/presets", {"name": "Cooking", "preset": True})
+        s = llm.load_settings()
+        s["proposal"] = {"categories": [{"name": "Cooking", "keywords": ["pasta"]}], "model": "test"}
+        llm.save_settings(s)
+        code, r = self.call("/api/ai/proposal/apply", {
+            "categories": [{"name": "Cooking", "keywords": ["pasta"], "description": "Food"},
+                           {"name": "Mystery Stories", "keywords": ["mystery"]}],
+            "remove": []})
+        self.assertEqual(code, 200)
+        _, state = self.call("/api/state")
+        self.assertIsNone(state["ai"]["proposal"])
+        self.assertIn("Mystery Stories", state["taxonomy"])
+        self.assertEqual(state["ai"]["category_notes"]["Cooking"], "Food")
+        self.assertEqual({v["video_id"]: v["category"] for v in state["videos"]}["b"], "Mystery Stories")
+
+    def test_accept_suggestion_via_api(self):
+        storage.save_suggestions([{"video_id": "b", "category": "Cooking", "confidence": 0.7}])
+        code, r = self.call("/api/ai/suggestions/accept", {"ids": ["b"]})
+        self.assertEqual((code, r["accepted"]), (200, 1))
+        _, state = self.call("/api/state")
+        b = {v["video_id"]: v for v in state["videos"]}["b"]
+        self.assertEqual((b["category"], b["category_source"]), ("Cooking", "ai"))
+        self.call("/api/videos/update", {"ids": ["b"], "reset_category": True})

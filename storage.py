@@ -5,6 +5,9 @@ Tracks playlists, videos, playlist membership, categories, and watch completion 
 Membership lives in `playlist_items` so one video can belong to several playlists, and
 videos that disappear from a source playlist are flagged (`removed = 1`) rather than deleted.
 Manual category assignments are protected by `videos.category_locked` and survive re-ingestion.
+`videos.category_source` records where a category came from: 'keywords' (automatic, unlocked),
+'manual' (set by hand) or 'ai' (an accepted AI suggestion). AI suggestions wait for review in
+`category_suggestions` and never change a video until the user accepts them.
 """
 import sqlite3
 import os
@@ -71,15 +74,29 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS category_suggestions (
+                video_id TEXT PRIMARY KEY,
+                category TEXT NOT NULL,
+                confidence REAL,
+                model TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(video_id) REFERENCES videos(video_id)
+            )
+        """)
+
         # Migrate databases created before these columns existed
         existing = _columns(cursor, "videos")
         for col, ddl in (
             ("category_locked", "INTEGER NOT NULL DEFAULT 0"),
             ("notes", "TEXT DEFAULT ''"),
             ("status_updated_at", "TIMESTAMP"),
+            ("category_source", "TEXT NOT NULL DEFAULT 'keywords'"),
         ):
             if col not in existing:
                 cursor.execute(f"ALTER TABLE videos ADD COLUMN {col} {ddl}")
+                if col == "category_source":
+                    cursor.execute("UPDATE videos SET category_source = 'manual' WHERE category_locked = 1")
 
         # Backfill membership from the legacy single playlist_id column
         cursor.execute("""
@@ -225,7 +242,10 @@ def get_library(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
             v = videos.get(row['video_id'])
             if v is not None:
                 v['sources'].append({'id': row['playlist_id'], 'position': row['position'], 'removed': row['removed']})
+        suggestions = {row['video_id']: {'category': row['category'], 'confidence': row['confidence']}
+                       for row in cursor.execute("SELECT video_id, category, confidence FROM category_suggestions")}
     for v in videos.values():
+        v['suggestion'] = suggestions.get(v['video_id'])
         v['in_source'] = any(not s['removed'] for s in v['sources'])
     return list(videos.values())
 
@@ -269,7 +289,7 @@ def update_videos(
         sets.append("status = ?, status_updated_at = CURRENT_TIMESTAMP")
         params.append(status)
     if category is not None:
-        sets.append("category = ?, category_locked = 1")
+        sets.append("category = ?, category_locked = 1, category_source = 'manual'")
         params.append(category)
     if notes is not None:
         sets.append("notes = ?")
@@ -283,8 +303,12 @@ def update_videos(
             f"UPDATE videos SET {', '.join(sets)} WHERE video_id IN (SELECT value FROM json_each(?))",
             (*params, json.dumps(ids))
         )
+        updated = cursor.rowcount
+        if category is not None:
+            # A hand-picked category answers any pending AI suggestion
+            cursor.execute("DELETE FROM category_suggestions WHERE video_id IN (SELECT value FROM json_each(?))", (json.dumps(ids),))
         conn.commit()
-        return cursor.rowcount
+        return updated
 
 def update_video_status(video_id: str, status: str, db_path: str = DB_PATH) -> None:
     """Updates watch status: unwatched, in_progress, completed."""
@@ -311,7 +335,8 @@ def reclassify_videos(
         if video_ids is not None:
             ids = json.dumps(list(video_ids))
             if unlock:
-                cursor.execute("UPDATE videos SET category_locked = 0 WHERE video_id IN (SELECT value FROM json_each(?))", (ids,))
+                cursor.execute("UPDATE videos SET category_locked = 0, category_source = 'keywords' "
+                               "WHERE video_id IN (SELECT value FROM json_each(?))", (ids,))
             rows = cursor.execute(
                 "SELECT video_id, title, channel, category FROM videos "
                 "WHERE category_locked = 0 AND video_id IN (SELECT value FROM json_each(?))", (ids,)
@@ -335,16 +360,105 @@ def rename_category(old: str, new: str, db_path: str = DB_PATH) -> int:
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("UPDATE videos SET category = ? WHERE category = ?", (new, old))
+        n = cursor.rowcount
+        cursor.execute("UPDATE category_suggestions SET category = ? WHERE category = ?", (new, old))
         conn.commit()
-        return cursor.rowcount
+        return n
 
 def release_category(name: str, db_path: str = DB_PATH) -> int:
     """Moves a deleted category's videos to the fallback category and unlocks them."""
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE videos SET category = ?, category_locked = 0 WHERE category = ?",
+            "UPDATE videos SET category = ?, category_locked = 0, category_source = 'keywords' WHERE category = ?",
             (FALLBACK_CATEGORY, name)
         )
+        n = cursor.rowcount
+        cursor.execute("DELETE FROM category_suggestions WHERE category = ?", (name,))
+        conn.commit()
+        return n
+
+# --- AI category suggestions -------------------------------------------------
+
+def videos_for_ai(scope: str = "unsorted", db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Videos the AI may suggest a category for. Hand-set and accepted categories are never offered.
+    'unsorted': unlocked videos in the fallback bucket that have no pending suggestion.
+    'unlocked': every unlocked video (re-checks keyword-sorted ones too).
+    """
+    if scope not in ("unsorted", "unlocked"):
+        raise ValueError(f"Invalid scope: {scope}")
+    init_db(db_path)
+    sql = "SELECT video_id, title, channel, category FROM videos WHERE category_locked = 0"
+    if scope == "unsorted":
+        sql += (" AND category IN (?, 'Uncategorized')"
+                " AND video_id NOT IN (SELECT video_id FROM category_suggestions)")
+    with get_connection(db_path) as conn:
+        rows = conn.execute(sql, (FALLBACK_CATEGORY,) if scope == "unsorted" else ()).fetchall()
+        return [dict(r) for r in rows]
+
+def save_suggestions(items: Iterable[Dict[str, Any]], model: str = "", db_path: str = DB_PATH) -> int:
+    """
+    Stores AI suggestions [{'video_id', 'category', 'confidence'}] for review.
+    Skips locked videos and suggestions that match the current category. Returns the number stored.
+    """
+    init_db(db_path)
+    stored = 0
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        for it in items:
+            row = cursor.execute("SELECT category, category_locked FROM videos WHERE video_id = ?",
+                                 (it['video_id'],)).fetchone()
+            if row is None or row['category_locked']:
+                continue
+            if it['category'] == row['category']:
+                cursor.execute("DELETE FROM category_suggestions WHERE video_id = ?", (it['video_id'],))
+                continue
+            cursor.execute("""
+                INSERT INTO category_suggestions (video_id, category, confidence, model, created_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(video_id) DO UPDATE SET
+                    category = excluded.category, confidence = excluded.confidence,
+                    model = excluded.model, created_at = CURRENT_TIMESTAMP
+            """, (it['video_id'], it['category'], it.get('confidence'), model))
+            stored += 1
+        conn.commit()
+    return stored
+
+def _suggestion_filter(video_ids: Optional[Iterable[str]], min_confidence: Optional[float]):
+    where, params = [], []
+    if video_ids is not None:
+        where.append("video_id IN (SELECT value FROM json_each(?))")
+        params.append(json.dumps(list(video_ids)))
+    if min_confidence is not None:
+        where.append("COALESCE(confidence, 0) >= ?")
+        params.append(float(min_confidence))
+    return (" WHERE " + " AND ".join(where)) if where else "", params
+
+def accept_suggestions(
+    video_ids: Optional[Iterable[str]] = None,
+    min_confidence: Optional[float] = None,
+    db_path: str = DB_PATH
+) -> int:
+    """Applies pending suggestions (all, by ID, and/or above a confidence) and locks them as 'ai'."""
+    init_db(db_path)
+    where, params = _suggestion_filter(video_ids, min_confidence)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        rows = cursor.execute(f"SELECT video_id, category FROM category_suggestions{where}", params).fetchall()
+        for r in rows:
+            cursor.execute("UPDATE videos SET category = ?, category_locked = 1, category_source = 'ai' "
+                           "WHERE video_id = ?", (r['category'], r['video_id']))
+            cursor.execute("DELETE FROM category_suggestions WHERE video_id = ?", (r['video_id'],))
+        conn.commit()
+        return len(rows)
+
+def dismiss_suggestions(video_ids: Optional[Iterable[str]] = None, db_path: str = DB_PATH) -> int:
+    """Discards pending suggestions without changing any video."""
+    init_db(db_path)
+    where, params = _suggestion_filter(video_ids, None)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(f"DELETE FROM category_suggestions{where}", params)
         conn.commit()
         return cursor.rowcount

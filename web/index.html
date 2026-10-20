@@ -210,6 +210,27 @@
   .cat-row .meta a { color: var(--ink-2); }
   .cat-row > div:last-child { text-align: right; }
 
+  .cat-row .desc { font-size: 12.5px; color: var(--ink-2); margin-top: 6px; line-height: 1.45; }
+  .keep { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-2); margin-top: 8px; cursor: pointer; }
+  .keep input { margin: 0; accent-color: var(--accent); }
+  .tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
+  .tag.new { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .prop-row { display: grid; grid-template-columns: 24px 240px minmax(0, 1fr); gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .prop-row input[type="checkbox"] { margin: 10px 0 0; accent-color: var(--ink); }
+  .prop-row.off > :not(:first-child) { opacity: .45; }
+
+  /* ---------- AI ---------- */
+  .row-c { min-width: 0; }
+  .sug { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin-top: 4px; }
+  .sug b { font-weight: 500; color: var(--accent); }
+  .sug .btn-text { height: 22px; font-size: 12.5px; }
+  .sug-box { border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--line)); border-radius: 8px; padding: 12px 14px; }
+  .ai-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; margin-top: 16px; }
+  .ai-grid .full { grid-column: 1 / -1; }
+  .ai-grid input:not([type="checkbox"]), .ai-grid select { width: 100%; }
+  .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
+  .check input { margin: 3px 0 0; accent-color: var(--ink); }
+
   /* ---------- drawer ---------- */
   .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 15, .28); }
   .drawer {
@@ -253,6 +274,9 @@
     .policy { grid-template-columns: 1fr; gap: 16px; }
     .cat-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
     .cat-row > div:last-child { text-align: left; }
+    .prop-row { grid-template-columns: 24px minmax(0, 1fr); }
+    .prop-row > :last-child { grid-column: 2; }
+    .ai-grid { grid-template-columns: minmax(0, 1fr); }
     .form-grid { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 640px) {
@@ -288,8 +312,15 @@
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
 const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched' };
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched' };
-const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['all', 'Everything'], ['gone', 'Not in a playlist']];
-const TABS = [['', 'Library'], ['plan', 'Plan'], ['sources', 'Playlists'], ['categories', 'Categories']];
+const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
+const TABS = [['', 'Library'], ['plan', 'Plan'], ['sources', 'Playlists'], ['categories', 'Categories'], ['ai', 'AI']];
+const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
+  ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
+const JOB_TEXT = {
+  sync: ['Reading playlist. Large playlists take a minute.', 'Playlist synced', 'Sync failed. See the log.'],
+  discover: ['Asking the AI to propose categories…', 'Categories proposed. Review them below.', 'AI run failed. See the log.'],
+  suggest: ['Asking the AI to sort videos…', 'Suggestions ready to review', 'AI run failed. See the log.'],
+};
 
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -303,7 +334,8 @@ const S = {
   sel: new Set(), limit: 150, visible: [],
   plan: { mins: +store.get('ytkb.plan.mins') || 60, days: +store.get('ytkb.plan.days') || 5 },
   session: { cat: '', mins: 45, order: 'order' },
-  ingest: { url: '', access: store.get('ytkb.access') || 'public', cookies: store.get('ytkb.cookies') || '' },
+  ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
+  ai: { provider: null, key: '', models: {} },
   drawer: null, polling: false,
 };
 
@@ -423,7 +455,8 @@ function renderView() {
   const r = route(), v = $('#view');
   if (r === 'plan') v.innerHTML = videos().length ? viewPlan() : emptyState();
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
-  else if (r === 'categories') v.innerHTML = viewCategories();
+  else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
+  else if (r === 'ai') v.innerHTML = viewAI();
   else { v.innerHTML = videos().length ? viewLibrary() : emptyState(); renderList(); }
 }
 const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a YouTube playlist to get started. YT KB only reads it and never changes it.<br><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
@@ -435,6 +468,7 @@ function statusFilter(v, status, src) {
     case 'in_progress': return v.status === 'in_progress';
     case 'completed': return v.status === 'completed';
     case 'gone': return isGone(v, src);
+    case 'suggested': return !!v.suggestion;
     default: return true;
   }
 }
@@ -462,7 +496,7 @@ function viewLibrary() {
     <aside class="rail">
       <div class="rail-group views">
         <h4>Show</h4>
-        ${VIEWS.filter(([k]) => k !== 'gone' || viewCounts.gone || status === 'gone').map(([k, l]) =>
+        ${VIEWS.filter(([k]) => !['gone', 'suggested'].includes(k) || viewCounts[k] || status === k).map(([k, l]) =>
           `<a href="#/" data-act="v-status" data-v="${k}" class="${status === k ? 'on' : ''}"><span class="lbl">${l}</span><span class="c">${viewCounts[k]}</span></a>`).join('')}
       </div>
       <div class="rail-group collapsible">
@@ -507,7 +541,7 @@ function renderList() {
   S.visible = list;
   const st = stats(list);
   box.innerHTML = `
-    ${S.sel.size ? selBar() : `<div class="list-sum"><span>${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
+    ${S.sel.size ? selBar() : status === 'suggested' ? sugSum(list) : `<div class="list-sum"><span>${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
       <span class="play-links">${playLinks(list)}</span></div>`}
     ${list.length ? `<ul class="rows ${S.sel.size ? 'selecting' : ''}">${list.slice(0, S.limit).map(row).join('')}</ul>`
       : `<div class="empty">Nothing here${q ? ' matches your search' : ''}.</div>`}
@@ -521,9 +555,25 @@ function row(v) {
   return `<li class="row ${v.status === 'completed' ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
     <input type="checkbox" class="pick" data-act="pick" data-id="${esc(v.video_id)}" ${S.sel.has(v.video_id) ? 'checked' : ''} aria-label="Select">
     <button class="st" data-act="cycle" data-id="${esc(v.video_id)}" title="${STATUS_LABEL[v.status]}. Click to change." aria-label="Status: ${STATUS_LABEL[v.status]}">${statusIcon(v.status)}</button>
-    <button class="row-main" data-act="open" data-id="${esc(v.video_id)}"><span class="row-title">${esc(v.title)}</span><span class="row-meta">${meta}</span></button>
+    <div class="row-c"><button class="row-main" data-act="open" data-id="${esc(v.video_id)}"><span class="row-title">${esc(v.title)}</span><span class="row-meta">${meta}</span></button>${sugLine(v)}</div>
     <span class="row-time">${d ? fmt(d / S.speed) : '—'}${d && S.speed !== 1 ? `<small>${fmt(d)} at 1×</small>` : ''}</span>
   </li>`;
+}
+const pct = c => c == null ? '' : ` · ${Math.round(c * 100)}%`;
+function sugLine(v) {
+  const g = v.suggestion;
+  if (!g) return '';
+  return `<div class="sug">AI suggests <b>${esc(g.category)}</b><span class="faint">${pct(g.confidence)}</span>
+    <button class="btn-text" data-act="sug-accept" data-id="${esc(v.video_id)}">Accept</button>
+    <button class="btn-text" data-act="sug-dismiss" data-id="${esc(v.video_id)}">Dismiss</button></div>`;
+}
+function sugSum(list) {
+  const sure = list.filter(v => (v.suggestion.confidence ?? 0) >= 0.8).length;
+  return `<div class="list-sum"><span>${plural(list.length, 'suggestion')} to review. Nothing changes until you accept.</span>
+    <span class="play-links">
+      ${sure && sure < list.length ? `<button class="btn btn-sm" data-act="sug-accept-sure">Accept ${sure} at 80%+</button>` : ''}
+      <button class="btn btn-dark btn-sm" data-act="sug-accept-list">Accept ${list.length === 1 ? '' : 'all '}${list.length}</button>
+      <button class="btn btn-sm" data-act="sug-dismiss-list">Dismiss ${list.length === 1 ? '' : 'all'}</button></span></div>`;
 }
 function selBar() {
   const sel = videos().filter(v => S.sel.has(v.video_id));
@@ -534,6 +584,7 @@ function selBar() {
     <button class="btn-text" data-act="bulk" data-status="unwatched">Unwatched</button>
     <select data-change="bulk-cat" aria-label="Move to category"><option value="">Move to…</option>
       ${categoryNames().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}<option value="__new">New category…</option></select>
+    ${sel.some(v => v.suggestion) ? `<button class="btn-text" data-act="sug-accept-sel">Accept AI suggestions</button>` : ''}
     ${queueUrls(sel).map((u, i, a) => `<a class="btn-text" href="${esc(u)}" target="_blank" rel="noopener">Play${a.length > 1 ? ` ${i + 1}/${a.length}` : ''}</a>`).join('')}
     <span class="grow"></span>
     ${S.sel.size < S.visible.length ? `<button class="btn-text" data-act="sel-all">Select all ${S.visible.length}</button>` : ''}
@@ -609,7 +660,7 @@ function buildSession() {
 /* ---------------- playlists ---------------- */
 function viewSources() {
   const g = S.ingest, job = S.data.job, pls = S.data.playlists;
-  const chromium = /^(chrome|edge|brave)$/.test(g.access);
+  const winChromium = S.data.platform === 'win32' && /^(chrome|chromium|edge|brave)$/.test(g.access);
   return `
   <section>
     <div class="eyebrow">Playlists</div>
@@ -628,16 +679,17 @@ function viewSources() {
         <input id="i-url" type="text" data-input="i-url" value="${esc(g.url)}" placeholder="youtube.com/playlist?list=…   or WL for Watch Later" style="width:100%"></div>
       <div><label class="field-label" for="i-access">Sign-in</label>
         <select id="i-access" data-change="i-access" style="width:100%">
-          ${[['public', 'None (public or unlisted)'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['edge', 'Use my Edge login'], ['brave', 'Use my Brave login'], ['cookies', 'cookies.txt file']]
+          ${[...BROWSERS, ['public', 'None (public or unlisted)'], ['cookies', 'cookies.txt file']]
             .map(([k, l]) => `<option value="${k}" ${g.access === k ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
-      <div style="align-self:end"><button class="btn btn-dark" id="run" data-act="ingest" ${job.running ? 'disabled' : ''}>${job.running ? 'Syncing…' : 'Sync'}</button></div>
+      <div style="align-self:end"><button class="btn btn-dark" id="run" data-act="ingest" ${job.running ? 'disabled' : ''}>${job.running ? 'Working…' : 'Sync'}</button></div>
     </div>
     ${g.access === 'cookies' ? `<div style="margin-top:12px"><label class="field-label" for="i-cookies">Path to cookies.txt</label>
       <input id="i-cookies" type="text" data-input="i-cookies" value="${esc(g.cookies)}" placeholder="C:\\Users\\you\\cookies.txt" style="width:100%"></div>` : ''}
-    <p class="hint">${chromium
+    <p class="hint">${winChromium
       ? '<span class="warn-text">On Windows, Chrome-based browsers usually block reading their login.</span> If the sync fails, use Firefox or a cookies.txt export.'
-      : 'Private playlists and Watch Later need a sign-in. Syncing again keeps your statuses, notes and categories.'}</p>
+      : 'Private playlists and Watch Later need a sign-in. "Detect" uses the first browser that is signed in to YouTube. Syncing again keeps your statuses, notes and categories.'}
+      ${S.data.ai.ready && S.data.ai.auto_after_sync ? '<br>After each sync, the AI suggests categories for new unsorted videos.' : ''}</p>
     <div id="job"></div>
   </section>
 
@@ -661,14 +713,19 @@ function fmtDate(s) {
   const d = new Date(s.replace(' ', 'T') + 'Z');
   return isNaN(d) ? s : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 }
+// Job times are local ISO strings from the server, unlike SQLite's UTC timestamps
+const fmtLocal = s => { const d = new Date(s || ''); return isNaN(d) ? '' : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
 function updateJob() {
   const box = $('#job'), job = S.data.job;
   if (!box) return;
   const btn = $('#run');
-  if (btn) { btn.disabled = !!job.running; btn.textContent = job.running ? 'Syncing…' : 'Sync'; }
-  if (!job.log && !job.running) { box.innerHTML = ''; return; }
-  const head = job.running ? '<span class="status-line"><span class="spin"></span>Reading playlist. Large playlists take a minute.</span>'
-    : `<span class="status-line">${job.ok ? 'Last sync finished' : '<span class="warn-text">Last sync failed</span>'} · ${esc(fmtDate((job.finished_at || '').replace('T', ' ')) || '')}</span>`;
+  if (btn) { btn.disabled = !!job.running; btn.textContent = job.running ? 'Working…' : 'Sync'; }
+  for (const b of $$('[data-job-btn]')) b.disabled = !!job.running;
+  const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind) : job.kind === 'sync' || !job.kind;
+  if (!mine || (!job.log && !job.running)) { box.innerHTML = ''; return; }
+  const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
+  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}</span>`
+    : `<span class="status-line">${job.ok ? 'Finished' : '<span class="warn-text">Failed</span>'} · ${esc(fmtLocal(job.finished_at))}</span>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div><pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
   log.scrollTop = log.scrollHeight;
@@ -686,11 +743,20 @@ async function pollJob() {
       await sleep(1000);
     }
   } catch (e) { toast(e.message, true); } finally { S.polling = false; }
-  if (job) { toast(job.ok ? 'Playlist synced' : 'Sync failed. See the log.', !job.ok); await load(); }
+  if (job) { const t = JOB_TEXT[job.kind] || JOB_TEXT.sync; toast(job.ok ? t[1] : t[2], !job.ok); await load(); }
+}
+async function startAi(path, body = {}) {
+  try {
+    await api(path, body);
+    S.data.job = { running: true, log: '', kind: path.endsWith('discover') ? 'discover' : 'suggest' };
+    if (route() !== 'categories') location.hash = '#/categories';
+    else updateJob();
+    pollJob();
+  } catch (e) { toast(e.message, true); }
 }
 async function runIngest(url) {
   const g = S.ingest;
-  const browser = /^(firefox|chrome|edge|brave)$/.test(g.access) ? g.access : null;
+  const browser = BROWSERS.some(([k]) => k === g.access) ? g.access : null;
   try {
     await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies });
     S.data.job = { running: true, log: '' };
@@ -703,25 +769,40 @@ async function runIngest(url) {
 function viewCategories() {
   const counts = {};
   for (const v of videos()) counts[v.category] = (counts[v.category] || 0) + 1;
-  const tax = S.data.taxonomy;
+  const tax = S.data.taxonomy, ai = S.data.ai, notes = ai.category_notes || {}, presets = new Set(ai.presets || []);
   const manual = Object.keys(counts).filter(c => !(c in tax) && c !== FALLBACK() && c !== 'Uncategorized');
   const fb = (counts[FALLBACK()] || 0) + (counts.Uncategorized || 0);
+  const pending = videos().filter(v => v.suggestion).length;
+  // Mirrors storage.videos_for_ai('unsorted'): unlocked, unsorted, no suggestion waiting
+  const toSort = videos().filter(v => !v.category_locked && !v.suggestion && (v.category === FALLBACK() || v.category === 'Uncategorized')).length;
+  const running = !!S.data.job.running;
   return `
   <section>
     <div class="eyebrow">Categories</div>
     <h1 class="display">${plural(Object.keys(tax).length + manual.length, 'category')}<em>${fb ? `${fb} unsorted` : 'everything sorted'}</em></h1>
-    <p class="lede" style="max-width:640px">Videos are sorted by matching these keywords against their title and channel. A video you move by hand stays where you put it.</p>
+    <p class="lede" style="max-width:680px">Keywords sort videos instantly and offline. The AI can propose a better set of categories from your library,
+      keeping the ones you tick as <b>Keep</b>, and suggest a category for each unsorted video. You review everything before it changes.
+      A video you move by hand stays where you put it.</p>
     <div class="actions">
       <button class="btn btn-dark btn-sm" data-act="reclassify">Save and re-sort</button>
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
-      ${fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
+      ${ai.ready ? `<button class="btn btn-sm" data-act="ai-discover" data-job-btn ${running ? 'disabled' : ''}>Propose categories with AI</button>
+        <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${running || !toSort ? 'disabled' : ''} title="${toSort ? '' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort || ''} unsorted with AI</button>`
+        : `<a class="btn-text" href="#/ai">Set up AI sorting →</a>`}
+      ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>`
+        : fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
     </div>
+    <div id="job"></div>
   </section>
+  ${ai.proposal ? viewProposal(ai.proposal, tax, counts) : ''}
   <section class="section">
+    ${ai.proposal ? '<h2 class="h">Current categories</h2>' : ''}
     ${Object.keys(tax).map(n => `<div class="cat-row">
       <div><input type="text" value="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
-        <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div></div>
-      <textarea class="kw" data-name="${esc(n)}" rows="2" aria-label="Keywords for ${esc(n)}" placeholder="keywords, separated, by commas">${esc(tax[n].join(', '))}</textarea>
+        <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div>
+        <label class="keep" title="The AI keeps this category exactly as it is"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Keep</label></div>
+      <div><textarea class="kw" data-name="${esc(n)}" rows="2" aria-label="Keywords for ${esc(n)}" placeholder="keywords, separated, by commas">${esc(tax[n].join(', '))}</textarea>
+        ${notes[n] ? `<div class="desc">${esc(notes[n])}</div>` : ''}</div>
       <div><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
     ${manual.map(n => `<div class="cat-row">
@@ -731,6 +812,110 @@ function viewCategories() {
     </div>`).join('')}
   </section>`;
 }
+function viewProposal(p, tax, counts) {
+  const proposed = new Set(p.categories.map(c => c.name));
+  const dropped = Object.keys(tax).filter(n => !proposed.has(n));
+  return `
+  <section class="section card">
+    <h2 class="h">Proposed categories</h2>
+    <p class="note">From ${esc(p.model || 'the AI')}. Untick any you don't want, and edit names or keywords. Applying saves these categories
+      and re-sorts by keywords. Then use “Sort unsorted with AI” for what keywords miss.</p>
+    <div id="proposal" style="margin-top:8px">
+      ${p.categories.map((c, i) => `<div class="prop-row" data-i="${i}">
+        <input type="checkbox" class="p-on" checked ${c.preset ? 'disabled title="Kept: you ticked Keep"' : ''} aria-label="Use ${esc(c.name)}">
+        <div><input type="text" class="p-name" value="${esc(c.name)}" style="width:100%;font-weight:500" ${c.preset ? 'readonly' : ''} aria-label="Name">
+          <div class="meta" style="font-size:12.5px;color:var(--ink-3);margin-top:6px">${c.preset ? '<span class="tag">kept</span>' : c.existing ? `<span class="tag">current</span> ${plural(counts[c.name] || 0, 'video')}` : '<span class="tag new">new</span>'}</div></div>
+        <div><textarea class="p-kw" rows="2" aria-label="Keywords">${esc(c.keywords.join(', '))}</textarea>
+          ${c.description ? `<div class="desc p-desc">${esc(c.description)}</div>` : ''}</div>
+      </div>`).join('')}
+      ${dropped.length ? `<div style="margin-top:20px"><span class="field-label">Current categories the AI left out</span>
+        ${dropped.map(n => `<label class="check" style="margin-top:8px"><input type="checkbox" class="p-drop" value="${esc(n)}">
+          <span>Remove <b style="font-weight:500">${esc(n)}</b> <span class="faint">(${plural(counts[n] || 0, 'video')} go back to automatic sorting)</span></span></label>`).join('')}
+        <p class="hint">Unticked ones stay as they are.</p></div>` : ''}
+    </div>
+    <div class="actions">
+      <button class="btn btn-dark btn-sm" data-act="prop-apply">Apply categories</button>
+      <button class="btn btn-sm" data-act="prop-dismiss">Discard proposal</button>
+    </div>
+  </section>`;
+}
+function collectProposal() {
+  const p = S.data.ai.proposal, categories = [];
+  for (const row of $$('#proposal .prop-row')) {
+    if (!$('.p-on', row).checked) continue;
+    const c = p.categories[+row.dataset.i];
+    categories.push({ name: $('.p-name', row).value.trim() || c.name, description: c.description,
+      keywords: $('.p-kw', row).value.split(',').map(x => x.trim()).filter(Boolean) });
+  }
+  return { categories, remove: $$('#proposal .p-drop').filter(x => x.checked).map(x => x.value) };
+}
+
+/* ---------------- AI settings ---------------- */
+function viewAI() {
+  const ai = S.data.ai, sel = S.ai.provider || ai.provider, cfg = ai.providers[sel];
+  const models = [...new Set([...(cfg?.models || []), ...(S.ai.models[sel] || [])])];
+  const keyNote = !cfg ? '' : cfg.key_source === 'saved' ? 'A key is saved. Leave blank to keep it.'
+    : cfg.key_source === 'env' ? `Using ${esc(cfg.env)} from your environment.` : cfg.needs_key ? 'Required.' : 'Optional for local servers.';
+  return `
+  <section>
+    <div class="eyebrow">AI</div>
+    <h1 class="display">${ai.ready ? esc(ai.providers[ai.provider].label) : 'AI sorting is off'}<em>${ai.ready ? esc(ai.providers[ai.provider].model) : ''}</em></h1>
+    <p class="lede" style="max-width:680px">An AI model can propose categories from your library and sort what keywords miss. It only ever <i>suggests</i>:
+      nothing changes until you accept. Only video titles and channel names are sent, never your cookies or watch history.
+      Local models keep everything on this computer.</p>
+  </section>
+  <section class="section card">
+    <h2 class="h">Model</h2>
+    <div class="ai-grid">
+      <div class="full"><label class="field-label" for="ai-provider">Provider</label>
+        <select id="ai-provider" data-change="ai-provider">
+          <option value="none" ${sel === 'none' ? 'selected' : ''}>Off (keywords only)</option>
+          ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${sel === k ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}
+        </select></div>
+      ${cfg ? `
+      <div><label class="field-label" for="ai-model">Model</label>
+        <input id="ai-model" type="text" list="ai-models" value="${esc(cfg.model)}" placeholder="${cfg.local ? 'e.g. llama3.1:8b' : 'model name'}">
+        <datalist id="ai-models">${models.map(m => `<option value="${esc(m)}">`).join('')}</datalist>
+        ${cfg.kind === 'openai' ? `<button class="btn-text" style="padding:0;margin-top:4px" data-act="ai-models">List models from server</button>` : ''}</div>
+      ${cfg.kind === 'openai' ? `<div><label class="field-label" for="ai-base">Server URL</label>
+        <input id="ai-base" type="text" value="${esc(cfg.base_url)}" placeholder="http://localhost:11434/v1"></div>` : '<div></div>'}
+      <div class="full"><label class="field-label" for="ai-key">API key</label>
+        <input id="ai-key" type="password" autocomplete="off" value="${esc(S.ai.key)}" data-input="ai-key" placeholder="${cfg.key_source ? '••••••••' : ''}">
+        <div class="hint" style="margin-top:6px">${keyNote} Keys are stored only in <code>settings.json</code> on this computer.
+          ${cfg.key_source === 'saved' ? '<button class="btn-text" style="padding:0;height:auto" data-act="ai-clear-key">Remove saved key</button>' : ''}</div></div>
+      ${cfg.local ? `<p class="hint full" style="margin:0">Install ${sel === 'ollama' ? '<a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>, then run <code>ollama pull llama3.1:8b</code>' : 'LM Studio, load a model and start its local server'}.
+        Smaller models work but make more mistakes. Review their suggestions carefully.</p>` : ''}` : ''}
+      <label class="check full"><input type="checkbox" id="ai-auto" ${ai.auto_after_sync ? 'checked' : ''}>
+        <span>After each playlist sync, ask the AI to suggest categories for new unsorted videos</span></label>
+    </div>
+    <div class="actions">
+      <button class="btn btn-dark btn-sm" data-act="ai-save">Save</button>
+      ${cfg ? `<button class="btn btn-sm" data-act="ai-test">Save and test</button>` : ''}
+      <span id="ai-status" class="status-line"></span>
+    </div>
+  </section>
+  <section class="section">
+    <h2 class="h">How it works</h2>
+    <div class="policy">
+      <div><b>1. Keep what matters</b><p>On the Categories page, tick <strong>Keep</strong> on categories you always want. The AI never renames or drops them.</p></div>
+      <div><b>2. Propose categories</b><p>The AI reads your titles and proposes a set that fits your library. You edit and apply it.</p></div>
+      <div><b>3. Review suggestions</b><p>It suggests a category for each unsorted video, with a confidence score. Accept them one by one or in bulk.</p></div>
+    </div>
+  </section>`;
+}
+function aiForm() {
+  const provider = $('#ai-provider').value, config = {};
+  if ($('#ai-model')) config.model = $('#ai-model').value;
+  if ($('#ai-base')) config.base_url = $('#ai-base').value;
+  if ($('#ai-key') && $('#ai-key').value.trim()) config.api_key = $('#ai-key').value.trim();
+  return { provider, auto_after_sync: $('#ai-auto').checked, config };
+}
+async function saveAi(body) {
+  const r = await api('/api/ai/settings', body || aiForm());
+  S.data.ai = r.ai; S.ai.key = ''; S.ai.provider = null;
+  return r.ai;
+}
+
 function collectTax() {
   const t = {};
   for (const ta of $$('.kw')) t[ta.dataset.name] = ta.value.split(',').map(s => s.trim()).filter(Boolean);
@@ -766,6 +951,7 @@ function renderDrawer() {
       <div><label class="field-label" for="d-cat">Category</label>
         <select id="d-cat" data-change="d-cat" data-id="${esc(v.video_id)}" style="width:100%">${cats.map(c => `<option value="${esc(c)}" ${c === v.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}<option value="__new">New category…</option></select>
         <div class="kv-line" id="d-cat-note">${catNote(v)}</div></div>
+      <div id="d-sug">${drawerSug(v)}</div>
       <div><label class="field-label" for="d-notes">Notes</label>
         <textarea id="d-notes" rows="6" placeholder="Takeaways, timestamps, follow-ups…">${esc(v.notes || '')}</textarea>
         <div class="kv-line">Notes save when you click away.</div></div>
@@ -774,14 +960,16 @@ function renderDrawer() {
   </aside>`;
 }
 const catNote = v => v.category_locked
-  ? `Set by hand. <button class="btn-text" style="height:auto;padding:0;font-size:12.5px" data-act="reset-cat" data-id="${esc(v.video_id)}">Sort automatically instead</button>`
+  ? `${v.category_source === 'ai' ? 'Accepted from an AI suggestion.' : 'Set by hand.'} <button class="btn-text" style="height:auto;padding:0;font-size:12.5px" data-act="reset-cat" data-id="${esc(v.video_id)}">Sort automatically instead</button>`
   : 'Sorted automatically by keywords.';
+const drawerSug = v => v.suggestion ? `<div class="sug-box"><span class="field-label">AI suggestion</span>${sugLine(v).replace('AI suggests ', '')}</div>` : '';
 function syncDrawer() {
   const v = S.drawer && byId(S.drawer);
   if (!v || !$('#d-status')) return;
   for (const b of $$('#d-status button')) b.classList.toggle('on', b.dataset.status === v.status);
   $('#d-cat').value = v.category;
   $('#d-cat-note').innerHTML = catNote(v);
+  $('#d-sug').innerHTML = drawerSug(v);
 }
 function saveNotes() {
   const ta = $('#d-notes'), v = S.drawer && byId(S.drawer);
@@ -797,7 +985,7 @@ async function update(ids, patch) {
     const v = byId(id);
     if (!v) continue;
     Object.assign(v, patch);
-    if (patch.category !== undefined) v.category_locked = 1;
+    if (patch.category !== undefined) { v.category_locked = 1; v.category_source = 'manual'; v.suggestion = null; }
   }
   refresh(); syncDrawer();
   try { await api('/api/videos/update', { ids, ...patch }); } catch (e) { toast(e.message, true); await load(); }
@@ -854,6 +1042,54 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'resync': S.ingest.url = el.dataset.url; runIngest(el.dataset.url); refresh(); break;
+    case 'sug-accept': case 'sug-dismiss': case 'sug-accept-list': case 'sug-dismiss-list': case 'sug-accept-sure': case 'sug-accept-sel': {
+      const accept = act.startsWith('sug-accept');
+      const ids = act === 'sug-accept-sel' ? [...S.sel] : act.endsWith('-list') || act === 'sug-accept-sure' ? S.visible.map(v => v.video_id) : [id];
+      const body = { ids, ...(act === 'sug-accept-sure' ? { min_confidence: 0.8 } : {}) };
+      if (ids.length > 1 && !accept && !confirm(`Dismiss ${plural(ids.length, 'suggestion')}? No videos change.`)) break;
+      try {
+        const r = await api(`/api/ai/suggestions/${accept ? 'accept' : 'dismiss'}`, body);
+        if (act === 'sug-accept-sel') S.sel.clear();
+        await load(); syncDrawer();
+        toast(accept ? `${plural(r.accepted, 'video')} moved` : `${plural(r.dismissed, 'suggestion')} dismissed`);
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'ai-discover': try { await saveTax(collectTax()); } catch (err) { toast(err.message, true); break; } startAi('/api/ai/discover'); break;
+    case 'ai-suggest': try { await saveTax(collectTax()); } catch (err) { toast(err.message, true); break; } startAi('/api/ai/suggest', { scope: 'unsorted' }); break;
+    case 'prop-apply': {
+      const body = collectProposal();
+      if (!body.categories.length) { toast('Tick at least one category', true); break; }
+      if (body.remove.length && !confirm(`Remove ${plural(body.remove.length, 'category')}? Their videos go back to automatic sorting. No videos are deleted.`)) break;
+      try { const r = await api('/api/ai/proposal/apply', body); await load(); toast(`Saved ${plural(r.categories, 'category')}. ${plural(r.changed, 'video')} re-sorted.`); } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'prop-dismiss':
+      if (!confirm('Discard the proposed categories?')) break;
+      try { await api('/api/ai/proposal/dismiss', {}); await load(); } catch (err) { toast(err.message, true); }
+      break;
+    case 'ai-save': try { await saveAi(); refresh(); renderBar(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
+    case 'ai-clear-key': try { await saveAi({ provider: $('#ai-provider').value, config: { api_key: '__clear__' } }); refresh(); toast('Key removed'); } catch (err) { toast(err.message, true); } break;
+    case 'ai-test': {
+      const st = () => $('#ai-status');
+      try {
+        await saveAi(); refresh();
+        st().innerHTML = '<span class="spin"></span>Testing…';
+        await api('/api/ai/test', {});
+        st().innerHTML = '✓ The model answered';
+      } catch (err) { if (st()) st().innerHTML = `<span class="warn-text">${esc(err.message)}</span>`; }
+      break;
+    }
+    case 'ai-models': {
+      try {
+        const body = aiForm();
+        await saveAi({ ...body, provider: body.provider });
+        const r = await api('/api/ai/models', { provider: body.provider });
+        S.ai.models[body.provider] = r.models; refresh();
+        toast(r.models.length ? `${plural(r.models.length, 'model')} found. Pick one in the Model box.` : 'The server lists no models', !r.models.length);
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'add-cat': {
       const n = askName();
       if (!n) break;
@@ -908,6 +1144,11 @@ document.addEventListener('change', async e => {
     case 's-cat': S.session.cat = el.value; refresh(); break;
     case 's-order': S.session.order = el.value; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
+    case 'ai-provider': S.ai.provider = el.value; S.ai.key = ''; refresh(); break;
+    case 'preset':
+      try { const r = await api('/api/presets', { name: el.dataset.name, preset: el.checked }); S.data.ai.presets = r.presets; }
+      catch (err) { el.checked = !el.checked; toast(err.message, true); }
+      break;
     case 'rename': {
       const old = el.dataset.old, n = el.value.trim();
       if (!n || n === old) { el.value = old; break; }
@@ -923,6 +1164,7 @@ document.addEventListener('input', e => {
   if (el.id === 'q') { S.view.q = el.value; clearTimeout(qT); qT = setTimeout(() => { S.limit = 150; renderList(); }, 120); }
   else if (el.dataset.input === 'i-url') S.ingest.url = el.value;
   else if (el.dataset.input === 'i-cookies') { S.ingest.cookies = el.value; store.set('ytkb.cookies', el.value); }
+  else if (el.dataset.input === 'ai-key') S.ai.key = el.value;
 });
 document.addEventListener('focusout', e => { if (e.target.id === 'd-notes') saveNotes(); });
 document.addEventListener('keydown', e => {

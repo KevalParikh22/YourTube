@@ -133,6 +133,11 @@ The schema migration runs automatically on startup (`storage.init_db`) and was c
 
 ## 6. Recommended next steps (prioritized)
 
+> **Status (2026-10-20):**
+> - LLM classification with review: **done**. Providers: Claude, Gemini, OpenAI-compatible/open-weight, Ollama and LM Studio. The AI proposes categories that keep your presets, then suggests a category per video for you to accept.
+> - Automated tests: **done** (`tests/`, 44 tests).
+> - Live test against a private playlist: **done** for Watch Later (10/10 videos with durations, through the Chrome sign-in, auto-detected). A test on a 250+ video playlist is still open.
+
 | Priority | Item | Why |
 | :--- | :--- | :--- |
 | **P1** | **LLM classification with review**: send batches of about 50 titles and channels to a small, fast model (e.g. Gemini Flash as the PRD proposes, or Claude Haiku). Ask it to assign one taxonomy category plus a confidence, or to *propose* clusters for the "General / Other" bucket. Results land as suggestions the user accepts in the dashboard. | Keyword matching misses anything without obvious keywords. That is the ≥ 88 % accuracy goal. |

@@ -16,6 +16,13 @@ A non-destructive ingestion, classification, and watch-time optimization engine 
 
 ## 🚀 Quick Start
 
+### 0. Install
+```bash
+python3 -m venv .venv            # on Debian/Ubuntu without python3-venv: python3 -m venv --without-pip .venv
+python3 -m pip --python .venv/bin/python install -r requirements.txt
+```
+Then run everything with `.venv/bin/python` (e.g. `.venv/bin/python dashboard.py`).
+
 ### 1. Run Interactively
 Simply run:
 ```bash
@@ -30,11 +37,12 @@ It will guide you to enter your playlist URL and select whether to read private 
 python main.py "https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID"
 ```
 
-#### If your playlist is **Private** (Reading session from Chrome):
+#### If your playlist is **Private** or Watch Later (uses your browser's YouTube sign-in):
 ```bash
-python main.py "https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID" --browser chrome
+python main.py "https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID" --browser auto
+python main.py WL --browser auto --ai      # Watch Later, then ask the AI for category suggestions
 ```
-*(You can use `edge`, `brave`, or `firefox`)*
+*`auto` uses the first browser signed in to YouTube. You can also name one: `firefox`, `chrome`, `brave`, `edge`. On Linux, Chrome needs the `secretstorage` package (in requirements.txt).*
 
 #### Watch Later or private playlists on Windows
 Chrome/Edge cookies are protected by app-bound encryption on Windows and often can't be read. Prefer Firefox, or export a `cookies.txt`:
@@ -52,9 +60,22 @@ python dashboard.py            # opens http://127.0.0.1:8765/
 - **Library**: search and filter, change status or category inline or in bulk, play queues, CSV/JSON export.
 - **Planner**: finish dates for a daily time budget, and a session builder.
 - **Categories**: edit keywords and re-run auto-classification. Manual choices are kept.
-- **Ingest**: run or re-sync playlists from the browser.
+- **Playlists**: run or re-sync playlists from the browser ("Detect my browser login" for private ones).
+- **AI**: choose Claude, Gemini, an open-weight model (any OpenAI-compatible API such as OpenRouter or Groq) or a local model (Ollama, LM Studio).
 
 Re-syncing keeps your watch statuses, notes and manually set categories. Videos removed from the source are flagged, never deleted.
+
+### 4. AI categories (optional)
+1. On the **AI** page, pick a provider and model, add an API key if it needs one, then click **Save and test**.
+2. On **Categories**, tick **Keep** on the categories you always want, then click **Propose categories with AI**. Review the proposal, edit it, and apply.
+3. Click **Sort unsorted with AI**, then review the suggestions under **Library → AI suggestions**. Accept them one by one, all of them, or only those at 80%+ confidence.
+
+The AI only suggests. Nothing changes until you accept. Only titles and channel names are sent. API keys stay in `settings.json` on your computer (git-ignored).
+
+### Tests
+```bash
+.venv/bin/python -m unittest
+```
 
 See [`docs/Phase-0-Research-and-Improvements.md`](docs/Phase-0-Research-and-Improvements.md) for the research review and the roadmap.
 

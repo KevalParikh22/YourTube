@@ -7,6 +7,7 @@ Standard library only; binds to 127.0.0.1 so nothing is exposed to the network.
 """
 import os
 import io
+import sys
 import json
 import argparse
 import threading
@@ -17,18 +18,20 @@ from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
 import storage
+import llm
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
 from exporter import videos_to_csv
 
 WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
-ALLOWED_BROWSERS = {"chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
+ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 
-class IngestJob:
-    """Runs one pipeline at a time in a background thread, capturing its console output."""
+class Job:
+    """Runs one background task at a time (a sync or an AI run), capturing its console output."""
     def __init__(self):
         self.lock = threading.Lock()
-        self.state = {"running": False, "ok": None, "log": "", "started_at": None, "finished_at": None, "url": None}
+        self.state = {"running": False, "ok": None, "log": "", "kind": None, "label": None,
+                      "started_at": None, "finished_at": None}
         self._buf = io.StringIO()
 
     def snapshot(self):
@@ -37,28 +40,33 @@ class IngestJob:
             snap["log"] = self._buf.getvalue()
         return snap
 
-    def start(self, url, browser=None, cookies_file=None):
+    def start(self, kind, label, fn):
         with self.lock:
             if self.state["running"]:
                 return False
             self._buf = io.StringIO()
-            self.state = {"running": True, "ok": None, "log": "", "url": url,
+            self.state = {"running": True, "ok": None, "log": "", "kind": kind, "label": label,
                           "started_at": datetime.now().isoformat(timespec="seconds"), "finished_at": None}
-        threading.Thread(target=self._run, args=(url, browser, cookies_file), daemon=True).start()
+        threading.Thread(target=self._run, args=(fn,), daemon=True).start()
         return True
 
-    def _run(self, url, browser, cookies_file):
-        from main import run_pipeline  # deferred so the dashboard starts even if yt-dlp is missing
+    def _run(self, fn):
         ok = False
         try:
             with contextlib.redirect_stdout(self._buf):
-                ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False)
+                ok = fn()
         except Exception as e:  # surface anything unexpected in the job log
             self._buf.write(f"\n❌ Unexpected error: {e}\n")
         self.state.update(running=False, ok=bool(ok), log=self._buf.getvalue(),
                           finished_at=datetime.now().isoformat(timespec="seconds"))
 
-JOB = IngestJob()
+def _sync(url, browser, cookies_file):
+    from main import run_pipeline  # deferred so the dashboard starts even if yt-dlp is missing
+    settings = llm.load_settings()
+    return run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False,
+                        ai_suggest=settings["auto_after_sync"] and llm.is_configured(settings))
+
+JOB = Job()
 
 def build_state():
     return {
@@ -67,6 +75,8 @@ def build_state():
         "taxonomy": load_taxonomy(),
         "fallback_category": FALLBACK_CATEGORY,
         "job": JOB.snapshot(),
+        "ai": llm.public_settings(llm.load_settings()),
+        "platform": sys.platform,
     }
 
 class Handler(BaseHTTPRequestHandler):
@@ -176,6 +186,11 @@ class Handler(BaseHTTPRequestHandler):
                     tax = {(new if k == old else k): v for k, v in tax.items()}
                     save_taxonomy(tax)
                 n = storage.rename_category(old, new)
+                settings = llm.load_settings()
+                settings["presets"] = [new if p == old else p for p in settings["presets"]]
+                if old in settings["category_notes"]:
+                    settings["category_notes"][new] = settings["category_notes"].pop(old)
+                llm.save_settings(settings)
                 return self._json({"ok": True, "updated": n})
 
             if path == "/api/categories/delete":
@@ -184,6 +199,10 @@ class Handler(BaseHTTPRequestHandler):
                 tax.pop(name, None)
                 save_taxonomy(tax)
                 n = storage.release_category(name)
+                settings = llm.load_settings()
+                settings["presets"] = [p for p in settings["presets"] if p != name]
+                settings["category_notes"].pop(name, None)
+                llm.save_settings(settings)
                 return self._json({"ok": True, "moved": n})
 
             if path == "/api/reclassify":
@@ -204,11 +223,120 @@ class Handler(BaseHTTPRequestHandler):
                     cookies = _clean(body.get("cookies_file"))
                     if not cookies or not os.path.isfile(cookies):
                         return self._error("cookies.txt file not found")
-                if not JOB.start(url, browser, cookies):
-                    return self._error("An ingestion is already running", 409)
+                if not JOB.start("sync", url, lambda: _sync(url, browser, cookies)):
+                    return self._error("Another task is already running", 409)
                 return self._json({"ok": True})
+
+            if path.startswith("/api/ai/") or path == "/api/presets":
+                return self._ai(path, body)
         except ValueError as e:
             return self._error(str(e))
+        except llm.LLMError as e:
+            return self._error(str(e), 502)
+        return self._error("Not found", 404)
+
+    # --- AI ------------------------------------------------------------------------
+    def _ai(self, path, body):
+        from ai_classifier import run_discover, run_suggest
+
+        if path == "/api/ai/settings":
+            settings = llm.load_settings()
+            provider = body.get("provider", settings["provider"])
+            if provider != "none" and provider not in llm.PROVIDERS:
+                return self._error("Unknown provider")
+            settings["provider"] = provider
+            if "auto_after_sync" in body:
+                settings["auto_after_sync"] = bool(body["auto_after_sync"])
+            cfg = body.get("config")
+            if provider in llm.PROVIDERS and isinstance(cfg, dict):
+                target = settings["providers"][provider]
+                for k in ("model", "base_url"):
+                    if isinstance(cfg.get(k), str):
+                        target[k] = cfg[k].strip()
+                key = cfg.get("api_key")
+                if key == "__clear__":
+                    target["api_key"] = ""
+                elif isinstance(key, str) and key.strip():
+                    target["api_key"] = key.strip()
+            llm.save_settings(settings)
+            return self._json({"ok": True, "ai": llm.public_settings(settings)})
+
+        if path == "/api/ai/test":
+            reply = llm.make_completer(llm.load_settings())(
+                "Reply with JSON only.", 'Reply with {"ok": true} and nothing else.')
+            llm.parse_json(reply)
+            return self._json({"ok": True})
+
+        if path == "/api/ai/models":
+            return self._json({"models": llm.list_models(body.get("provider", ""), llm.load_settings())})
+
+        if path == "/api/presets":
+            name = _clean(body.get("name"))
+            if not name:
+                return self._error("Category name is required")
+            settings = llm.load_settings()
+            presets = [p for p in settings["presets"] if p != name]
+            if body.get("preset"):
+                presets.append(name)
+            settings["presets"] = presets
+            llm.save_settings(settings)
+            return self._json({"ok": True, "presets": presets})
+
+        if path in ("/api/ai/discover", "/api/ai/suggest"):
+            if not llm.is_configured(llm.load_settings()):
+                return self._error("Set up an AI provider on the AI page first")
+            if path == "/api/ai/discover":
+                started = JOB.start("discover", "Propose categories", run_discover)
+            else:
+                scope = body.get("scope") or "unsorted"
+                if scope not in ("unsorted", "unlocked"):
+                    return self._error("Invalid scope")
+                started = JOB.start("suggest", "Suggest categories", lambda: run_suggest(scope))
+            if not started:
+                return self._error("Another task is already running", 409)
+            return self._json({"ok": True})
+
+        if path == "/api/ai/proposal/apply":
+            cats = body.get("categories")
+            if not isinstance(cats, list):
+                return self._error("categories must be a list")
+            remove = {_clean(n) for n in body.get("remove") or []}
+            old = load_taxonomy()
+            settings = llm.load_settings()
+            tax, notes = {}, dict(settings["category_notes"])
+            for c in cats:
+                name = _clean((c or {}).get("name"))
+                if not name or name == FALLBACK_CATEGORY or name in tax:
+                    continue
+                tax[name] = sorted({str(k).strip().lower() for k in c.get("keywords") or [] if str(k).strip()})
+                if c.get("description"):
+                    notes[name] = str(c["description"]).strip()
+            for name, kws in old.items():
+                if name not in tax and name not in remove:
+                    tax[name] = kws
+            save_taxonomy(tax)
+            moved = sum(storage.release_category(n) for n in remove if n not in tax)
+            settings["category_notes"] = {k: v for k, v in notes.items() if k in tax}
+            settings["presets"] = [p for p in settings["presets"] if p in tax]
+            settings["proposal"] = None
+            llm.save_settings(settings)
+            changed = storage.reclassify_videos(_classifier())
+            return self._json({"ok": True, "categories": len(tax), "moved": moved, "changed": changed})
+
+        if path == "/api/ai/proposal/dismiss":
+            settings = llm.load_settings()
+            settings["proposal"] = None
+            llm.save_settings(settings)
+            return self._json({"ok": True})
+
+        if path == "/api/ai/suggestions/accept":
+            n = storage.accept_suggestions(body.get("ids"), body.get("min_confidence"))
+            return self._json({"ok": True, "accepted": n})
+
+        if path == "/api/ai/suggestions/dismiss":
+            n = storage.dismiss_suggestions(body.get("ids"))
+            return self._json({"ok": True, "dismissed": n})
+
         return self._error("Not found", 404)
 
 def _clean(value):
