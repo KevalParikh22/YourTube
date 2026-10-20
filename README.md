@@ -42,6 +42,8 @@ python main.py "https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID"
 python main.py "https://www.youtube.com/playlist?list=YOUR_PLAYLIST_ID" --browser auto
 python main.py WL --browser auto --ai      # Watch Later, then ask the AI for category suggestions
 ```
+Not sure of the ID? `python main.py --list --browser auto` lists your playlists with their IDs.
+
 *`auto` uses the first browser signed in to YouTube. You can also name one: `firefox`, `chrome`, `brave`, `edge`. On Linux, Chrome needs the `secretstorage` package (in requirements.txt).*
 
 #### Watch Later or private playlists on Windows

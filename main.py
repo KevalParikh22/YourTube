@@ -46,6 +46,8 @@ def run_pipeline(
         print("      On Windows, Chrome/Edge cookies are app-bound encrypted and often can't be read;")
         print("      use Firefox or export a cookies.txt and pass --cookies cookies.txt instead.")
         print("   2. Or set the YouTube playlist visibility to 'Unlisted' so it requires no cookies.")
+        print("   3. \"The playlist does not exist\" usually means a wrong ID, or a private playlist read without")
+        print("      a sign-in. See your playlists and their IDs with: python main.py --list --browser auto")
         return False
         
     videos = data['videos']
@@ -136,10 +138,24 @@ def main():
     parser.add_argument("--browser", "-b", help="Browser to read session cookies from: auto (detect), firefox, chrome, brave, edge")
     parser.add_argument("--cookies", "-c", help="Path to cookies.txt file")
     parser.add_argument("--no-open", action="store_true", help="Do not open HTML report in browser automatically")
+    parser.add_argument("--list", action="store_true", help="List the playlists on your signed-in account, with their IDs")
     parser.add_argument("--ai", action="store_true", help="After syncing, ask the configured AI for category suggestions on unsorted videos")
     
     args = parser.parse_args()
-    
+
+    if args.list:
+        from extractor import list_my_playlists
+        try:
+            playlists = list_my_playlists(args.browser or "auto", args.cookies)
+        except Exception as e:
+            print(f"❌ Could not list playlists: {e}")
+            return
+        width = max((len(p['id']) for p in playlists), default=2)
+        for p in playlists:
+            print(f"{p['id']:<{width}}  {p['title']}")
+        print(f"\n{len(playlists)} playlists. Sync one with: python main.py <ID> --browser auto")
+        return
+
     if args.url:
         run_pipeline(
             playlist_url=args.url,

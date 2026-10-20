@@ -39,6 +39,26 @@ def normalize_playlist_url(playlist_url: str) -> str:
         return f"https://www.youtube.com/playlist?list={value}"
     return value
 
+def list_my_playlists(browser_cookies: Optional[str] = "auto", cookies_file: Optional[str] = None) -> List[Dict[str, str]]:
+    """Lists the signed-in account's playlists (read-only): [{'id', 'title'}]."""
+    opts: Dict[str, Any] = {'extract_flat': True, 'skip_download': True, 'quiet': True,
+                            'no_warnings': True, 'ignoreerrors': True}
+    if browser_cookies and browser_cookies.lower() == 'auto':
+        browser_cookies = detect_browser()
+        if not browser_cookies:
+            raise ValueError("No browser signed in to YouTube was found.")
+    if browser_cookies:
+        opts['cookiesfrombrowser'] = (browser_cookies.lower(),)
+    elif cookies_file:
+        opts['cookiefile'] = cookies_file
+    else:
+        raise ValueError("Listing your playlists needs a sign-in (--browser or --cookies).")
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info("https://www.youtube.com/feed/playlists", download=False) or {}
+    # "RD…" entries are auto-generated mixes, not saved playlists
+    return [{'id': e['id'], 'title': e.get('title') or e['id']}
+            for e in info.get('entries') or [] if e and e.get('id') and not e['id'].startswith('RD')]
+
 def extract_playlist_metadata(
     playlist_url: str,
     browser_cookies: Optional[str] = None,

@@ -14,6 +14,7 @@ YT KB (YouTube Knowledge Base), Phase 0: a local Python tool that reads a YouTub
 python3 -m venv --without-pip .venv && python3 -m pip --python .venv/bin/python install -r requirements.txt
 .venv/bin/python dashboard.py            # local dashboard at http://127.0.0.1:8765 (--port, --no-open)
 .venv/bin/python main.py "<playlist URL | ID | WL>" [--browser auto|firefox|chrome | --cookies cookies.txt] [--ai] [--no-open]
+.venv/bin/python main.py --list [--browser auto]   # list the signed-in account's playlists and IDs
 .venv/bin/python -m unittest             # test suite (tests/), runs against temp files
 ```
 
