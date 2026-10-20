@@ -231,6 +231,15 @@
   .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
   .check input { margin: 3px 0 0; accent-color: var(--ink); }
 
+  /* ---------- triage ---------- */
+  .tri { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 36px; margin-top: 28px; align-items: start; }
+  .tri h2 { font-family: var(--serif); font-weight: 500; font-size: 26px; line-height: 1.25; letter-spacing: -.01em; margin: 0; }
+  .tri-acts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 22px; }
+  .tri-acts .btn { justify-content: space-between; height: 40px; }
+  .tri-acts kbd { font: 11.5px ui-monospace, monospace; color: var(--ink-3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 5px; }
+  .btn-dark kbd { color: inherit; border-color: color-mix(in srgb, var(--bg) 40%, transparent); }
+  .st-skip { fill: none; stroke: var(--ink-3); stroke-width: 1.5; stroke-linecap: round; }
+
   /* ---------- drawer ---------- */
   .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 15, .28); }
   .drawer {
@@ -277,6 +286,7 @@
     .prop-row { grid-template-columns: 24px minmax(0, 1fr); }
     .prop-row > :last-child { grid-column: 2; }
     .ai-grid { grid-template-columns: minmax(0, 1fr); }
+    .tri { grid-template-columns: minmax(0, 1fr); gap: 20px; }
     .form-grid { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 640px) {
@@ -310,10 +320,11 @@
 <script>
 'use strict';
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
-const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched' };
-const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched' };
-const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
-const TABS = [['', 'Library'], ['plan', 'Plan'], ['sources', 'Playlists'], ['categories', 'Categories'], ['ai', 'AI']];
+const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched', skipped: 'Skipped' };
+const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
+const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
+const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
+const TABS = [['', 'Library'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['ai', 'AI']];
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
 const JOB_TEXT = {
@@ -336,6 +347,7 @@ const S = {
   session: { cat: '', mins: 45, order: 'order' },
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
+  triage: { cat: '', order: 'order', kept: new Set(), undo: [] },
   drawer: null, polling: false,
 };
 
@@ -353,12 +365,14 @@ function fmt(sec) {
   if (m) return `${m}m`;
   return sec ? `${s}s` : '0m';
 }
+// "skipped" means decided not to watch: done for remaining time, like "completed" (mirrors metrics.py)
+const isDone = v => v.status === 'completed' || v.status === 'skipped';
 function stats(list) {
   let total = 0, rem = 0, done = 0, prog = 0, unknown = 0;
   for (const v of list) {
     const d = v.duration_seconds || 0;
     total += d;
-    if (v.status === 'completed') done++; else rem += d;
+    if (isDone(v)) done++; else rem += d;
     if (v.status === 'in_progress') prog++;
     if (!d) unknown++;
   }
@@ -413,7 +427,7 @@ function queueUrls(list) {
   return out;
 }
 function playLinks(list, label = 'Play') {
-  const todo = list.filter(v => v.status !== 'completed');
+  const todo = list.filter(v => !isDone(v));
   const urls = queueUrls(todo);
   if (!urls.length) return '';
   if (urls.length === 1) return `<a class="btn btn-dark btn-sm" href="${esc(urls[0])}" target="_blank" rel="noopener">▶ ${label}</a>`;
@@ -422,6 +436,8 @@ function playLinks(list, label = 'Play') {
 }
 const statusIcon = s => s === 'completed'
   ? '<svg viewBox="0 0 20 20"><circle class="st-fill" cx="10" cy="10" r="8.5"/><path class="st-check" d="M6.5 10.2l2.4 2.4 4.6-5"/></svg>'
+  : s === 'skipped'
+    ? '<svg viewBox="0 0 20 20"><circle class="st-ring" cx="10" cy="10" r="8" stroke-dasharray="2.5 2.4"/><path class="st-skip" d="M7.2 7.2l5.6 5.6"/></svg>'
   : s === 'in_progress'
     ? '<svg viewBox="0 0 20 20"><circle class="st-ring" cx="10" cy="10" r="8"/><path class="st-half" d="M10 3.5a6.5 6.5 0 0 1 0 13z"/></svg>'
     : '<svg viewBox="0 0 20 20"><circle class="st-ring" cx="10" cy="10" r="8"/></svg>';
@@ -454,6 +470,7 @@ function applyTheme() { if (S.theme === 'auto') delete document.documentElement.
 function renderView() {
   const r = route(), v = $('#view');
   if (r === 'plan') v.innerHTML = videos().length ? viewPlan() : emptyState();
+  else if (r === 'triage') v.innerHTML = videos().length ? viewTriage() : emptyState();
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
   else if (r === 'ai') v.innerHTML = viewAI();
@@ -464,9 +481,10 @@ const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a
 /* ---------------- library ---------------- */
 function statusFilter(v, status, src) {
   switch (status) {
-    case 'todo': return v.status !== 'completed';
+    case 'todo': return !isDone(v);
     case 'in_progress': return v.status === 'in_progress';
     case 'completed': return v.status === 'completed';
+    case 'skipped': return v.status === 'skipped';
     case 'gone': return isGone(v, src);
     case 'suggested': return !!v.suggestion;
     default: return true;
@@ -488,7 +506,7 @@ function viewLibrary() {
   <section>
     <div class="eyebrow">${esc(scopeName)}</div>
     <h1 class="display num">${fmt(st.rem / S.speed)}<em>left at ${sx(S.speed)}</em></h1>
-    <p class="lede">${st.left} of ${plural(st.n, 'video')} to go · ${fmt(st.rem)} at normal speed · ${pct}% watched</p>
+    <p class="lede">${st.left} of ${plural(st.n, 'video')} to go · ${fmt(st.rem)} at normal speed · ${pct}% done</p>
     <div class="progress"><i style="width:${st.n ? (st.done / st.n) * 100 : 0}%"></i><i style="width:${st.n ? (st.prog / st.n) * 100 : 0}%"></i></div>
   </section>
 
@@ -496,7 +514,7 @@ function viewLibrary() {
     <aside class="rail">
       <div class="rail-group views">
         <h4>Show</h4>
-        ${VIEWS.filter(([k]) => !['gone', 'suggested'].includes(k) || viewCounts[k] || status === k).map(([k, l]) =>
+        ${VIEWS.filter(([k]) => !OPTIONAL_VIEWS.includes(k) || viewCounts[k] || status === k).map(([k, l]) =>
           `<a href="#/" data-act="v-status" data-v="${k}" class="${status === k ? 'on' : ''}"><span class="lbl">${l}</span><span class="c">${viewCounts[k]}</span></a>`).join('')}
       </div>
       <div class="rail-group collapsible">
@@ -552,7 +570,7 @@ function row(v) {
   const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : esc(v.category),
     isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '']
     .filter(Boolean).join(' · ');
-  return `<li class="row ${v.status === 'completed' ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
+  return `<li class="row ${isDone(v) ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
     <input type="checkbox" class="pick" data-act="pick" data-id="${esc(v.video_id)}" ${S.sel.has(v.video_id) ? 'checked' : ''} aria-label="Select">
     <button class="st" data-act="cycle" data-id="${esc(v.video_id)}" title="${STATUS_LABEL[v.status]}. Click to change." aria-label="Status: ${STATUS_LABEL[v.status]}">${statusIcon(v.status)}</button>
     <div class="row-c"><button class="row-main" data-act="open" data-id="${esc(v.video_id)}"><span class="row-title">${esc(v.title)}</span><span class="row-meta">${meta}</span></button>${sugLine(v)}</div>
@@ -581,6 +599,7 @@ function selBar() {
     <strong>${S.sel.size} selected</strong>
     <button class="btn-text" data-act="bulk" data-status="completed">Mark watched</button>
     <button class="btn-text" data-act="bulk" data-status="in_progress">In progress</button>
+    <button class="btn-text" data-act="bulk" data-status="skipped">Skip</button>
     <button class="btn-text" data-act="bulk" data-status="unwatched">Unwatched</button>
     <select data-change="bulk-cat" aria-label="Move to category"><option value="">Move to…</option>
       ${categoryNames().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}<option value="__new">New category…</option></select>
@@ -643,7 +662,7 @@ function viewPlan() {
 }
 function buildSession() {
   const s = S.session;
-  let pool = videos().filter(v => v.status !== 'completed' && v.duration_seconds > 0 && (!s.cat || v.category === s.cat));
+  let pool = videos().filter(v => !isDone(v) && v.duration_seconds > 0 && (!s.cat || v.category === s.cat));
   pool = s.order === 'progress'
     ? sortList(pool, 'order').sort((a, b) => (b.status === 'in_progress') - (a.status === 'in_progress'))
     : sortList(pool, s.order);
@@ -655,6 +674,66 @@ function buildSession() {
     if (used + t <= budget) { picked.push(v); used += t; }
   }
   return { picked, pool: pool.length };
+}
+
+/* ---------------- triage ---------------- */
+// Unwatched videos not yet decided on this visit ("keep" only lasts until reload)
+function triageQueue() {
+  const t = S.triage;
+  const pool = videos().filter(v => v.status === 'unwatched' && !t.kept.has(v.video_id) && (!t.cat || v.category === t.cat));
+  return sortList(pool, t.order);
+}
+function viewTriage() {
+  const t = S.triage, queue = triageQueue(), v = queue[0];
+  const unwatched = videos().filter(x => x.status === 'unwatched' && (!t.cat || x.category === t.cat));
+  const cats = categoryNames().filter(c => videos().some(x => x.category === c && x.status === 'unwatched'));
+  const d = v?.duration_seconds || 0;
+  return `
+  <section>
+    <div class="eyebrow">Triage</div>
+    <h1 class="display num">${queue.length ? `${queue.length} to decide` : 'All decided'}<em>${fmt(stats(unwatched).rem / S.speed)} unwatched at ${sx(S.speed)}</em></h1>
+    <p class="sentence">Go through
+      <select data-change="t-cat" aria-label="Category"><option value="">every category</option>${cats.map(c => `<option value="${esc(c)}" ${t.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>,
+      <select data-change="t-order" aria-label="Order">${[['order', 'in playlist order'], ['shortest', 'shortest first'], ['longest', 'longest first']]
+        .map(([k, l]) => `<option value="${k}" ${t.order === k ? 'selected' : ''}>${l}</option>`).join('')}</select>.</p>
+  </section>
+  ${v ? `<div class="tri">
+    <div class="embed"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(v.video_id)}?rel=0" title="${esc(v.title)}"
+      referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>
+    <div>
+      <h2>${esc(v.title)}</h2>
+      <div class="by muted" style="margin-top:6px">${esc(v.channel || 'Unknown channel')} · ${esc(v.category)}</div>
+      <div class="speeds" style="margin-top:14px">${d ? SPEEDS.map(x => `<span class="${x === S.speed ? 'on' : ''}">${sx(x)} <b>${fmt(d / x)}</b></span>`).join('') : 'No duration available'}</div>
+      ${v.suggestion ? `<div class="sug-box" style="margin-top:16px">${sugLine(v)}</div>` : ''}
+      <div class="tri-acts">
+        <button class="btn btn-dark" data-act="tri" data-do="keep" data-id="${esc(v.video_id)}">Keep for later <kbd>K</kbd></button>
+        <button class="btn" data-act="tri" data-do="skipped" data-id="${esc(v.video_id)}">Skip it <kbd>S</kbd></button>
+        <button class="btn" data-act="tri" data-do="in_progress" data-id="${esc(v.video_id)}">Watching now <kbd>P</kbd></button>
+        <button class="btn" data-act="tri" data-do="completed" data-id="${esc(v.video_id)}">Already watched <kbd>W</kbd></button>
+      </div>
+      <div class="actions" style="margin-top:12px">
+        <button class="btn-text" data-act="tri-undo" ${t.undo.length ? '' : 'disabled'}>Undo <kbd style="font-size:11px">U</kbd></button>
+        <a class="btn-text" href="${esc(v.url)}" target="_blank" rel="noopener">Open on YouTube ↗</a>
+        <button class="btn-text" data-act="open" data-id="${esc(v.video_id)}">Details and notes</button>
+      </div>
+      <p class="hint">Skipped videos stop counting as remaining time. Nothing is removed, and you can undo any time from Library → Skipped.</p>
+    </div>
+  </div>` : `<div class="empty"><h2>Nothing left to decide</h2>${t.kept.size ? `You kept ${plural(t.kept.size, 'video')} for later.` : 'Every unwatched video here has a decision.'}
+    ${t.kept.size ? '<br><button class="btn" data-act="tri-reset">Review the kept ones again</button>' : ''}</div>`}`;
+}
+async function triage(id, action) {
+  const v = byId(id);
+  if (!v) return;
+  const t = S.triage;
+  t.undo.push({ id, status: v.status, kept: action === 'keep' });
+  if (action === 'keep') { t.kept.add(id); refresh(); return; }
+  await update([id], { status: action });
+}
+async function triageUndo() {
+  const last = S.triage.undo.pop();
+  if (!last) return;
+  if (last.kept) { S.triage.kept.delete(last.id); refresh(); return; }
+  await update([last.id], { status: last.status });
 }
 
 /* ---------------- playlists ---------------- */
@@ -1027,6 +1106,9 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'more': S.limit += 150; renderList(); break;
+    case 'tri': triage(id, el.dataset.do); break;
+    case 'tri-undo': triageUndo(); break;
+    case 'tri-reset': S.triage.kept.clear(); S.triage.undo = []; refresh(); break;
     case 'session-done': {
       const ids = el.dataset.ids.split(',').filter(Boolean);
       if (confirm(`Mark ${plural(ids.length, 'video')} as watched?`)) { await update(ids, { status: 'completed' }); toast('Session marked watched'); }
@@ -1143,6 +1225,8 @@ document.addEventListener('change', async e => {
     case 's-mins': S.session.mins = Math.max(5, +el.value || 45); refresh(); break;
     case 's-cat': S.session.cat = el.value; refresh(); break;
     case 's-order': S.session.order = el.value; refresh(); break;
+    case 't-cat': S.triage.cat = el.value; refresh(); break;
+    case 't-order': S.triage.order = el.value; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
     case 'ai-provider': S.ai.provider = el.value; S.ai.key = ''; refresh(); break;
     case 'preset':
@@ -1172,6 +1256,13 @@ document.addEventListener('keydown', e => {
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
   if (e.key === '/' && $('#q')) { e.preventDefault(); $('#q').focus(); }
   if (S.drawer && (e.key === 'j' || e.key === 'k')) $(`[data-act="step"][data-dir="${e.key === 'j' ? 1 : -1}"]`)?.click();
+  if (!S.drawer && route() === 'triage' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const key = e.key.toLowerCase();
+    const id = $('[data-act="tri"]')?.dataset.id;
+    const action = { k: 'keep', s: 'skipped', p: 'in_progress', w: 'completed' }[key];
+    if (action && id) { e.preventDefault(); triage(id, action); }
+    else if (key === 'u') { e.preventDefault(); triageUndo(); }
+  }
 });
 $('#theme').addEventListener('click', () => {
   S.theme = { auto: 'light', light: 'dark', dark: 'auto' }[S.theme];

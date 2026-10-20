@@ -32,6 +32,18 @@ class MetricsTest(unittest.TestCase):
         self.assertEqual(m["time_saved_2x"]["seconds"], 1800)
         self.assertEqual(m["completion_percentage"], 33.3)
 
+    def test_skipped_counts_as_done(self):
+        videos = [
+            {"duration_seconds": 600, "status": "unwatched"},
+            {"duration_seconds": 1200, "status": "skipped"},
+            {"duration_seconds": 1800, "status": "completed"},
+            {"duration_seconds": 300, "status": "in_progress"},
+        ]
+        m = calculate_category_metrics(videos)
+        self.assertEqual((m["completed_videos"], m["skipped_videos"], m["unwatched_videos"]), (1, 1, 2))
+        self.assertEqual(m["remaining"]["1.0x"]["seconds"], 900)
+        self.assertEqual(m["completion_percentage"], 50.0)
+
     def test_empty(self):
         m = calculate_category_metrics([])
         self.assertEqual(m["total_videos"], 0)

@@ -15,7 +15,9 @@ import json
 from typing import List, Dict, Any, Optional, Callable, Iterable
 
 DB_PATH = os.environ.get("YTKB_DB") or os.path.join(os.path.dirname(__file__), "yt_kb.db")
-VALID_STATUSES = ("unwatched", "in_progress", "completed")
+VALID_STATUSES = ("unwatched", "in_progress", "completed", "skipped")
+# Statuses that no longer count as remaining work ("skipped" = decided not to watch)
+DONE_STATUSES = ("completed", "skipped")
 FALLBACK_CATEGORY = "General / Other"
 
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
@@ -25,6 +27,37 @@ def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
 
 def _columns(cursor: sqlite3.Cursor, table: str) -> set:
     return {row[1] for row in cursor.execute(f"PRAGMA table_info({table})").fetchall()}
+
+_STATUS_CHECK = ", ".join(f"'{s}'" for s in VALID_STATUSES)
+VIDEOS_DDL = f"""
+    CREATE TABLE IF NOT EXISTS {{name}} (
+        video_id TEXT PRIMARY KEY,
+        playlist_id TEXT,
+        title TEXT NOT NULL,
+        channel TEXT,
+        duration_seconds INTEGER DEFAULT 0,
+        url TEXT NOT NULL,
+        category TEXT DEFAULT 'Uncategorized',
+        status TEXT CHECK(status IN ({_STATUS_CHECK})) DEFAULT 'unwatched',
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        category_locked INTEGER NOT NULL DEFAULT 0,
+        notes TEXT DEFAULT '',
+        status_updated_at TIMESTAMP,
+        category_source TEXT NOT NULL DEFAULT 'keywords',
+        FOREIGN KEY(playlist_id) REFERENCES playlists(id)
+    )
+"""
+
+def _rebuild_videos_if_status_check_outdated(cursor: sqlite3.Cursor) -> None:
+    """SQLite cannot alter a CHECK constraint, so copy into a table with the current one."""
+    sql = cursor.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'videos'").fetchone()[0]
+    if all(f"'{s}'" in sql for s in VALID_STATUSES):
+        return
+    cursor.execute(VIDEOS_DDL.format(name="videos_new"))
+    cols = ", ".join(sorted(_columns(cursor, "videos") & _columns(cursor, "videos_new")))
+    cursor.execute(f"INSERT INTO videos_new ({cols}) SELECT {cols} FROM videos")
+    cursor.execute("DROP TABLE videos")
+    cursor.execute("ALTER TABLE videos_new RENAME TO videos")
 
 def init_db(db_path: str = DB_PATH) -> None:
     """Initializes tables if they do not exist and migrates older databases in place."""
@@ -43,23 +76,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
         """)
 
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS videos (
-                video_id TEXT PRIMARY KEY,
-                playlist_id TEXT,
-                title TEXT NOT NULL,
-                channel TEXT,
-                duration_seconds INTEGER DEFAULT 0,
-                url TEXT NOT NULL,
-                category TEXT DEFAULT 'Uncategorized',
-                status TEXT CHECK(status IN ('unwatched', 'in_progress', 'completed')) DEFAULT 'unwatched',
-                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                category_locked INTEGER NOT NULL DEFAULT 0,
-                notes TEXT DEFAULT '',
-                status_updated_at TIMESTAMP,
-                FOREIGN KEY(playlist_id) REFERENCES playlists(id)
-            )
-        """)
+        cursor.execute(VIDEOS_DDL.format(name="videos"))
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS playlist_items (
@@ -97,6 +114,7 @@ def init_db(db_path: str = DB_PATH) -> None:
                 cursor.execute(f"ALTER TABLE videos ADD COLUMN {col} {ddl}")
                 if col == "category_source":
                     cursor.execute("UPDATE videos SET category_source = 'manual' WHERE category_locked = 1")
+        _rebuild_videos_if_status_check_outdated(cursor)
 
         # Backfill membership from the legacy single playlist_id column
         cursor.execute("""
@@ -311,7 +329,7 @@ def update_videos(
         return updated
 
 def update_video_status(video_id: str, status: str, db_path: str = DB_PATH) -> None:
-    """Updates watch status: unwatched, in_progress, completed."""
+    """Updates watch status: unwatched, in_progress, completed, skipped."""
     update_videos([video_id], status=status, db_path=db_path)
 
 def update_video_category(video_id: str, category: str, db_path: str = DB_PATH) -> None:

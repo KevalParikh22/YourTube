@@ -208,7 +208,7 @@ def run_discover(max_categories: int = 12) -> bool:
     from classifier import load_taxonomy
 
     settings = llm.load_settings()
-    videos = [v for v in storage.get_library() if v.get("status") != "completed"] or storage.get_library()
+    videos = [v for v in storage.get_library() if v.get("status") not in storage.DONE_STATUSES] or storage.get_library()
     print(f"🤖 Proposing categories with {llm.describe(settings)} from {len(videos)} videos…")
     try:
         complete = llm.make_completer(settings)

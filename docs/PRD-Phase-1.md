@@ -72,7 +72,7 @@ Phase 0 tells you *what* is in your backlog and *how long* it takes. Phase 1 tel
 
 ## 6. Build order (proposed)
 
-1. Skipped status and Triage (small, immediately useful).
+1. Skipped status and Triage (small, immediately useful). **Done 2026-10-20.**
 2. Details queue and transcripts (F1, F2).
 3. Search (F3).
 4. Summaries with cost guardrail (F4), then triage verdicts.

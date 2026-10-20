@@ -36,7 +36,7 @@ def generate_markdown_report(
         f"**Total Videos**: {overall_metrics['total_videos']}  ",
         f"**Total Duration (1.0x)**: {overall_metrics['durations']['1.0x']['formatted']}  ",
         f"**Total Duration at 2.0x Speed**: **{overall_metrics['durations']['2.0x']['formatted']}** (⚡ Saves {overall_metrics['time_saved_2x']['formatted']})  ",
-        f"**Progress**: {overall_metrics['completed_videos']}/{overall_metrics['total_videos']} completed ({overall_metrics['completion_percentage']}%)",
+        f"**Progress**: {overall_metrics['completed_videos']} watched, {overall_metrics['skipped_videos']} skipped, of {overall_metrics['total_videos']} ({overall_metrics['completion_percentage']}% done)",
         "",
         "---",
         "",
@@ -70,7 +70,7 @@ def generate_markdown_report(
         for idx, v in enumerate(cat_videos, 1):
             dur_fmt = format_seconds(v.get('duration_seconds', 0))
             dur_2x = format_seconds(v.get('duration_seconds', 0) / 2.0)
-            status_icon = "✅" if v.get('status') == 'completed' else "⏳"
+            status_icon = {"completed": "✅", "skipped": "⏭️"}.get(v.get('status'), "⏳")
             lines.append(f"{idx}. {status_icon} [{v['title']}]({v['url']}) — `{dur_fmt}` *(2x: `{dur_2x}`)* | *{v.get('channel', 'Channel')}*")
         lines.append("")
         

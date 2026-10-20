@@ -40,19 +40,20 @@ def calculate_category_metrics(videos: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
     Computes comprehensive metrics for a given list of videos in a category or entire playlist:
     - total_videos
-    - completed_videos, unwatched_videos
+    - completed_videos, skipped_videos, unwatched_videos (everything not done)
     - total_seconds_1x, total_seconds_1_25x, total_seconds_1_5x, total_seconds_1_75x, total_seconds_2x
     - remaining_seconds_1x, remaining_seconds_2x
     - time_saved_at_2x
     - completion_percentage
     """
     total_videos = len(videos)
-    completed = [v for v in videos if v.get("status") == "completed"]
-    completed_videos = len(completed)
-    unwatched_videos = total_videos - completed_videos
+    # "skipped" (decided not to watch) is done, like "completed", for remaining time and progress
+    completed_videos = sum(1 for v in videos if v.get("status") == "completed")
+    skipped_videos = sum(1 for v in videos if v.get("status") == "skipped")
+    unwatched_videos = total_videos - completed_videos - skipped_videos
     
     total_sec = sum(v.get("duration_seconds", 0) for v in videos)
-    remaining_sec = sum(v.get("duration_seconds", 0) for v in videos if v.get("status") != "completed")
+    remaining_sec = sum(v.get("duration_seconds", 0) for v in videos if v.get("status") not in ("completed", "skipped"))
     
     sec_1x = total_sec
     sec_1_25x = calculate_speed_duration(total_sec, 1.25)
@@ -64,11 +65,12 @@ def calculate_category_metrics(videos: List[Dict[str, Any]]) -> Dict[str, Any]:
     rem_2x = calculate_speed_duration(remaining_sec, 2.0)
     
     time_saved_at_2x = sec_1x - sec_2x
-    completion_pct = (completed_videos / total_videos * 100.0) if total_videos > 0 else 0.0
+    completion_pct = ((completed_videos + skipped_videos) / total_videos * 100.0) if total_videos > 0 else 0.0
     
     return {
         "total_videos": total_videos,
         "completed_videos": completed_videos,
+        "skipped_videos": skipped_videos,
         "unwatched_videos": unwatched_videos,
         "completion_percentage": round(completion_pct, 1),
         "durations": {

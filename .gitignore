@@ -1,7 +1,7 @@
 __pycache__/
 *.pyc
 .venv/
-yt_kb.db
+*.db
 *.db-journal
 taxonomy.json
 settings.json

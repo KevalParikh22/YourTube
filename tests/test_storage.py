@@ -50,6 +50,45 @@ class StorageTest(unittest.TestCase):
         self.assertEqual(len(lib), 1)
         self.assertEqual({s["id"] for s in lib["a"]["sources"]}, {"PL1", "PL2"})
 
+    def test_skipped_status(self):
+        self.save([video("a")])
+        storage.update_videos(["a"], status="skipped", db_path=self.db)
+        self.assertEqual(self.lib()["a"]["status"], "skipped")
+        self.save([video("a")])  # re-sync keeps the decision
+        self.assertEqual(self.lib()["a"]["status"], "skipped")
+
+    def test_rebuilds_outdated_status_check(self):
+        conn = sqlite3.connect(self.db)
+        conn.executescript("""
+            CREATE TABLE playlists (id TEXT PRIMARY KEY, title TEXT NOT NULL, original_url TEXT,
+                total_videos INTEGER DEFAULT 0, total_duration_seconds INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP);
+            CREATE TABLE videos (video_id TEXT PRIMARY KEY, playlist_id TEXT, title TEXT NOT NULL, channel TEXT,
+                duration_seconds INTEGER DEFAULT 0, url TEXT NOT NULL, category TEXT DEFAULT 'Uncategorized',
+                status TEXT CHECK(status IN ('unwatched', 'in_progress', 'completed')) DEFAULT 'unwatched',
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, category_locked INTEGER NOT NULL DEFAULT 0,
+                notes TEXT DEFAULT '', status_updated_at TIMESTAMP,
+                category_source TEXT NOT NULL DEFAULT 'keywords');
+            CREATE TABLE playlist_items (playlist_id TEXT NOT NULL, video_id TEXT NOT NULL, position INTEGER DEFAULT 0,
+                removed INTEGER NOT NULL DEFAULT 0, first_seen_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY(playlist_id, video_id));
+            INSERT INTO playlists (id, title) VALUES ('PL1', 'Old');
+            INSERT INTO videos (video_id, playlist_id, title, url, status, notes, category, category_locked, category_source)
+                VALUES ('a', 'PL1', 'Old video', 'u', 'completed', 'my notes', 'Mine', 1, 'manual');
+            INSERT INTO playlist_items (playlist_id, video_id, position) VALUES ('PL1', 'a', 3);
+        """)
+        conn.commit()
+        conn.close()
+        storage.init_db(self.db)
+        a = self.lib()["a"]
+        self.assertEqual((a["status"], a["notes"], a["category"], a["category_locked"], a["category_source"]),
+                         ("completed", "my notes", "Mine", 1, "manual"))
+        self.assertEqual(a["sources"], [{"id": "PL1", "position": 3, "removed": 0}])
+        storage.update_videos(["a"], status="skipped", db_path=self.db)
+        self.assertEqual(self.lib()["a"]["status"], "skipped")
+        storage.init_db(self.db)  # second run is a no-op
+        self.assertEqual(self.lib()["a"]["status"], "skipped")
+
     def test_invalid_status_rejected(self):
         self.save([video("a")])
         with self.assertRaises(ValueError):
