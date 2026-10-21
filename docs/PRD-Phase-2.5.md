@@ -30,21 +30,44 @@ Phase 1 learns from videos that have captions, using any AI provider. Phase 2.5 
 | A per-video read **with** cookies fails ("The page needs to be reloaded"), while anonymous reads work. | Media downloads are **anonymous**; cookies are never used for them. |
 | This machine: NVIDIA RTX 3050 Laptop (**4 GB VRAM**), 14 GB RAM (about 5 GB free in normal use), 16 CPU threads, `ffmpeg` installed, 63 GB free on the project drive. Ollama and an OCR engine are not installed yet. | Pick models that fit in 4 GB VRAM. Run **one GPU job at a time**: speech-to-text, vision model and LLM never load together. Fall back to CPU when no GPU is present. Cap and clean the media cache. |
 
+### Spike results (2026-10-21, RTX 3050 4 GB; scripts in `spikes/`)
+
+Measured on the library's 3 real videos: an 18 min talk with demo, a 2 h live-coding session, and a 10 min slide talk.
+
+| What | Result | Consequence |
+|---|---|---|
+| Audio download (anonymous, paced, smallest stream) | 49 kbps m4a = **22 MB per hour**, 4–26 s per video | Cheap. A whole backlog's audio is a few GB, but files are deleted after use anyway. |
+| **Auto-dubbed videos** | The 18 min video carries **20 audio tracks** (AI dubs). "Smallest audio" picked the **Arabic dub**, and Whisper transcribed Arabic. | **Always select the original track** (`language_preference >= 10` or note "original"), falling back to the smallest stream. |
+| Video-only 480p | 18–78 MB per hour, depending on motion | Fine to download whole. |
+| Section-only video downloads | 5.5 min for a 10 min clip (yt-dlp hands ranges to ffmpeg) | **Download whole video-only files** natively; don't use `download_ranges`. |
+| Whisper large-v3-turbo, int8, GPU | **22–26× real time** (about 2.5 min per hour of audio) after warm-up; **1.3 GB** VRAM; 94–97 % word agreement with good captions | **Default on GPU.** |
+| Whisper small, int8, GPU | about the same speed (decoding isn't GPU-bound here), 0.6 GB VRAM, 94–95 % agreement | No reason to prefer it on a GPU. |
+| Whisper small / large-v3-turbo, int8, CPU (8 threads) | 5.8× / 2.5× real time | **CPU fallback: small** (about 10 min per hour of audio). |
+| First run | Model download (~1.6 GB) plus warm-up made the first pass 5–8× real time | Show "downloading model…" separately in the job log. |
+| faster-whisper's own audio decoder | Broke with the installed PyAV ("unexpected keyword argument 'metadata_errors'") | **Decode with ffmpeg** (16 kHz mono s16le) and pass the samples in. |
+| **Captions in the wrong script** | The 10 min slide talk is spoken in English, but YouTube labels it Hindi, and its auto-captions are English words written in Devanagari ("फाइंड ट्यूनिंग हैज़ बिकम…"). Whisper produced proper English. | L1 must also run when captions **don't match the spoken language**, not only when there are none. See L1. |
+| Frame picking | Scene changes alone gave **1 frame in 10 min** of live coding (typing and scrolling don't trip scene detection). Adding a frame every 30 s plus dHash dedupe gives **11–15 frames per 10 min** for slides and for coding; ffmpeg takes 4–15 s per 10 min of 480p. | Use scene change + every 30 s + near-duplicate removal. |
+| RapidOCR (CPU) | 0.2–3.5 s per frame. Garbles handwriting ("Raw veey Sivgh", "Mulh Hop") and mixes up columns on web pages ("Xeep costs", "infraseructure"). | Not good enough as the main reader. |
+| Vision model `qwen3.5:4b` (Ollama) | 4–29 s per frame (more for dense text), **2.95 GB** VRAM. Read the handwritten whiteboard correctly and kept web-page text in reading order, with diagram descriptions. | **Use the vision model.** About 70–90 frames per hour of video means about 8–13 min per hour. |
+| Talking-head frames | Both readers picked up book-spine text ("AI SNAKE OIL") from the background | The vision prompt must say whether a frame has **real content**, and frames without it are dropped. |
+| GPU memory | Vision model 2.95 GB + Whisper 1.3 GB > 4 GB | **One GPU model at a time.** Unloading Ollama with `keep_alive: 0` before Whisper works (verified). |
+| Heat | The laptop GPU reached 87 °C during repeated runs | Long batches should pause briefly between videos. |
+
 ## 4. Features
 
 ### L1 — Local transcription (no captions? listen locally)
-- **When:** a non-music video has no usable captions. Optionally also when the only captions are a poor auto-translation (setting).
-- **How:** download **audio only** at the smallest quality (anonymously, through the paced job queue). Convert it to 16 kHz mono with `ffmpeg`. Transcribe locally with **faster-whisper**: a large-v3-turbo-class model in int8 on the GPU, or a smaller model on the CPU. The language is detected automatically, including Hindi and Hinglish, with an option to translate to English. Output is timestamped segments, stored like captions, with `source = 'local-asr'`.
+- **When:** a non-music video has no usable captions, **or its captions don't match the spoken language** (for example English speech captioned in Devanagari; found in the spike). Detection: the caption script doesn't fit the language Whisper detects on the first 30 s of audio. Also when the only captions are a poor auto-translation (setting).
+- **How:** download **audio only**: the **original-language track** (auto-dubbed videos carry many), at the smallest quality, anonymously, through the paced job queue. Convert it to 16 kHz mono with `ffmpeg` and pass the samples in. Transcribe locally with **faster-whisper**: a large-v3-turbo-class model in int8 on the GPU, or a smaller model on the CPU. The language is detected automatically, including Hindi and Hinglish, with an option to translate to English. Output is timestamped segments, stored like captions, with `source = 'local-asr'`.
 - **Afterwards:** the audio file is **deleted** as soon as the transcript is saved.
 - **Shown to the user:** a queue with per-video state (`downloading → transcribing → done / failed`) and an estimated time from the audio length and measured speed. Nothing runs until the user starts it, per video, per category, or "all without captions".
 
 ### L2 — Visual content (slides, whiteboard, code on screen)
 - **Which videos:** opt-in. Mark a video or category as **"Has slides / whiteboard"**. The app also *suggests* the mark from hints: title words like lecture, slides, presentation, whiteboard or walkthrough; few spoken words per minute; or a transcript that keeps referring to "this slide" or "as you can see".
 - **How:**
-  1. Download **video only**, no audio, at 480p (720p for small text, as a setting).
-  2. Use `ffmpeg` scene-change detection to pick frames where the picture changes, at most one every ~10 s and at most ~150 per video.
+  1. Download **video only**, no audio, at 480p (720p for small text, as a setting), as a **whole file** (section downloads were very slow).
+  2. Use `ffmpeg` scene-change detection **plus a frame at least every 30 s** (live coding never trips scene detection), at most one every ~10 s and at most ~150 per video.
   3. Drop near-duplicate frames with a perceptual hash.
-  4. Read each kept frame **locally**: OCR for slide and code text, and/or a **small local vision model** (through Ollama) that describes diagrams and whiteboard drawings in one or two sentences.
+  4. Read each kept frame **locally** with the **vision model** (through Ollama). It returns the on-screen text in reading order, a one-sentence description of any diagram or whiteboard, and whether the frame has real content (talking-head frames are dropped). OCR was tested and rejected (see spike results).
 - **Output:** timestamped "visual segments" (`source = 'ocr' | 'vision'`) stored next to the transcript. They feed search and summaries, so a summary can say "slide at 12:40 lists the 5 steps". Small JPEG thumbnails of key frames can be kept (setting) for a slide strip in the video panel.
 - **Afterwards:** the video file is **deleted** after processing. Only text and, if chosen, thumbnails are kept.
 
@@ -70,7 +93,7 @@ Phase 1 learns from videos that have captions, using any AI provider. Phase 2.5 
 
 ## 7. Build order
 
-1. **Spike:** on 3–5 real videos, check that an anonymous paced audio and video download works. Measure faster-whisper speed and VRAM on the RTX 3050. Compare OCR with a small vision model on slide frames. Record the numbers in §3.
+1. **Spike:** on 3–5 real videos, check that an anonymous paced audio and video download works. Measure faster-whisper speed and VRAM on the RTX 3050. Compare OCR with a small vision model on slide frames. Record the numbers in §3. **Done 2026-10-21**: see "Spike results" in §3. Scripts in `spikes/`. The downloaded media was deleted afterwards.
 2. Setup check and per-task local models (L3). **Done 2026-10-20**, except that the *vision* and *speech* task choices arrive with L2 and L1:
    - Native Ollama provider (`/api/chat` with `num_ctx`, JSON format and `keep_alive`). The OpenAI-compatible `/v1` path can't set the context size, so long transcripts would be cut silently.
    - Setup check on the AI page (GPU, memory, ffmpeg, Ollama and its models, faster-whisper), with one-click model download and "Use".
@@ -88,6 +111,7 @@ Each step ships with tests and keeps the dashboard working.
 
 ## 8. Open decisions
 
-1. **OCR engine vs. vision model:** decided by the spike's results on real slide frames.
-2. **Default Whisper model:** turbo-class on GPU vs. smaller on CPU, decided by measured speed.
-3. **Thumbnails:** keep key-frame thumbnails for a slide strip, or text only?
+1. ~~OCR engine vs. vision model~~ **Decided by the spike: the vision model** (`qwen3.5:4b` on this machine). RapidOCR misread handwriting and page layouts.
+2. ~~Default Whisper model~~ **Decided by the spike: `large-v3-turbo` int8 on the GPU** (22–26× real time, 1.3 GB), and **`small` int8 on CPU-only machines** (5.8× real time).
+3. **Thumbnails:** keep key-frame thumbnails for a slide strip, or text only? (still open; the user decides)
+4. **Wrong-script captions:** should L1 replace such captions automatically, or keep both and let the user pick? (new, from the spike)
