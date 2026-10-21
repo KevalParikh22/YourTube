@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-YT KB (YouTube Knowledge Base), Phase 0: a local Python tool that reads a YouTube playlist (often a private "Watch Later"-style backlog), sorts its videos into topic categories, works out watch time at 1x through 2x speed, and tracks progress in a local dashboard. Specs: `docs/PRD-Phase-0.md` (original) and `docs/Phase-0-Research-and-Improvements.md` (research findings, revised requirements v0.2, roadmap). The second document supersedes the first where they disagree.
+YT KB (YouTube Knowledge Base): a local Python tool that reads YouTube playlists (often a private "Watch Later"-style backlog), sorts videos into topic categories, works out watch time at 1x through 2x speed, fetches transcripts, rates videos with AI (Watch / Skim / Skip), searches everything, and tracks progress in a local dashboard. Specs:
+- `docs/PRD-Phase-0.md` (original) and `docs/Phase-0-Research-and-Improvements.md` (research, revised requirements v0.2, roadmap, release checklist). The second supersedes the first where they disagree.
+- `docs/PRD-Phase-1.md`: complete.
+- `docs/PRD-Phase-2.5.md`: everything processed locally (in progress).
+- `docs/SETUP.md`: the user-facing setup guide.
 
 **Hard rule: the source playlist is never modified.** Non-destructiveness is a core requirement. Many playlists can be ingested; each is a *source* feeding one deduplicated library. A video that disappears from a source is flagged (`playlist_items.removed = 1`), never deleted, and **stays in the library (and in remaining-time totals) until it is marked watched**.
 
@@ -38,18 +42,19 @@ Every stage passes around a list of plain video dicts with the keys `video_id, t
    `videos.category_source` is `keywords` (unlocked), `manual` or `ai`. Accepting a suggestion locks the category with source `ai`. A manual category change deletes any pending suggestion.
 
    `save_playlist()` keeps status and notes, and keeps the category when `category_locked = 1`. It marks videos missing from the latest extraction as removed, and never does so from an empty extraction. After saving, `main.py` reloads from the DB so reports reflect manual edits.
-4. **`metrics.py`**: counts and durations at 1.0/1.25/1.5/1.75/2.0x. The remaining time leaves out `completed` videos.
+4. **`metrics.py`**: counts and durations at 1.0/1.25/1.5/1.75/2.0x. The remaining time leaves out done videos (`completed` and `skipped`).
 5. **`reporter.py`**: writes static snapshots to `reports/`. User content must be HTML-escaped.
-**AI layer (optional)**: `llm.py` holds the provider registry and `settings.json` (git-ignored; API keys, presets, category notes, a pending proposal). Every provider reduces to `complete(system, prompt) -> text`. Claude goes through the `anthropic` SDK. Gemini uses REST. OpenAI-compatible endpoints cover open-weight hosts and local Ollama/LM Studio. `public_settings()` is the only form sent to the browser and never includes keys. `ai_classifier.py` has `discover_categories` (proposes a category set that keeps the user's presets verbatim) and `assign_categories` (batches of 50, indexed lines, unknown answers go to the fallback). `run_discover`/`run_suggest` are the job entry points. AI output is always a proposal or suggestion that the user accepts in the dashboard.
+**AI layer (optional)**: `llm.py` holds the provider registry and `settings.json` (git-ignored; API keys, presets, category notes, a pending proposal). Every provider reduces to `complete(system, prompt) -> text`. Claude goes through the `anthropic` SDK. Gemini uses REST. OpenAI-compatible endpoints cover open-weight hosts and local Ollama/LM Studio. `public_settings()` is the only form sent to the browser and never includes keys. `ai_classifier.py` has `discover_categories` (proposes a category set that keeps the user's presets verbatim) and `assign_categories` (indexed lines, batches of at most 50 videos packed to the model's context, unknown answers go to the fallback). `run_discover`/`run_suggest` are the job entry points. AI output is always a proposal or suggestion that the user accepts in the dashboard.
 
 6. **`exporter.py`**: builds `watch_videos?video_ids=` queue URLs. The endpoint is undocumented and capped at 50 IDs, so use the chunked `generate_youtube_watch_queue_urls`. Also handles CSV and JSON export.
 
-**Dashboard**: `dashboard.py` is a stdlib `ThreadingHTTPServer` bound to 127.0.0.1. It serves `web/index.html`, a single-file vanilla JS app with hash routing (`#/` library with status/category/playlist filters in the left rail, including an "AI suggestions" view, `#/plan`, `#/sources`, `#/categories` with presets ("Keep") and proposal review, `#/ai` provider settings). `/api/state` returns the whole library via `storage.get_library()` (every video with its `sources` and `in_source`); all filtering happens client-side, and a JSON API:
-- `GET /api/state?playlist=`, `/api/job`, `/api/export`
-- `POST /api/videos/update`, `/api/taxonomy`, `/api/categories/{rename,delete}`, `/api/reclassify`, `/api/ingest`, `/api/presets`
+**Dashboard**: `dashboard.py` is a stdlib `ThreadingHTTPServer` bound to 127.0.0.1. It serves `web/index.html`, a single-file vanilla JS app with hash routing (`#/` library with status/category/playlist filters in the left rail, including an "AI suggestions" view, `#/plan`, `#/sources`, `#/categories` with presets ("Keep") and proposal review, `#/ai` provider settings, `#/triage`, `#/search`, `#/setup`). `/api/state` returns the whole library via `storage.get_library()` (every video with its `sources` and `in_source`); all filtering happens client-side, and a JSON API:
+- `GET /api/state`, `/api/job`, `/api/export?format=&playlist=`, `/api/export/markdown?id=`, `/api/video?id=`, `/api/search?q=&kinds=`, `/api/local/status`, `/docs/setup`, `/download/<name>`
+- `POST /api/videos/update`, `/api/taxonomy`, `/api/categories/{rename,delete}`, `/api/reclassify`, `/api/ingest`, `/api/presets`, `/api/job/cancel`
 - `POST /api/ai/{settings,test,models,discover,suggest}`, `/api/ai/proposal/{apply,dismiss}`, `/api/ai/suggestions/{accept,dismiss}`
+- `POST /api/details/{fetch,settings}`, `/api/rate`, `/api/rate/estimate`, `/api/local/{pull,use}`, `/api/export/markdown`
 
-POSTs must send the `X-YTKB: 1` header and JSON content. The Host header must be localhost. Together these act as CSRF and DNS-rebinding protection; keep them. Syncs and AI runs share one background `Job` slot (`kind`: sync/discover/suggest), with stdout captured into the job log. When `auto_after_sync` is on, a sync also asks for suggestions on unsorted videos. The client computes metrics itself (mirroring `metrics.py`) from the video list in `/api/state`. Setting a category through the API locks it; `reset_category` unlocks it and re-classifies.
+POSTs must send the `X-YTKB: 1` header and JSON content. The Host header must be localhost. Together these act as CSRF and DNS-rebinding protection; keep them. Syncs, details fetches, AI runs and model downloads share one background `Job` slot (`kind`: sync, details, discover, suggest, rate, pull), with stdout captured into the job log. A job can be stopped with `POST /api/job/cancel` if it checks `JOB.stop_requested`. When `auto_after_sync` is on, a sync also asks for suggestions on unsorted videos. The client computes metrics itself (mirroring `metrics.py`) from the video list in `/api/state`. Setting a category through the API locks it; `reset_category` unlocks it and re-classifies.
 
 ## Phase 1 (complete)
 
@@ -83,7 +88,9 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 
 **Triage (`#/triage`)** is a ranked list (highest score first). It has verdict chips, Accept all skips, Undo, Rate (batch or one video), and a headline comparing time if you follow the ratings with time for everything. Rows and the library show YouTube thumbnails from `i.ytimg.com`.
 
-## Not built yet (see the research doc §5–6)
+## Not built yet
 
+- **Phase 2.5** (`docs/PRD-Phase-2.5.md`): local transcription of videos without captions (L1), and reading slides and whiteboards from frames (L2). Step 1, a measuring spike, comes first; its scripts live in `spikes/`.
+- **Phase 2**: questions across the whole library, with answers citing videos and timestamps. No plan document yet.
 - Writing `[YT-KB]` playlists back via the Data API: 50 units per insert against a 10k/day quota, so it needs a paced multi-day queue, and the source playlist must be hard-blocked from every write. The user hasn't decided whether they want it.
-- Per-video enrichment (description and tags) for better AI classification, and captions or transcripts (Phase 1).
+- Public release: the checklist in section 9 of the research doc (deferred).
