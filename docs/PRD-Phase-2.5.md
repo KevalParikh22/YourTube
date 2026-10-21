@@ -68,7 +68,7 @@ Measured on the library's 3 real videos: an 18 min talk with demo, a 2 h live-co
   2. Use `ffmpeg` scene-change detection **plus a frame at least every 30 s** (live coding never trips scene detection), at most one every ~10 s and at most ~150 per video.
   3. Drop near-duplicate frames with a perceptual hash.
   4. Read each kept frame **locally** with the **vision model** (through Ollama). It returns the on-screen text in reading order, a one-sentence description of any diagram or whiteboard, and whether the frame has real content (talking-head frames are dropped). OCR was tested and rejected (see spike results).
-- **Output:** timestamped "visual segments" (`source = 'ocr' | 'vision'`) stored next to the transcript. They feed search and summaries, so a summary can say "slide at 12:40 lists the 5 steps". Small JPEG thumbnails of key frames can be kept (setting) for a slide strip in the video panel.
+- **Output:** timestamped "visual segments" (`source = 'vision'`) stored next to the transcript. They feed search and summaries, so a summary can say "slide at 12:40 lists the 5 steps". **Small JPEG thumbnails of the kept key frames are stored** (decided) for a slide strip in the video panel.
 - **Afterwards:** the video file is **deleted** after processing. Only text and, if chosen, thumbnails are kept.
 
 ### L3 — Local AI by default
@@ -113,5 +113,5 @@ Each step ships with tests and keeps the dashboard working.
 
 1. ~~OCR engine vs. vision model~~ **Decided by the spike: the vision model** (`qwen3.5:4b` on this machine). RapidOCR misread handwriting and page layouts.
 2. ~~Default Whisper model~~ **Decided by the spike: `large-v3-turbo` int8 on the GPU** (22–26× real time, 1.3 GB), and **`small` int8 on CPU-only machines** (5.8× real time).
-3. **Thumbnails:** keep key-frame thumbnails for a slide strip, or text only? (still open; the user decides)
-4. **Wrong-script captions:** should L1 replace such captions automatically, or keep both and let the user pick? (new, from the spike)
+3. ~~Thumbnails~~ **Decided 2026-10-21: keep key-frame thumbnails.** Store small JPEGs of the kept frames so the video panel can show a strip of slides, next to the extracted text.
+4. ~~Wrong-script captions~~ **Decided 2026-10-21: keep both for now.** When L1 transcribes a video that already has captions, store the local transcript alongside the captions (`source = 'captions' | 'local-asr'`) and let the user choose per video. Whether to switch automatically is revisited once L1 has run on real videos.
