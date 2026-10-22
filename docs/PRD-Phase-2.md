@@ -27,10 +27,24 @@ Phases 1 and 2.5 made every video *readable*: transcripts (captions or local), s
 2. **Retrieval (hybrid):**
    - *Keyword*: the existing FTS5 trigram index.
    - *Meaning*: embeddings from a small local model (recommended `qwen3-embedding:0.6b`, 0.64 GB, multilingual) stored in SQLite and compared with cosine similarity. Brute force in numpy is fine up to ~100k pieces.
-   - Results are merged (reciprocal-rank fusion), with filters for category, playlist and "unwatched only". The top pieces are trimmed to the answer model's context.
-3. **Answer:** a new AI task, **Questions and answers**, uses the chosen provider (Phase 1 per-task routing; local by default). The prompt gets the numbered pieces and must cite them as `[n]`; citations are checked in code against the pieces actually sent (invalid ones are dropped). Answers are written in the user's preferred language.
+   - Results are merged by reciprocal-rank fusion **with the keyword list at half weight** (spike), with filters for category, playlist and "unwatched only". The top pieces are trimmed to the answer model's context.
+3. **Answer:** a new AI task, **Questions and answers**, uses the chosen provider (Phase 1 per-task routing; local by default). The prompt gets the numbered pieces and must cite them as `[n]`; citations are checked in code against the pieces actually sent: invalid numbers are dropped, and a citation whose excerpt matches its sentence much worse than another sent excerpt is **moved to the better match** (embedding similarity; the spike found the small model mis-attributes now and then). Answers are written in the user's preferred language.
 4. **Follow-ups:** a short conversation. Follow-up questions are rewritten into standalone questions before retrieval, so "and where does he show the code?" works.
 5. **Keeping the index fresh:** an incremental background job (kind `embed`) embeds new or changed pieces after syncs, details fetches, transcriptions and slide reads. Embeddings are tied to the model that made them, and switching models re-embeds.
+
+### Spike results (2026-10-22; scripts `spikes/embed_eval.py`, `spikes/answer_eval.py`)
+
+Library: 360 search pieces from the 3 real videos. 18 hand-written questions, worded to share few words with their answers; 2 are in Hindi. A question counts as found when a top-5 piece is in the right video and time window.
+
+| What | Result | Consequence |
+|---|---|---|
+| Embedding speed (`qwen3-embedding:0.6b`, Ollama, RTX 3050) | 360 pieces in 31 s (**12 pieces/s**); 1024 dimensions; **1.5 MB** of float32; a query embeds in **12 ms** | Indexing a 1,000-video library (~100k pieces) takes about 2.5 h once, in the background, then is incremental. Brute-force cosine search is instant at this size. |
+| Keyword only (FTS5, any term) | 14/18 found, MRR 0.63; **missed both Hindi questions** | Not enough on its own. |
+| Meaning only (embeddings) | **18/18**, MRR **0.875**, including both Hindi questions | Meaning-based retrieval is the core. |
+| Hybrid, equal weights (RRF) | 17/18, MRR 0.817; keywords add noise on paraphrases | Don't weight keywords equally. |
+| **Hybrid, keyword weight 0.5** | 17/18, MRR **0.872** (≈ meaning only); keeps exact-term matches ("Neo4j", error text) that paraphrased tests can't show | **Chosen.** Send about 8 pieces to the answer model, so rank-6 answers still reach it. |
+| Local answers (`qwen3.5:4b`, 8 excerpts) | About **6 s per answer** once warm. **0 invalid citation numbers** out of 20. 4 of 6 answers fully correct; the Hindi question got a correct English answer with 1 unrelated citation. | Usable locally. |
+| **Mis-attributed citations** | The small model sometimes puts a correct sentence next to the wrong excerpt (claimed "LM Studio" from an excerpt about the closing verdict) | **Citation check:** compare each answer sentence with all sent excerpts (embeddings) and move a citation to the best-matching excerpt when the cited one matches much worse. Always show each citation's snippet so the user can verify. |
 
 ## 4. Features
 
@@ -56,7 +70,7 @@ Phases 1 and 2.5 made every video *readable*: transcripts (captions or local), s
 
 ## 6. Build order (proposed)
 
-1. **Spike:** embed the current library with `qwen3-embedding:0.6b` and measure speed, size and retrieval quality on 15–20 hand-written questions (keyword vs meaning vs hybrid). Check that answer citations from the local 4B model are accurate.
+1. **Spike:** embed the current library with `qwen3-embedding:0.6b` and measure speed, size and retrieval quality on 15–20 hand-written questions (keyword vs meaning vs hybrid). Check that answer citations from the local 4B model are accurate. **Done 2026-10-22**: see "Spike results" in §3. Hybrid with keyword weight 0.5, plus a citation check.
 2. Embedding index plus incremental `embed` job, and hybrid retrieval (`retrieve()`) with tests.
 3. Ask page (A1): answers with checked citations and sources.
 4. Follow-ups, Ask about this video (A2) and semantic search (A3).
