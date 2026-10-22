@@ -20,8 +20,16 @@ VALID_STATUSES = ("unwatched", "in_progress", "completed", "skipped")
 DONE_STATUSES = ("completed", "skipped")
 FALLBACK_CATEGORY = "General / Other"
 
+class _ClosingConnection(sqlite3.Connection):
+    """sqlite3's own `with conn:` only commits or rolls back; this also closes, so connections don't leak."""
+    def __exit__(self, exc_type, exc, tb):
+        try:
+            return super().__exit__(exc_type, exc, tb)
+        finally:
+            self.close()
+
 def get_connection(db_path: str = DB_PATH) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path)
+    conn = sqlite3.connect(db_path, factory=_ClosingConnection)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -783,8 +791,22 @@ def _create_search_tables(cursor: sqlite3.Cursor) -> bool:
             INSERT INTO search_index(rowid, text) VALUES (new.id, new.text); END;
         CREATE TRIGGER IF NOT EXISTS search_docs_ad AFTER DELETE ON search_docs BEGIN
             INSERT INTO search_index(search_index, rowid, text) VALUES ('delete', old.id, old.text); END;
+        -- Phase 2: embedding vectors keyed by model + text hash, so re-saved but unchanged text keeps its vector
+        CREATE TABLE IF NOT EXISTS embedding_cache (
+            model TEXT NOT NULL, hash TEXT NOT NULL, dim INTEGER NOT NULL, vector BLOB NOT NULL,
+            PRIMARY KEY (model, hash));
     """)
+    if "hash" not in _columns(cursor, "search_docs"):
+        cursor.execute("ALTER TABLE search_docs ADD COLUMN hash TEXT")
+        cursor.executemany("UPDATE search_docs SET hash = ? WHERE id = ?",
+                           [(_doc_hash(kind, text), i) for i, kind, text in
+                            cursor.execute("SELECT id, kind, text FROM search_docs").fetchall()])
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_search_docs_hash ON search_docs(hash)")
     return not exists
+
+def _doc_hash(kind: str, text: str) -> str:
+    import hashlib
+    return hashlib.sha1(f"{kind}\x00{text}".encode("utf-8")).hexdigest()
 
 def _docs_for(cursor: sqlite3.Cursor, video_id: str, kind: str) -> List[tuple]:
     """(t, text) rows of one kind for one video."""
@@ -832,8 +854,8 @@ def _reindex(cursor: sqlite3.Cursor, video_ids: Iterable[str], kinds: Iterable[s
     for vid in video_ids:
         cursor.execute(f"DELETE FROM search_docs WHERE video_id = ? AND kind IN ({marks})", (vid, *kinds))
         for kind in kinds:
-            cursor.executemany("INSERT INTO search_docs (video_id, kind, t, text) VALUES (?, ?, ?, ?)",
-                               [(vid, kind, t, text) for t, text in _docs_for(cursor, vid, kind)])
+            cursor.executemany("INSERT INTO search_docs (video_id, kind, t, text, hash) VALUES (?, ?, ?, ?, ?)",
+                               [(vid, kind, t, text, _doc_hash(kind, text)) for t, text in _docs_for(cursor, vid, kind)])
 
 def rebuild_search_index(db_path: str = DB_PATH) -> int:
     """Rebuilds the whole index; returns the number of indexed pieces."""
@@ -1135,3 +1157,58 @@ def get_visuals(video_id: str, db_path: str = DB_PATH, conn=None) -> List[Dict[s
             return get_visuals(video_id, db_path, c)
     return [dict(r) for r in conn.execute(
         "SELECT t_s AS t, text, visual, thumb FROM visual_segments WHERE video_id = ? ORDER BY t_s", (video_id,))]
+
+# --- Embeddings (Phase 2) -----------------------------------------------------------------
+
+def docs_missing_embeddings(model: str, limit: Optional[int] = None, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Search pieces whose text has no vector for this model yet: [{'hash', 'kind', 'text'}], one per distinct text."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute(f"""
+            SELECT d.hash, MIN(d.kind) AS kind, MIN(d.text) AS text FROM search_docs d
+            WHERE d.hash IS NOT NULL AND NOT EXISTS (SELECT 1 FROM embedding_cache e WHERE e.model = ? AND e.hash = d.hash)
+            GROUP BY d.hash {'LIMIT ' + str(int(limit)) if limit else ''}
+        """, (model,)).fetchall()
+        return [dict(r) for r in rows]
+
+def save_embeddings(model: str, items: List[tuple], db_path: str = DB_PATH) -> None:
+    """items: [(hash, vector as float32 bytes, dim)]."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.executemany("INSERT OR REPLACE INTO embedding_cache (model, hash, dim, vector) VALUES (?, ?, ?, ?)",
+                         [(model, h, dim, blob) for h, blob, dim in items])
+        conn.commit()
+
+def prune_embeddings(model: Optional[str] = None, db_path: str = DB_PATH) -> int:
+    """Drops vectors whose text is no longer in the search index (and, with model, vectors of other models)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        n = conn.execute("DELETE FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs WHERE hash IS NOT NULL)").rowcount
+        if model:
+            n += conn.execute("DELETE FROM embedding_cache WHERE model != ?", (model,)).rowcount
+        conn.commit()
+        return n
+
+def embedding_status(model: str, db_path: str = DB_PATH) -> Dict[str, int]:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        total = conn.execute("SELECT COUNT(DISTINCT hash) FROM search_docs WHERE hash IS NOT NULL").fetchone()[0]
+        done = conn.execute("SELECT COUNT(DISTINCT d.hash) FROM search_docs d JOIN embedding_cache e "
+                            "ON e.hash = d.hash AND e.model = ?", (model,)).fetchone()[0]
+        return {"pieces": total, "embedded": done}
+
+def embedded_docs(model: str, db_path: str = DB_PATH) -> tuple:
+    """(rows [{'id', 'video_id', 'kind', 't', 'text'}], list of float32 vector bytes) for every piece with a vector."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute("""
+            SELECT d.id, d.video_id, d.kind, d.t, d.text, e.vector FROM search_docs d
+            JOIN embedding_cache e ON e.hash = d.hash AND e.model = ? ORDER BY d.id
+        """, (model,)).fetchall()
+    return [{k: r[k] for k in ("id", "video_id", "kind", "t", "text")} for r in rows], [r["vector"] for r in rows]
+
+def index_version(db_path: str = DB_PATH) -> tuple:
+    """Changes whenever search pieces or vectors change; used to refresh in-memory caches."""
+    with get_connection(db_path) as conn:
+        return conn.execute("SELECT (SELECT COUNT(*) FROM search_docs), (SELECT MAX(id) FROM search_docs), "
+                            "(SELECT COUNT(*) FROM embedding_cache)").fetchone()[:]

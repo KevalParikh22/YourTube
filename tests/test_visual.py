@@ -91,7 +91,8 @@ class RunVisualTest(unittest.TestCase):
 
     def fake_download(self, vid):
         path = os.path.join(self.tmp, f"{vid}.video.mp4")
-        open(path, "wb").write(b"video")
+        with open(path, "wb") as f:
+            f.write(b"video")
         return path
 
     def fake_extract(self, path, work):

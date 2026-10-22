@@ -76,6 +76,14 @@ class Job:
         try:
             with contextlib.redirect_stdout(self._buf):
                 ok = fn()
+                # Keep the meaning index current after anything that adds or changes searchable text
+                if self.state["kind"] in AUTO_EMBED_KINDS and not self._stop.is_set():
+                    import embedder
+                    try:
+                        print()
+                        embedder.run_embed(should_stop=self.stop_requested, quiet=True)
+                    except Exception as e:  # the main job already finished; just report
+                        print(f"⚠️ Meaning index not updated: {e}")
         except Exception as e:  # surface anything unexpected in the job log
             self._buf.write(f"\n❌ Unexpected error: {e}\n")
         self.state.update(running=False, ok=bool(ok), log=self._buf.getvalue(),
@@ -94,6 +102,7 @@ def _sync(url, browser, cookies_file):
 
 AFTER_SYNC_DETAILS_LIMIT = 50
 
+AUTO_EMBED_KINDS = {"sync", "details", "asr", "visual", "rate"}
 JOB = Job()
 
 def _transcript_categories(settings):
@@ -193,6 +202,21 @@ class Handler(BaseHTTPRequestHandler):
             name = safe_filename(v["title"]) + ".md"
             return self._send(200, video_markdown(v, storage.get_details(vid)), "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
+        if url.path == "/api/retrieve":
+            import retrieval
+            q = (qs.get("q") or [""])[0][:500]
+            if not q.strip():
+                return self._error("q is required")
+            split = lambda name: [x for x in (qs.get(name) or [""])[0].split(",") if x]
+            filters = {"categories": split("categories"), "playlists": split("playlists"), "video_ids": split("videos"),
+                       "include_done": (qs.get("done") or ["1"])[0] != "0"}
+            k = max(1, min(30, int((qs.get("k") or ["8"])[0] or 8)))
+            return self._json(retrieval.retrieve(q, k=k, filters=filters))
+        if url.path == "/api/embed/status":
+            import embedder
+            settings = llm.load_settings()
+            model = embedder.model_name(settings)
+            return self._json({"model": model, "available": embedder.available(settings), **storage.embedding_status(model)})
         if url.path == "/api/visuals/plan":
             import local_visual
             settings = llm.load_settings()
@@ -383,6 +407,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not local_asr.available():
                     return self._error("Local transcription needs faster-whisper and ffmpeg: run bash scripts/setup.sh --local-ai")
                 if not JOB.start("asr", "Transcribe locally", lambda: local_asr.run_asr(ids, should_stop=JOB.stop_requested)):
+                    return self._error("Another task is already running", 409)
+                return self._json({"ok": True})
+
+            if path == "/api/embed":
+                import embedder
+                if not JOB.start("embed", "Update meaning index", lambda: embedder.run_embed(should_stop=JOB.stop_requested)):
                     return self._error("Another task is already running", 409)
                 return self._json({"ok": True})
 

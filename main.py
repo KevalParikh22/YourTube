@@ -139,11 +139,17 @@ def main():
     parser.add_argument("--cookies", "-c", help="Path to cookies.txt file")
     parser.add_argument("--no-open", action="store_true", help="Do not open HTML report in browser automatically")
     parser.add_argument("--list", action="store_true", help="List the playlists on your signed-in account, with their IDs")
+    parser.add_argument("--embed", action="store_true", help="Update the meaning-based search index (needs the Ollama embedding model)")
     parser.add_argument("--details", type=int, nargs="?", const=200, metavar="N",
                         help="Fetch descriptions, chapters and captions for up to N videos that need them (default 200)")
     parser.add_argument("--ai", action="store_true", help="After syncing, ask the configured AI for category suggestions on unsorted videos")
     
     args = parser.parse_args()
+
+    if args.embed:
+        from embedder import run_embed
+        run_embed()
+        return
 
     if args.details is not None:
         from enrich import run_enrich

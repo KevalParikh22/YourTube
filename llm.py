@@ -87,6 +87,7 @@ def default_settings() -> Dict[str, Any]:
         "visuals": {},            # category -> read slides/whiteboards for its videos
         "vision_model": "",       # Ollama model that reads frames; empty = the Ollama text model
         "visual_height": 480,     # frame resolution for slide reading (720 for small text)
+        "embed_model": "qwen3-embedding:0.6b",   # Ollama embedding model for meaning-based search (Phase 2)
     }
 
 def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
@@ -146,6 +147,7 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         "asr_model": settings.get("asr_model") or "auto",
         "vision_model": settings.get("vision_model") or "",
         "visual_height": int(settings.get("visual_height") or 480),
+        "embed_model": settings.get("embed_model") or "qwen3-embedding:0.6b",
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},
         "uses": {t: describe(settings, t) for t in TASKS},

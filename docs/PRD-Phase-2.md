@@ -71,7 +71,12 @@ Library: 360 search pieces from the 3 real videos. 18 hand-written questions, wo
 ## 6. Build order (proposed)
 
 1. **Spike:** embed the current library with `qwen3-embedding:0.6b` and measure speed, size and retrieval quality on 15–20 hand-written questions (keyword vs meaning vs hybrid). Check that answer citations from the local 4B model are accurate. **Done 2026-10-22**: see "Spike results" in §3. Hybrid with keyword weight 0.5, plus a citation check.
-2. Embedding index plus incremental `embed` job, and hybrid retrieval (`retrieve()`) with tests.
+2. Embedding index plus incremental `embed` job, and hybrid retrieval (`retrieve()`) with tests. **Done 2026-10-22.**
+   - `embedding_cache` is keyed by model + text hash (`search_docs.hash`), so re-saved but unchanged text is never embedded again.
+   - `embedder.run_embed` (job kind `embed`) runs automatically after sync, details, transcription, slide and rating jobs. It also has `main.py --embed` and `POST /api/embed`.
+   - `retrieval.retrieve()`: meaning + keywords (half weight), filters (videos, categories, playlists, include done), at most 4 pieces per video, and keyword-only fallback.
+   - Real library: 360 pieces embedded in 9 s. A paraphrased English question finds the LoRA explanation; a Hindi question finds the Neo4j Docker setup in an English video.
+   - Fixed along the way: database connections were never closed (a Phase 0 bug); `get_connection()` now closes them on leaving a `with` block.
 3. Ask page (A1): answers with checked citations and sources.
 4. Follow-ups, Ask about this video (A2) and semantic search (A3).
 5. Setup and status (A4), docs and setup script.

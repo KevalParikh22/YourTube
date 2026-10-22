@@ -89,7 +89,8 @@ class RunAsrTest(unittest.TestCase):
 
     def fake_download(self, vid):
         path = os.path.join(self.tmp, f"{vid}.m4a")
-        open(path, "wb").write(b"audio")
+        with open(path, "wb") as f:
+            f.write(b"audio")
         self.files.append(path)
         return path
 

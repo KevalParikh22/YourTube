@@ -20,6 +20,7 @@ python3 -m venv --without-pip .venv && python3 -m pip --python .venv/bin/python 
 .venv/bin/python main.py "<playlist URL | ID | WL>" [--browser auto|firefox|chrome | --cookies cookies.txt] [--ai] [--no-open]
 .venv/bin/python main.py --list [--browser auto]   # list the signed-in account's playlists and IDs
 .venv/bin/python main.py --details [N]             # fetch details/captions for up to N videos (default 200)
+.venv/bin/python main.py --embed                   # update the meaning-based search index (Ollama embedding model)
 .venv/bin/python -m unittest             # test suite (tests/), runs against temp files
 bash scripts/setup.sh [--local-ai]       # first-time setup for users (venv, deps, optional Ollama + model); guide: docs/SETUP.md
 .venv/bin/python local_setup.py [--pull M | --use M | --recommended]   # local AI check and model setup
@@ -96,6 +97,12 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
   3. `read_frame`: Ollama vision model (`vision_model` or the Ollama text model; checked with `/api/show` capabilities). It returns `content`, `text` and `visual`; frames where `content` is false are dropped.
   4. `save_thumb` writes `frames/<id>/<sec>.jpg` (320 px, git-ignored), then the video is deleted.
 - `visual_segments` holds the results. Search kind `slide`; ratings get on-screen text (at most ¼ of the budget); notes get an "On screen" section. `GET /frames/<id>/<sec>.jpg` serves only that exact shape.
+
+**Meaning-based retrieval (Phase 2)**:
+- `search_docs.hash` (sha1 of kind + text) keys `embedding_cache(model, hash, dim, vector)`, a float32 unit vector.
+- `embedder.run_embed` embeds only missing hashes through Ollama `/api/embed` (`settings["embed_model"]`, default `qwen3-embedding:0.6b`) and prunes orphans. The dashboard `Job` runs it after `sync`, `details`, `asr`, `visual` and `rate` jobs (`AUTO_EMBED_KINDS`).
+- `retrieval.retrieve(q, k, filters)` fuses meaning (cosine over an in-memory matrix, refreshed when `storage.index_version()` changes; queries use `embedder.QUERY_PREFIX`) with FTS any-term keywords at weight 0.5 (RRF k=60). It caps 4 pieces per video and falls back to keywords alone. `GET /api/retrieve?q=&k=&categories=&playlists=&videos=&done=`.
+- `storage.get_connection()` returns a connection that **closes** when its `with` block ends. Always use it in a `with` block.
 
 **Search (`#/search?q=`)**:
 - `search_docs` holds one row per searchable piece (`kind`: title, chapter, summary, notes, description, transcript; `t` = second). The FTS5 table `search_index` (trigram tokenizer, external content) follows it through insert and delete triggers.

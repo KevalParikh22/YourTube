@@ -24,6 +24,7 @@ class DashboardTest(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
+        cls.server.server_close()
 
     def call(self, path, body=None, headers=None):
         hdrs = {"X-YTKB": "1", "Content-Type": "application/json"} if body is not None else {}
@@ -194,3 +195,12 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertGreaterEqual(plan["videos"], 1)
         self.call("/api/videos/visuals", {"ids": ["a"], "value": None})
+
+    def test_retrieve_endpoints(self):
+        self.assertEqual(self.call("/api/retrieve")[0], 400)
+        code, r = self.call("/api/retrieve?q=pasta%20recipe&k=3")
+        self.assertEqual(code, 200)
+        self.assertIn(r["mode"], ("hybrid", "keyword"))
+        code, st = self.call("/api/embed/status")
+        self.assertEqual(code, 200)
+        self.assertIn("embedded", st)

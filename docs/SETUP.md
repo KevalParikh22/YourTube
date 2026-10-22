@@ -228,6 +228,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `visuals.<category>` | off | Read slides for videos in this category |
 | `vision_model` | `""` | Ollama model that reads frames; empty means the Ollama text model |
 | `visual_height` | `480` | Frame quality for slide reading: `480` or `720` |
+| `embed_model` | `"qwen3-embedding:0.6b"` | Ollama model for meaning-based search and questions (Phase 2) |
 | `asr_model` | `"auto"` | Local speech-to-text model: `auto` (large-v3-turbo on a GPU, small on the CPU), `large-v3-turbo`, `small` or `medium` |
 | `interests` | `""` | What you want to learn (used by ratings) |
 | `language` | `"English"` | Language for summaries and reasons |
@@ -253,6 +254,7 @@ dashboard.py   [--port 8765] [--no-open]
 main.py        [URL|ID|WL] [--browser auto|firefox|chrome|chromium|brave|edge] [--cookies FILE]
                [--ai] [--no-open] [--list] [--details [N]]
 local_setup.py [--pull MODEL] [--use MODEL] [--recommended]
+main.py        --embed          # update the meaning-based search index
 ```
 
 ---
