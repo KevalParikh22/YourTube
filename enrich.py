@@ -164,7 +164,7 @@ def run_enrich(
     wanted = [v for v in queue if transcripts_wanted(v['category'], settings)]
     skipped = len(queue) - len(wanted)
     todo = wanted[:limit]
-    print(f"📝 Video details: {len(wanted)} videos need them"
+    print(f"Video details: {len(wanted)} videos need them"
           + (f" (doing the first {limit} this run)" if len(wanted) > limit else "")
           + (f"; {skipped} in no-transcript categories left out" if skipped else "") + ".")
     if not todo:
@@ -178,12 +178,12 @@ def run_enrich(
     try:
         for n, v in enumerate(todo, 1):
             if should_stop():
-                print("⏹️ Stopped. Progress is saved; run again to continue.")
+                print("Stopped. Progress is saved; run again to continue.")
                 break
             try:
                 result = fetch(ydl, v['video_id'])
             except BotCheck:
-                print("🛑 YouTube asked to confirm we're not a bot. Stopping here; try again in an hour or two.")
+                print("YouTube asked to confirm we're not a bot. Stopping here; try again in an hour or two.")
                 return False
             storage.save_details(v['video_id'], result)
             counts[result['status']] = counts.get(result['status'], 0) + 1
@@ -197,5 +197,5 @@ def run_enrich(
             ydl.close()
     labels = {'done': 'with transcript', 'no_captions': 'no captions', 'music': 'music',
               'unavailable': 'unavailable', 'failed': 'failed (retried next run)'}
-    print("✅ " + ", ".join(f"{c} {labels.get(k, k)}" for k, c in counts.items()) + ".")
+    print("" + ", ".join(f"{c} {labels.get(k, k)}" for k, c in counts.items()) + ".")
     return True

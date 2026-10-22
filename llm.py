@@ -1,5 +1,5 @@
 """
-Pluggable LLM providers for YT KB's optional AI categorisation.
+Pluggable LLM providers for YourTube's optional AI categorisation.
 
 Supported providers (picked in the dashboard, stored in settings.json):
   - Claude, through the official `anthropic` SDK

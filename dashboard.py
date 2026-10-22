@@ -1,5 +1,5 @@
 """
-Local web dashboard for YT KB - Phase 0.
+Local web dashboard for YourTube - Phase 0.
 Serves web/index.html plus a small JSON API over the local SQLite database.
 Standard library only; binds to 127.0.0.1 so nothing is exposed to the network.
 
@@ -37,39 +37,78 @@ ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "viva
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 
 class Job:
-    """Runs one background task at a time (a sync or an AI run), capturing its console output."""
+    """
+    Background tasks (syncs, details, AI runs, transcription, downloads) in a queue: one runs at a time and
+    the rest wait their turn, so starting a task while another runs queues it instead of refusing it.
+    The same task (kind + label) can't be queued twice. Console output is captured per task.
+    """
+    HISTORY = 5   # finished tasks kept for the status panel
+
     def __init__(self):
         self.lock = threading.Lock()
-        self.state = {"running": False, "ok": None, "log": "", "kind": None, "label": None,
+        self.state = {"id": 0, "running": False, "ok": None, "log": "", "kind": None, "label": None,
                       "started_at": None, "finished_at": None}
+        self.pending = []    # [{'id', 'kind', 'label', 'fn', 'queued_at'}]
+        self.done = []       # recent finished tasks, newest first (without logs)
+        self._next = 1
         self._buf = io.StringIO()
         self._stop = threading.Event()
+        self._worker = None
 
     def stop_requested(self):
         return self._stop.is_set()
 
-    def request_stop(self):
-        if self.state["running"]:
-            self._stop.set()
-            return True
+    def request_stop(self, task_id=None):
+        """Stops the running task, or (with the id of a waiting one) takes it off the queue."""
+        with self.lock:
+            if task_id is not None and any(t["id"] == task_id for t in self.pending):
+                self.pending = [t for t in self.pending if t["id"] != task_id]
+                return True
+            if self.state["running"] and task_id in (None, self.state["id"]):
+                self._stop.set()
+                return True
         return False
 
     def snapshot(self):
-        snap = dict(self.state)
-        if snap["running"]:
-            snap["log"] = self._buf.getvalue()
+        with self.lock:
+            snap = {k: v for k, v in self.state.items() if k != "key"}
+            if snap["running"]:
+                snap["log"] = self._buf.getvalue()
+            snap["queue"] = [{k: t[k] for k in ("id", "kind", "label", "queued_at")} for t in self.pending]
+            snap["recent"] = list(self.done)
         return snap
 
-    def start(self, kind, label, fn):
+    def start(self, kind, label, fn, key=None):
+        """
+        Queues a task. Returns {'id', 'position'} (0 = started now), or None when the same task (kind + key, default
+        the label) is already waiting or running.
+        """
+        key = json.dumps([kind, key if key is not None else label], sort_keys=True, default=str)
         with self.lock:
-            if self.state["running"]:
-                return False
-            self._buf = io.StringIO()
-            self._stop.clear()
-            self.state = {"running": True, "ok": None, "log": "", "kind": kind, "label": label,
-                          "started_at": datetime.now().isoformat(timespec="seconds"), "finished_at": None}
-        threading.Thread(target=self._run, args=(fn,), daemon=True).start()
-        return True
+            if (self.state["running"] and self.state.get("key") == key) or any(t["key"] == key for t in self.pending):
+                return None
+            task = {"id": self._next, "kind": kind, "label": label, "fn": fn, "key": key,
+                    "queued_at": datetime.now().isoformat(timespec="seconds")}
+            self._next += 1
+            self.pending.append(task)
+            position = len(self.pending) - (0 if self.state["running"] else 1)
+            if not (self._worker and self._worker.is_alive()):
+                self._worker = threading.Thread(target=self._work, daemon=True)
+                self._worker.start()
+        return {"id": task["id"], "position": position}
+
+    def _work(self):
+        while True:
+            with self.lock:
+                if not self.pending:
+                    self._worker = None
+                    return
+                task = self.pending.pop(0)
+                self._buf = io.StringIO()
+                self._stop.clear()
+                self.state = {"id": task["id"], "key": task["key"], "running": True, "ok": None, "log": "", "kind": task["kind"], "label": task["label"],
+                              "started_at": datetime.now().isoformat(timespec="seconds"), "finished_at": None}
+            self._run(task["fn"])
 
     def _run(self, fn):
         ok = False
@@ -83,11 +122,15 @@ class Job:
                         print()
                         embedder.run_embed(should_stop=self.stop_requested, quiet=True)
                     except Exception as e:  # the main job already finished; just report
-                        print(f"⚠️ Meaning index not updated: {e}")
+                        print(f"Warning: Meaning index not updated: {e}")
         except Exception as e:  # surface anything unexpected in the job log
-            self._buf.write(f"\n❌ Unexpected error: {e}\n")
-        self.state.update(running=False, ok=bool(ok), log=self._buf.getvalue(),
-                          finished_at=datetime.now().isoformat(timespec="seconds"))
+            self._buf.write(f"\nUnexpected error: {e}\n")
+        with self.lock:
+            stopped = self._stop.is_set()
+            self.state.update(running=False, ok=bool(ok), stopped=stopped, log=self._buf.getvalue(),
+                              finished_at=datetime.now().isoformat(timespec="seconds"))
+            self.done.insert(0, {k: self.state.get(k) for k in ("id", "kind", "label", "ok", "stopped", "started_at", "finished_at")})
+            del self.done[self.HISTORY:]
 
 def _sync(url, browser, cookies_file):
     from main import run_pipeline  # deferred so the dashboard starts even if yt-dlp is missing
@@ -101,6 +144,15 @@ def _sync(url, browser, cookies_file):
     return ok
 
 AFTER_SYNC_DETAILS_LIMIT = 50
+
+def _label(action, ids):
+    """Task label: 'Rate: 3 videos', 'Rate: <title>' for one video, or the action alone for 'everything that needs it'."""
+    if ids is None:
+        return action
+    if len(ids) == 1:
+        title = next((v["title"] for v in storage.get_all_videos(include_removed=True) if v["video_id"] == ids[0]), ids[0])
+        return f"{action}: {title[:60]}"
+    return f"{action}: {len(ids)} videos"
 
 def _pull_then_index(model):
     """Downloads a model; when it is the embedding model, builds the meaning index right away."""
@@ -141,7 +193,7 @@ def build_state():
     }
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "YTKB/0.2"
+    server_version = "YourTube/0.3"
 
     def log_message(self, fmt, *args):
         pass  # keep the console quiet; errors are returned to the UI
@@ -167,6 +219,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _error(self, msg, code=400):
         self._json({"error": msg}, code)
+
+    def _queued(self, started):
+        """Reply for a task handed to JOB: where it is in the queue, or 409 when it is already there."""
+        if started is None:
+            return self._error("That task is already running or waiting in the queue", 409)
+        snap = JOB.snapshot()
+        ahead = ([snap["label"]] if snap["running"] and snap["id"] != started["id"] else []) + \
+                [t["label"] for t in snap["queue"] if t["id"] < started["id"]]
+        return self._json({"ok": True, "id": started["id"], "position": started["position"], "after": ahead})
 
     def _body(self):
         length = int(self.headers.get("Content-Length") or 0)
@@ -285,9 +346,9 @@ class Handler(BaseHTTPRequestHandler):
             stamp = datetime.now().strftime("%Y%m%d")
             if fmt == "json":
                 return self._send(200, json.dumps(videos, indent=2, default=str, ensure_ascii=False),
-                                  extra_headers={"Content-Disposition": f'attachment; filename="yt_kb_{stamp}.json"'})
+                                  extra_headers={"Content-Disposition": f'attachment; filename="yourtube_{stamp}.json"'})
             return self._send(200, "﻿" + videos_to_csv(videos), "text/csv; charset=utf-8",
-                              extra_headers={"Content-Disposition": f'attachment; filename="yt_kb_{stamp}.csv"'})
+                              extra_headers={"Content-Disposition": f'attachment; filename="yourtube_{stamp}.csv"'})
         return self._error("Not found", 404)
 
     # --- POST ------------------------------------------------------------------
@@ -378,9 +439,7 @@ class Handler(BaseHTTPRequestHandler):
                     cookies = _clean(body.get("cookies_file"))
                     if not cookies or not os.path.isfile(cookies):
                         return self._error("cookies.txt file not found")
-                if not JOB.start("sync", url, lambda: _sync(url, browser, cookies)):
-                    return self._error("Another task is already running", 409)
-                return self._json({"ok": True})
+                return self._queued(JOB.start("sync", f"Sync {url}", lambda: _sync(url, browser, cookies)))
 
             if path.startswith("/api/ai/") or path == "/api/presets":
                 return self._ai(path, body)
@@ -394,29 +453,28 @@ class Handler(BaseHTTPRequestHandler):
                 data = markdown_zip(videos, {v["video_id"]: storage.get_details(v["video_id"]) for v in videos})
                 stamp = datetime.now().strftime("%Y%m%d")
                 return self._send(200, data, "application/zip",
-                                  extra_headers={"Content-Disposition": f'attachment; filename="yt_kb_notes_{stamp}.zip"'})
+                                  extra_headers={"Content-Disposition": f'attachment; filename="yourtube_notes_{stamp}.zip"'})
 
             if path == "/api/job/cancel":
-                return self._json({"ok": JOB.request_stop()})
+                task_id = body.get("id")
+                if task_id is not None and (not isinstance(task_id, int) or isinstance(task_id, bool)):
+                    return self._error("id must be a number")
+                return self._json({"ok": JOB.request_stop(task_id)})
 
             if path == "/api/details/fetch":
                 from enrich import run_enrich
                 ids = body.get("ids")
                 if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
                     return self._error("ids must be a list of video IDs")
-                if not JOB.start("details", "Fetch video details",
-                                 lambda: run_enrich(video_ids=ids, should_stop=JOB.stop_requested)):
-                    return self._error("Another task is already running", 409)
-                return self._json({"ok": True})
+                return self._queued(JOB.start("details", _label("Fetch details", ids),
+                                              lambda: run_enrich(video_ids=ids, should_stop=JOB.stop_requested), key=ids))
 
             if path == "/api/local/pull":
                 import local_setup
                 model = _clean(body.get("model"))
                 if not isinstance(model, str) or not re.fullmatch(r"[\w.\-/]+(:[\w.\-]+)?", model):
                     return self._error("Not a valid model name")
-                if not JOB.start("pull", f"Download {model}", lambda: _pull_then_index(model)):
-                    return self._error("Another task is already running", 409)
-                return self._json({"ok": True})
+                return self._queued(JOB.start("pull", f"Download {model}", lambda: _pull_then_index(model)))
 
             if path == "/api/local/use":
                 import local_setup
@@ -434,9 +492,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("ids must be a list of video IDs")
                 if not local_asr.available():
                     return self._error("Local transcription needs faster-whisper and ffmpeg: run bash scripts/setup.sh --local-ai")
-                if not JOB.start("asr", "Transcribe locally", lambda: local_asr.run_asr(ids, should_stop=JOB.stop_requested)):
-                    return self._error("Another task is already running", 409)
-                return self._json({"ok": True})
+                return self._queued(JOB.start("asr", _label("Transcribe locally", ids),
+                                              lambda: local_asr.run_asr(ids, should_stop=JOB.stop_requested), key=ids))
 
             if path == "/api/ask":
                 import asker
@@ -467,20 +524,17 @@ class Handler(BaseHTTPRequestHandler):
                 def run():
                     if rebuild:
                         model = embedder.model_name(llm.load_settings())
-                        print(f"🧹 Rebuilding the meaning index: cleared {storage.clear_embeddings(model)} vectors of {model}.")
+                        print(f"Rebuilding the meaning index: cleared {storage.clear_embeddings(model)} vectors of {model}.")
                     return embedder.run_embed(should_stop=JOB.stop_requested)
-                if not JOB.start("embed", "Rebuild meaning index" if rebuild else "Update meaning index", run):
-                    return self._error("Another task is already running", 409)
-                return self._json({"ok": True})
+                return self._queued(JOB.start("embed", "Rebuild meaning index" if rebuild else "Update meaning index", run))
 
             if path == "/api/visuals":
                 import local_visual
                 ids = body.get("ids")
                 if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
                     return self._error("ids must be a list of video IDs")
-                if not JOB.start("visual", "Read slides", lambda: local_visual.run_visual(ids, should_stop=JOB.stop_requested)):
-                    return self._error("Another task is already running", 409)
-                return self._json({"ok": True})
+                return self._queued(JOB.start("visual", _label("Read slides", ids),
+                                              lambda: local_visual.run_visual(ids, should_stop=JOB.stop_requested), key=ids))
 
             if path == "/api/videos/visuals":
                 ids = body.get("ids")
@@ -513,9 +567,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(rater.estimate(ids))
                 if not llm.is_configured(llm.load_settings(), "rate"):
                     return self._error("Choose an AI for ratings on the AI page first")
-                if not JOB.start("rate", "Rate videos", lambda: rater.run_rate(ids, should_stop=JOB.stop_requested)):
-                    return self._error("Another task is already running", 409)
-                return self._json({"ok": True})
+                return self._queued(JOB.start("rate", _label("Rate", ids), lambda: rater.run_rate(ids, should_stop=JOB.stop_requested), key=ids))
 
             if path == "/api/details/settings":
                 settings = llm.load_settings()
@@ -624,9 +676,7 @@ class Handler(BaseHTTPRequestHandler):
                 if scope not in ("unsorted", "unlocked"):
                     return self._error("Invalid scope")
                 started = JOB.start("suggest", "Suggest categories", lambda: run_suggest(scope))
-            if not started:
-                return self._error("Another task is already running", 409)
-            return self._json({"ok": True})
+            return self._queued(started)
 
         if path == "/api/ai/proposal/apply":
             cats = body.get("categories")
@@ -685,7 +735,7 @@ def _classifier():
     return lambda title, channel: classify_video(title, channel, taxonomy)
 
 def main():
-    parser = argparse.ArgumentParser(description="YT KB local dashboard")
+    parser = argparse.ArgumentParser(description="YourTube local dashboard")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-open", action="store_true", help="Do not open the dashboard in a browser")
     args = parser.parse_args()
@@ -693,7 +743,7 @@ def main():
     storage.init_db()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}/"
-    print(f"⚡ YT KB dashboard running at {url}  (Ctrl+C to stop)")
+    print(f"YourTube dashboard running at {url}  (Ctrl+C to stop)")
     if not args.no_open:
         webbrowser.open(url)
     try:

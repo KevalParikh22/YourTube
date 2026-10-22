@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this project is
 
-YT KB (YouTube Knowledge Base): a local Python tool that reads YouTube playlists (often a private "Watch Later"-style backlog), sorts videos into topic categories, works out watch time at 1x through 2x speed, fetches transcripts, rates videos with AI (Watch / Skim / Skip), searches everything, and tracks progress in a local dashboard. Specs:
+**YourTube** (formerly YT KB; internal names such as `yt_kb.db`, `YTKB_*` and the `X-YTKB` header keep the old name): a local Python tool that reads YouTube playlists (often a private "Watch Later"-style backlog), sorts videos into topic categories, works out watch time at 1x through 2x speed, fetches transcripts, rates videos with AI (Watch / Skim / Skip), searches everything, and tracks progress in a local dashboard. Specs:
 - `docs/PRD-Phase-0.md` (original) and `docs/Phase-0-Research-and-Improvements.md` (research, revised requirements v0.2, roadmap, release checklist). The second supersedes the first where they disagree.
 - `docs/PRD-Phase-1.md`: complete.
 - `docs/PRD-Phase-2.5.md`: everything processed locally (complete).
@@ -58,7 +58,7 @@ Every stage passes around a list of plain video dicts with the keys `video_id, t
 - `POST /api/ai/{settings,test,models,discover,suggest}`, `/api/ai/proposal/{apply,dismiss}`, `/api/ai/suggestions/{accept,dismiss}`
 - `POST /api/details/{fetch,settings}`, `/api/rate`, `/api/rate/estimate`, `/api/local/{pull,use}`, `/api/export/markdown`
 
-POSTs must send the `X-YTKB: 1` header and JSON content. The Host header must be localhost. Together these act as CSRF and DNS-rebinding protection; keep them. Syncs, details fetches, AI runs and model downloads share one background `Job` slot (`kind`: sync, details, discover, suggest, rate, pull), with stdout captured into the job log. A job can be stopped with `POST /api/job/cancel` if it checks `JOB.stop_requested`. When `auto_after_sync` is on, a sync also asks for suggestions on unsorted videos. The client computes metrics itself (mirroring `metrics.py`) from the video list in `/api/state`. Setting a category through the API locks it; `reset_category` unlocks it and re-classifies.
+POSTs must send the `X-YTKB: 1` header and JSON content. The Host header must be localhost. Together these act as CSRF and DNS-rebinding protection; keep them. Syncs, details fetches, AI runs, transcription, slide reading, downloads and index updates go through one background **queue** (`dashboard.Job`): one task runs at a time, the rest wait in order. `JOB.start(kind, label, fn, key=None)` returns `{id, position}`, or None when the same kind + key (default the label; per-video tasks pass their ids) is already running or waiting; endpoints reply through `Handler._queued` (`{position, after}`, 409 for duplicates). `/api/job` returns the running or last task plus `queue` and `recent` (last 5). `POST /api/job/cancel {id?}` stops the running task (if it checks `JOB.stop_requested`) or removes a waiting one. Job output is plain text: no emojis; errors start with "Error:", warnings with "Warning:". When `auto_after_sync` is on, a sync also asks for suggestions on unsorted videos. The client computes metrics itself (mirroring `metrics.py`) from the video list in `/api/state`. Setting a category through the API locks it; `reset_category` unlocks it and re-classifies.
 
 ## Phase 1 (complete)
 

@@ -134,10 +134,10 @@ def use_embed_model(model: str) -> None:
 def pull_model(model: str, should_stop: Callable[[], bool] = lambda: False) -> bool:
     """Asks the local Ollama to download a model, printing progress for the job log."""
     if not re.fullmatch(r"[\w.\-/]+(:[\w.\-]+)?", model or ""):
-        print(f"❌ Not a valid model name: {model!r}")
+        print(f"Error: Not a valid model name: {model!r}")
         return False
     base = llm.ollama_base(llm.load_settings()["providers"]["ollama"].get("base_url"))
-    print(f"⬇️ Downloading {model} into Ollama. Large models take a while; you can keep using the app.")
+    print(f"Downloading {model} into Ollama. Large models take a while; you can keep using the app.")
     req = urllib.request.Request(base + "/api/pull", data=json.dumps({"model": model, "stream": True}).encode(),
                                  headers={"Content-Type": "application/json"}, method="POST")
     last = -10
@@ -145,11 +145,11 @@ def pull_model(model: str, should_stop: Callable[[], bool] = lambda: False) -> b
         with urllib.request.urlopen(req, timeout=60) as r:
             for raw in r:
                 if should_stop():
-                    print("⏹️ Stopped. Run it again to resume the download.")
+                    print("Stopped. Run it again to resume the download.")
                     return False
                 msg = json.loads(raw or b"{}")
                 if msg.get("error"):
-                    print(f"❌ {msg['error']}")
+                    print(f"Error: {msg['error']}")
                     return False
                 total, done = msg.get("total"), msg.get("completed")
                 if total and done:
@@ -160,9 +160,9 @@ def pull_model(model: str, should_stop: Callable[[], bool] = lambda: False) -> b
                 elif msg.get("status") and not msg["status"].startswith("pulling"):
                     print(f"   {msg['status']}")
     except (urllib.error.URLError, OSError) as e:
-        print(f"❌ Could not reach Ollama at {base}: {e}")
+        print(f"Error: Could not reach Ollama at {base}: {e}")
         return False
-    print(f"✅ {model} is ready. Choose it on the AI page.")
+    print(f"{model} is ready. Choose it on the AI page.")
     return True
 
 
@@ -179,12 +179,12 @@ def use_model(model: str, tasks: Optional[List[str]] = None) -> None:
 
 def main() -> None:
     import argparse
-    parser = argparse.ArgumentParser(description="Check and set up local AI for YT KB")
+    parser = argparse.ArgumentParser(description="Check and set up local AI for YourTube")
     parser.add_argument("--pull", metavar="MODEL", help="download a model into Ollama")
     parser.add_argument("--recommended", action="store_true", help="print only the best-fit model name")
-    parser.add_argument("--use", metavar="MODEL", help="make this Ollama model YT KB's default AI")
-    parser.add_argument("--embed-model", action="store_true", help="print only the embedding model YT KB uses")
-    parser.add_argument("--use-embed", metavar="MODEL", help="make this Ollama model YT KB's embedding model")
+    parser.add_argument("--use", metavar="MODEL", help="make this Ollama model YourTube's default AI")
+    parser.add_argument("--embed-model", action="store_true", help="print only the embedding model YourTube uses")
+    parser.add_argument("--use-embed", metavar="MODEL", help="make this Ollama model YourTube's embedding model")
     args = parser.parse_args()
 
     if args.embed_model:
@@ -193,7 +193,7 @@ def main() -> None:
         return
     if args.use_embed:
         use_embed_model(args.use_embed)
-        print(f"✅ Meaning-based search now uses {args.use_embed}. Build the index: .venv/bin/python main.py --embed")
+        print(f"Meaning-based search now uses {args.use_embed}. Build the index: .venv/bin/python main.py --embed")
         return
     st = status()
     best = next(r for r in st["recommended"] if r["best"])
@@ -204,10 +204,10 @@ def main() -> None:
         raise SystemExit(0 if pull_model(args.pull) else 1)
     if args.use:
         use_model(args.use)
-        print(f"✅ YT KB now uses Ollama · {args.use} by default (change it on the AI page).")
+        print(f"YourTube now uses Ollama · {args.use} by default (change it on the AI page).")
         return
-    mark = lambda ok: "✅" if ok else "⚠️ "
-    print("YT KB local AI check")
+    mark = lambda ok: "" if ok else "Warning: "
+    print("YourTube local AI check")
     for key, label in (("gpu", "GPU"), ("memory", "Memory"), ("ffmpeg", "ffmpeg"), ("ollama", "Ollama"), ("whisper", "faster-whisper")):
         print(f"  {mark(st[key]['ok'])} {label:<15} {st[key]['detail']}")
     for m in st["ollama"].get("models", []):

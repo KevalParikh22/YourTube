@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>YT KB</title>
+<title>YourTube</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
@@ -356,6 +356,25 @@
   .hist a:hover { background: var(--sunken); color: var(--ink); }
   .hist a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
   .hist a small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
+  #jobs { position: relative; }
+  .done-banner { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; }
+  .done-banner.ok { background: var(--watch-bg); color: var(--watch); }
+  .done-banner.bad { background: var(--skip-bg); color: var(--skip); }
+  .done-banner span { color: var(--ink-2); }
+  .jobpill { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 15px;
+    border: 1px solid var(--line-strong); font-size: 12.5px; font-weight: 500; color: var(--ink-2); max-width: 260px; }
+  .jobpill .jl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .jobpill b { font-weight: 600; color: var(--ink-3); white-space: nowrap; }
+  .jobpill.run { border-color: var(--accent); color: var(--ink); }
+  .jobpill.ok { background: var(--watch-bg); border-color: var(--watch); color: var(--watch); }
+  .jobpill.bad { background: var(--skip-bg); border-color: var(--skip); color: var(--skip); }
+  .jobpill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .jobpanel { position: absolute; right: 0; top: 38px; z-index: 30; width: min(380px, calc(100vw - 32px)); background: var(--raised);
+    border: 1px solid var(--line-strong); border-radius: 10px; padding: 12px 14px; box-shadow: 0 8px 28px rgba(0,0,0,.18); }
+  .jobrow { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; }
+  .jobrow .jl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .st { font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+  .st-run { color: var(--accent); } .st-wait { color: var(--ink-3); } .st-ok { color: var(--watch); } .st-bad, .st-stop { color: var(--skip); }
   .search-big { width: 100%; height: 46px !important; font-size: 17px !important; padding: 0 14px !important; margin-top: 18px; }
   .s-row { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .hits { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -445,11 +464,12 @@
 <body>
 <header class="bar">
   <div class="bar-in">
-    <a class="logo" href="#/">YT KB</a>
+    <a class="logo" href="#/">YourTube</a>
     <nav class="tabs" id="tabs"></nav>
     <div class="bar-right">
       <input type="search" id="gsearch" placeholder="Search everything" aria-label="Search titles, transcripts, chapters and notes">
       <a class="btn icon-btn" id="gsearch-btn" href="#/search" aria-label="Search" title="Search">⌕</a>
+      <span id="jobs"></span>
       <select id="speed" aria-label="Playback speed"></select>
       <button class="btn icon-btn" id="theme" aria-label="Theme"></button>
     </div>
@@ -621,9 +641,9 @@ async function load() {
   const ids = new Set(videos().map(v => v.video_id));
   for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
   render();
-  if (S.data.job.running) pollJob();
+  if (S.data.job.running || S.data.job.queue?.length) pollJob();
 }
-function render() { renderBar(); renderView(); renderDrawer(); }
+function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); }
 function refresh() { const y = scrollY; renderView(); scrollTo(0, y); }
 function renderBar() {
   const r = route();
@@ -659,7 +679,7 @@ function renderView() {
   }
   else { v.innerHTML = videos().length ? viewLibrary() : emptyState(); renderList(); }
 }
-const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a YouTube playlist to get started. YT KB only reads it and never changes it.<br><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
+const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a YouTube playlist to get started. YourTube only reads it and never changes it.<br><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
 
 /* ---------------- library ---------------- */
 function statusFilter(v, status, src) {
@@ -791,7 +811,7 @@ async function exportNotes(ids) {
   try {
     const r = await fetch('/api/export/markdown', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-YTKB': '1' }, body: JSON.stringify({ ids }) });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `Export failed (${r.status})`);
-    const name = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'yt_kb_notes.zip';
+    const name = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || 'yourtube_notes.zip';
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await r.blob()), download: name });
     document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
     toast(`Exported ${plural(ids.length, 'note')}`);
@@ -907,7 +927,7 @@ function viewTriage() {
     <p class="lede">${open.length - unrated} of ${plural(open.length, 'unwatched video')} rated. The AI weighs depth, fit with your interests, time against value and freshness. Nothing changes until you act.</p>
     ${!ai.ready_for.rate ? `<div class="banner"><span>Choose an AI for ratings to get a Watch / Skim / Skip verdict for every video.</span><a class="btn btn-sm" href="#/ai">Set up AI</a></div>`
       : unrated ? `<div class="banner"><span>${plural(unrated, 'video')} not rated yet${open.filter(v => !v.rating && v.details?.status !== 'done').length ? '. Videos without transcripts are rated from title and description only' : ''}.</span>
-        <button class="btn btn-dark btn-sm" data-act="rate-batch" data-job-btn ${running ? 'disabled' : ''}>Rate ${plural(unrated, 'video')}</button></div>` : ''}
+        <button class="btn btn-dark btn-sm" data-act="rate-batch" data-job-btn>Rate ${plural(unrated, 'video')}</button></div>` : ''}
     <div id="job"></div>
   </section>
   <div class="tri-bar">
@@ -941,7 +961,7 @@ function triRow(v) {
         : `${r?.verdict === 'skip' ? `<button class="btn btn-dark btn-sm" data-act="tri-set" data-id="${esc(v.video_id)}" data-status="skipped">Skip it</button>` : ''}
            <button class="btn ${r && r.verdict !== 'skip' ? 'btn-dark ' : ''}btn-sm" data-act="play-at" data-id="${esc(v.video_id)}" data-t="${firstAt}">▶ ${r?.verdict === 'skim' && r.skim.length ? 'Skim' : 'Watch'}</button>
            ${r?.verdict !== 'skip' ? `<button class="btn btn-sm" data-act="tri-set" data-id="${esc(v.video_id)}" data-status="skipped">Skip</button>` : ''}
-           ${!r && S.data.ai.ready_for.rate ? `<button class="btn-text" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>Rate</button>` : ''}`}
+           ${!r && S.data.ai.ready_for.rate ? `<button class="btn-text" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate</button>` : ''}`}
     </div>
   </div>`;
 }
@@ -966,10 +986,7 @@ async function startRate(ids) {
       const cost = est.cost === 0 ? 'free (local model)' : est.cost == null ? 'cost unknown for this model' : `about $${est.cost < 0.01 ? '0.01 or less' : est.cost.toFixed(2)}`;
       if (!confirm(`Rate ${plural(est.videos, 'video')} with ${est.uses}?\n\n${est.with_transcript} with transcripts, ${est.videos - est.with_transcript} from title only.\n≈ ${Math.round(est.tokens_in / 1000)}k tokens in, ${cost}.`)) return;
     }
-    await api('/api/rate', ids ? { ids } : {});
-    S.data.job = { running: true, log: '', kind: 'rate' };
-    if (route() === 'triage') updateJob(); else toast('Rating…');
-    pollJob();
+    await queued(await api('/api/rate', ids ? { ids } : {}), ids?.length === 1 ? 'Rating' : 'Rating run');
   } catch (e) { toast(e.message, true); }
 }
 function playAt(id, t) { openDrawer(id); if (t) seek(t); }
@@ -983,7 +1000,7 @@ function viewSources() {
     <div class="eyebrow">Playlists</div>
     <h1 class="display">${plural(pls.length, 'playlist')}<em>${plural(videos().length, 'video')} in your library</em></h1>
     <div class="policy">
-      <div><b>Read-only</b><p>YT KB only reads your playlists. It never adds, removes or reorders anything on YouTube.</p></div>
+      <div><b>Read-only</b><p>YourTube only reads your playlists. It never adds, removes or reorders anything on YouTube.</p></div>
       <div><b>Add as many as you like</b><p>A video saved in two playlists shows up once in your library and keeps a single status.</p></div>
       <div><b>Kept until you've watched it</b><p>If you remove a video on YouTube, it stays here as "no longer in playlist" until you mark it watched.</p></div>
     </div>
@@ -999,7 +1016,7 @@ function viewSources() {
           ${[...BROWSERS, ['public', 'None (public or unlisted)'], ['cookies', 'cookies.txt file']]
             .map(([k, l]) => `<option value="${k}" ${g.access === k ? 'selected' : ''}>${l}</option>`).join('')}
         </select></div>
-      <div style="align-self:end"><button class="btn btn-dark" id="run" data-act="ingest" ${job.running ? 'disabled' : ''}>${job.running ? 'Working…' : 'Sync'}</button></div>
+      <div style="align-self:end"><button class="btn btn-dark" id="run" data-act="ingest">Sync</button></div>
     </div>
     ${g.access === 'cookies' ? `<div style="margin-top:12px"><label class="field-label" for="i-cookies">Path to cookies.txt</label>
       <input id="i-cookies" type="text" data-input="i-cookies" value="${esc(g.cookies)}" placeholder="C:\\Users\\you\\cookies.txt" style="width:100%"></div>` : ''}
@@ -1022,7 +1039,7 @@ function viewSources() {
         <td class="r">${p.active_videos || 0}</td>
         <td class="r">${fmt(p.duration_seconds)}</td>
         <td class="muted">${esc(fmtDate(p.updated_at))}</td>
-        <td class="r" style="white-space:nowrap"><button class="btn btn-sm" data-act="resync" data-url="${esc(p.original_url || p.id)}" ${job.running ? 'disabled' : ''}>Sync</button>
+        <td class="r" style="white-space:nowrap"><button class="btn btn-sm" data-act="resync" data-url="${esc(p.original_url || p.id)}">Sync</button>
           ${/^[\w-]+$/.test(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : '<p class="note">No playlists yet. Add one above.</p>'}
   </section>`;
@@ -1093,7 +1110,7 @@ function viewAsr() {
       Where captions exist, both are kept and you choose per video.</p>
     ${!P.available ? `<div class="banner"><span>Needs faster-whisper. Install it with <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
       : P.videos ? `<div class="actions">
-          <button class="btn btn-dark btn-sm" data-act="asr-run" data-job-btn ${running ? 'disabled' : ''}>Transcribe ${plural(P.videos, 'video')} locally</button>
+          <button class="btn btn-dark btn-sm" data-act="asr-run" data-job-btn>Transcribe ${plural(P.videos, 'video')} locally</button>
           <span class="faint" style="font-size:12.5px">${P.no_captions} without captions · ${P.wrong_script} wrong script · ${fmt(P.audio_s)} of audio ·
             about ${Math.max(1, Math.round(P.minutes))} min ${where} (${esc(P.model)})</span></div>`
       : '<p class="hint">Nothing to transcribe: every fetched video has usable captions. Fetch details for more videos first.</p>'}
@@ -1112,62 +1129,103 @@ function fmtDate(s) {
 }
 // Job times are local ISO strings from the server, unlike SQLite's UTC timestamps
 const fmtLocal = s => { const d = new Date(s || ''); return isNaN(d) ? '' : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
+// Which step a running task is on, from its log: a sync reads, sorts, saves, then may fetch details and update the index
+const STAGES = [[/^Step 1/m, 'Reading the playlist'], [/^Step 2/m, 'Sorting into categories'], [/^Step [3-5]/m, 'Saving'],
+  [/^AI suggestions/m, 'AI sorting'], [/^Video details/m, 'Fetching details'], [/meaning index/m, 'Updating the search index']];
+function jobStage(job) {
+  let at = -1, label = '';
+  for (const [re, name] of STAGES) {
+    const m = [...(job.log || '').matchAll(new RegExp(re.source, 'gm'))].pop();
+    if (m && m.index > at) { at = m.index; label = name; }
+  }
+  return label;
+}
+const lastError = log => ((log || '').split('\n').reverse().find(l => /^\s*(Error|Unexpected error)/.test(l)) || '').trim().slice(0, 160);
+function renderJobs() {
+  const box = $('#jobs'), job = S.data?.job;
+  if (!box || !job) return;
+  const waiting = job.queue?.length || 0, last = job.recent?.[0];
+  const flash = !job.running && last && S.flash?.id === last.id && Date.now() < S.flash.until;
+  if (flash) setTimeout(renderJobs, S.flash.until - Date.now() + 50);
+  const pill = job.running
+    ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}"><span class="spin"></span><span class="jl">${esc(job.label || 'Working')}</span>${waiting ? `<b>+${waiting} waiting</b>` : ''}</button>`
+    : flash ? `<button class="jobpill ${last.ok && !last.stopped ? 'ok' : 'bad'}" data-act="jobs-toggle"><span class="jl">${last.stopped ? 'Stopped' : last.ok ? 'Finished' : 'Failed'}: ${esc(last.label)}</span></button>`
+    : job.recent?.length ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks">Tasks</button>` : '';
+  const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', wait: 'Waiting', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
+      <span class="jl" title="${esc(t.label)}">${esc(t.label)}</span>${action}</div>`;
+  const panel = S.jobsOpen ? `<div class="jobpanel" role="dialog" aria-label="Tasks">
+      ${job.running ? row(job, 'run', '<button class="btn-text" data-act="job-stop">Stop</button>') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
+      ${(job.queue || []).map(t => row(t, 'wait', `<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button>`)).join('')}
+      ${(job.recent || []).length ? `<div class="faint" style="font-size:11.5px;margin:10px 0 4px">Recent</div>` + job.recent.map(t => row(t, t.stopped ? 'stop' : t.ok ? 'ok' : 'bad',
+        `<span class="faint" style="font-size:11.5px">${esc(fmtLocal(t.finished_at))}</span>`)).join('') : ''}
+    </div>` : '';
+  box.innerHTML = pill + panel;
+}
 function updateJob() {
   const box = $('#job'), job = S.data.job;
   if (!box) return;
-  const btn = $('#run');
-  if (btn) { btn.disabled = !!job.running; btn.textContent = job.running ? 'Working…' : 'Sync'; }
-  for (const b of $$('[data-job-btn]')) b.disabled = !!job.running;
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
     : route() === 'ai' ? ['pull', 'embed'].includes(job.kind)
     : ['sync', 'details', 'asr', 'visual'].includes(job.kind) || !job.kind;
-  if (!mine || (!job.log && !job.running)) { box.innerHTML = ''; return; }
+  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route() === 'ai' ? ['pull', 'embed'] : ['sync', 'details', 'asr', 'visual'];
+  const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
+  const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
+  if (!mine || (!job.log && !job.running)) { box.innerHTML = waitLine; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate', 'pull', 'asr', 'visual', 'embed'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
-    : `<span class="status-line">${job.ok ? 'Finished' : '<span class="warn-text">Failed</span>'} · ${esc(fmtLocal(job.finished_at))}</span>`;
-  box.innerHTML = `<div style="margin-top:18px">${head}</div><pre class="log">${esc(job.log || '')}</pre>`;
+  const stage = job.running ? jobStage(job) : '';
+  const head = job.running ? `<span class="status-line"><span class="spin"></span>${stage ? `<b style="font-weight:600">${esc(stage)}</b>&nbsp;·&nbsp;` : ''}${text[0]}${['details', 'sync', 'rate', 'pull', 'asr', 'visual', 'embed'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
+    : `<div class="done-banner ${job.stopped ? 'bad' : job.ok ? 'ok' : 'bad'}"><b>${job.stopped ? 'Stopped' : job.ok ? 'Finished' : 'Failed'}</b>
+        <span>${esc(job.label || '')} · ${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span></div>`;
+  box.innerHTML = `<div style="margin-top:18px">${head}</div>${waitLine}<pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
   log.scrollTop = log.scrollHeight;
 }
 async function pollJob() {
   if (S.polling) return;
   S.polling = true;
-  let job;
   try {
     for (;;) {
-      job = await api('/api/job');
+      const job = await api('/api/job');
+      const seen = S.data.job?.recent?.[0]?.id ?? 0, last = job.recent?.[0];
       S.data.job = job;
-      updateJob();
-      if (!job.running) break;
+      if (last && last.id !== seen) await taskFinished(last);
+      updateJob(); renderJobs();
+      if (!job.running && !job.queue.length) break;
       await sleep(1000);
     }
   } catch (e) { toast(e.message, true); } finally { S.polling = false; }
-  if (job) {
-    const t = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-    if (['details', 'sync', 'asr', 'visual'].includes(job.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
-    S.busy = {};
-    if (job.kind === 'pull' || job.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
-    toast(job.ok ? t[1] : t[2], !job.ok); await load();
-  }
+}
+async function taskFinished(t) {
+  const text = JOB_TEXT[t.kind] || JOB_TEXT.sync;
+  if (['details', 'sync', 'asr', 'visual'].includes(t.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
+  if (!S.data.job.running) S.busy = {};
+  if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
+  S.flash = { id: t.id, until: Date.now() + 15000 };
+  toast(t.stopped ? `Stopped: ${t.label}` : t.ok ? text[1] : text[2], !t.ok);
+  const job = S.data.job; await load(); S.data.job = job;
+}
+// After asking the server to start a task: say whether it started or is waiting, then follow the queue
+async function queued(res, what) {
+  toast(res.position ? `${what} queued. It starts after: ${res.after.join(', ')}` : `${what} started`);
+  await refreshJob();
+}
+async function refreshJob() {
+  try { S.data.job = await api('/api/job'); } catch (e) { return; }
+  updateJob(); renderJobs(); pollJob();
 }
 async function startAi(path, body = {}) {
   try {
-    await api(path, body);
-    S.data.job = { running: true, log: '', kind: path.endsWith('discover') ? 'discover' : 'suggest' };
+    const res = await api(path, body);
     if (route() !== 'categories') location.hash = '#/categories';
-    else updateJob();
-    pollJob();
+    await queued(res, path.endsWith('discover') ? 'Category proposal' : 'Category suggestions');
   } catch (e) { toast(e.message, true); }
 }
 async function runIngest(url) {
   const g = S.ingest;
   const browser = BROWSERS.some(([k]) => k === g.access) ? g.access : null;
   try {
-    await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies });
-    S.data.job = { running: true, log: '' };
-    updateJob();
-    pollJob();
+    await queued(await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies }), 'Sync');
   } catch (e) { toast(e.message, true); }
 }
 
@@ -1192,7 +1250,7 @@ function viewCategories() {
     <div class="actions">
       <button class="btn btn-dark btn-sm" data-act="reclassify">Save and re-sort</button>
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
-      ${ai.ready_for.categorize ? `<button class="btn btn-sm" data-act="ai-discover" data-job-btn ${running ? 'disabled' : ''}>Propose categories with AI</button>
+      ${ai.ready_for.categorize ? `<button class="btn btn-sm" data-act="ai-discover" data-job-btn>Propose categories with AI</button>
         <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${running || !toSort ? 'disabled' : ''} title="${toSort ? '' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort || ''} unsorted with AI</button>`
         : `<a class="btn-text" href="#/ai">Set up AI sorting →</a>`}
       ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>`
@@ -1457,7 +1515,7 @@ function viewSetup() {
   <section>
     <div class="eyebrow">Setup</div>
     <h1 class="display">Install and configure<em>scripts, commands and settings</em></h1>
-    <p class="lede" style="max-width:700px">Download the setup script, put it in the YT KB folder (the one with <code>dashboard.py</code>) and run it.
+    <p class="lede" style="max-width:700px">Download the setup script, put it in the YourTube folder (the one with <code>dashboard.py</code>) and run it.
       It installs the app, and with the local AI option also Ollama and a model that fits the computer. It asks before installing anything system-wide.</p>
     <div class="dl-grid">
       <a class="dl" href="/download/setup.sh" download><b>⬇ setup.sh</b><span>Linux and macOS · <code>bash setup.sh --local-ai</code></span></a>
@@ -1609,9 +1667,9 @@ function viewLocal() {
         <span class="faint" style="font-size:12.5px"> · ${m.size_gb} GB${m.params ? ' · ' + esc(m.params) : ''}${m.quant ? ' · ' + esc(m.quant) : ''}</span></div>${useBtn(m.name)}</div>`).join('')}
       ${L.recommended.filter(r => !have.has(r.model)).map(r => `<div class="prov"><div>${r.best ? '<span class="vb vb-watch" style="margin-right:6px">Best fit</span>' : ''}<b style="font-weight:500">${esc(r.model)}</b>
         <span class="faint" style="font-size:12.5px"> · ${esc(r.size)} · ${esc(r.why)}${r.fits_gpu ? '' : ' Too big for this GPU: runs partly on the CPU.'}</span></div>
-        <button class="btn btn-sm ${r.best ? 'btn-dark' : ''}" data-act="local-pull" data-model="${esc(r.model)}" data-job-btn ${running ? 'disabled' : ''}>Download</button></div>`).join('')}
+        <button class="btn btn-sm ${r.best ? 'btn-dark' : ''}" data-act="local-pull" data-model="${esc(r.model)}" data-job-btn>Download</button></div>`).join('')}
       <div class="actions"><input type="text" id="local-model" placeholder="Any Ollama model, e.g. gemma4:e2b" style="width:260px">
-        <button class="btn btn-sm" data-act="local-pull" data-job-btn ${running ? 'disabled' : ''}>Download</button></div>` : ''}
+        <button class="btn btn-sm" data-act="local-pull" data-job-btn>Download</button></div>` : ''}
     <div class="route" style="margin-top:14px"><span class="field-label" style="margin:0">Speech-to-text model</span>
       <select data-change="asr-model" style="width:100%">${[['auto', 'Auto: large-v3-turbo on a GPU, small on the CPU'], ['large-v3-turbo', 'large-v3-turbo (best; ~1.6 GB)'],
         ['small', 'small (faster on CPU; ~0.5 GB)'], ['medium', 'medium (~1.5 GB)']].map(([k, l]) => `<option value="${k}" ${ai.asr_model === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
@@ -1645,11 +1703,11 @@ function viewEmbed(L, running) {
     ${E.pieces ? `<div class="progress" style="margin:6px 0 4px"><i style="width:${pct}%"></i></div>` : ''}
     ${L.ollama.running ? known.map(c => `<div class="prov"><div>${c.model === E.model ? '<span class="vb vb-watch" style="margin-right:6px">In use</span>' : ''}<b style="font-weight:500">${esc(c.model)}</b>
       <span class="faint" style="font-size:12.5px">${c.size ? ' · ' + esc(c.size) : ''} · ${esc(c.why)}</span></div>
-      <span style="display:flex;gap:6px">${!c.installed ? `<button class="btn btn-sm ${c.model === E.model ? 'btn-dark' : ''}" data-act="local-pull" data-model="${esc(c.model)}" data-job-btn ${running ? 'disabled' : ''}>Download</button>` : ''}
+      <span style="display:flex;gap:6px">${!c.installed ? `<button class="btn btn-sm ${c.model === E.model ? 'btn-dark' : ''}" data-act="local-pull" data-model="${esc(c.model)}" data-job-btn>Download</button>` : ''}
         ${c.model !== E.model && c.installed ? `<button class="btn btn-sm" data-act="embed-use" data-model="${esc(c.model)}">Use</button>` : ''}</span></div>`).join('') : ''}
     ${L.ollama.running && E.installed ? `<div class="actions">
-      <button class="btn btn-sm" data-act="embed-run" data-job-btn ${running ? 'disabled' : ''}>Update index</button>
-      <button class="btn btn-sm" data-act="embed-rebuild" data-job-btn ${running ? 'disabled' : ''} title="Embed every piece again, e.g. after an Ollama or model update">Rebuild</button></div>` : ''}`;
+      <button class="btn btn-sm" data-act="embed-run" data-job-btn>Update index</button>
+      <button class="btn btn-sm" data-act="embed-rebuild" data-job-btn title="Embed every piece again, e.g. after an Ollama or model update">Rebuild</button></div>` : ''}`;
 }
 function aiEditor(k, p) {
   const models = [...new Set([...(p.models || []), ...(S.ai.models[k] || [])])];
@@ -1751,7 +1809,7 @@ function renderDrawer() {
 function drawerRating(v) {
   const r = v.rating;
   if (!r) return S.data.ai.ready_for.rate
-    ? `<div class="kv-line">Not rated yet. <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>Rate this video</button></div>` : '';
+    ? `<div class="kv-line">Not rated yet. <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate this video</button></div>` : '';
   return `<div class="rate-box">
     <div class="tri-head"><span class="score-big">${r.score.toFixed(1)}</span>${badge(v).replace(/<b>.*?<\/b>/, '')}
       <span class="muted" style="font-size:13px">${esc(r.reason)}</span></div>
@@ -1761,7 +1819,7 @@ function drawerRating(v) {
       ? `<li><button class="chap" data-act="seek" data-t="${p.t}"><time>${clock(p.t)}</time><span>${esc(p.text)}</span></button></li>`
       : `<li class="chap" style="cursor:default"><time></time><span>${esc(p.text)}</span></li>`).join('')}</ul>` : ''}
     <div class="kv-line">${r.basis === 'metadata' ? 'Rated from title and description only' : 'Rated from the transcript'} · ${esc(r.model || '')}
-      · <button class="btn-text" style="padding:0;height:auto;font-size:12.5px" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>Rate again</button></div>
+      · <button class="btn-text" style="padding:0;height:auto;font-size:12.5px" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate again</button></div>
   </div>`;
 }
 function drawerSlides(v) {
@@ -1771,7 +1829,7 @@ function drawerSlides(v) {
   const mark = v.has_visuals == null ? '' : v.has_visuals ? 'checked' : '';
   const head = `<label class="check"><input type="checkbox" data-change="has-visuals" data-id="${esc(v.video_id)}" ${mark}>
     <span>Has slides / whiteboard / on-screen code${v.has_visuals == null && vis.hint ? ` <span class="faint">(suggested: ${esc(vis.hint)})</span>` : ''}</span></label>`;
-  const readBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="vis-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>${label}</button>`;
+  const readBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="vis-one" data-id="${esc(v.video_id)}" data-job-btn>${label}</button>`;
   let body = '';
   if (busy) body = `<div class="kv-line"><span class="spin" style="display:inline-block;vertical-align:-1px"></span> Reading slides${vis.job && vis.job.status !== 'done' && vis.job.status !== 'failed' ? `: ${esc(vis.job.status)}${vis.job.progress ? ` ${Math.round(vis.job.progress * 100)}%` : ''}` : ''}… The job log is on the Playlists page.</div>`;
   else if (vis.slides && full?.visuals) {
@@ -1789,7 +1847,7 @@ function drawerSlides(v) {
 }
 function drawerDetails(v) {
   const det = v.details, cached = S.detailCache[v.video_id], full = cached === 'loading' ? null : cached;
-  const fetchBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="details-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>${label}</button>`;
+  const fetchBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="details-one" data-id="${esc(v.video_id)}" data-job-btn>${label}</button>`;
   if (!det) return `<span class="field-label">Details</span><div class="kv-line">Not fetched yet. ${fetchBtn('Fetch now')}</div>`;
   const head = det.status === 'done'
     ? `${det.caption_kind === 'manual' ? 'Captions' : 'Auto captions'} (${esc(det.caption_lang || '?')})${det.chapters ? ` · ${plural(det.chapters, 'chapter')}` : ''}`
@@ -1798,7 +1856,7 @@ function drawerDetails(v) {
     if (det.status !== 'unavailable') loadDetails(v.video_id);
     return `<span class="field-label">Details</span><div class="kv-line">${head}${det.status === 'unavailable' || det.status === 'failed' ? ` · ${fetchBtn('Try again')}` : ''}</div>`;
   }
-  const asrBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="asr-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>${label}</button>`;
+  const asrBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="asr-one" data-id="${esc(v.video_id)}" data-job-btn>${label}</button>`;
   const job = det.asr;
   const asrLine = det.sources.length > 1
     ? `<div style="margin-top:10px"><span class="field-label">Transcript used for search, ratings and summaries</span>
@@ -1875,6 +1933,7 @@ function setView(patch) {
 
 /* ---------------- events ---------------- */
 document.addEventListener('click', async e => {
+  if (S.jobsOpen && !e.target.closest('#jobs')) { S.jobsOpen = false; renderJobs(); }
   const el = e.target.closest('[data-act]');
   if (!el) return;
   const act = el.dataset.act, id = el.dataset.id;
@@ -1917,11 +1976,9 @@ document.addEventListener('click', async e => {
       break;
     case 'vis-run': case 'vis-one': {
       try {
-        await api('/api/visuals', act === 'vis-one' ? { ids: [id] } : {});
-        S.data.job = { running: true, log: '', kind: 'visual' };
+        const res = await api('/api/visuals', act === 'vis-one' ? { ids: [id] } : {});
         S.busy = { visual: act === 'vis-one' ? [id] : videos().filter(v => v.has_visuals === 1 || S.data.visual_categories[v.category]).map(v => v.video_id) };
-        if (route() === 'sources') updateJob(); else { toast('Reading slides…'); renderDrawer(); }
-        pollJob();
+        await queued(res, 'Slide reading'); renderDrawer();
       } catch (err) { toast(err.message, true); }
       break;
     }
@@ -1933,11 +1990,9 @@ document.addEventListener('click', async e => {
     }
     case 'asr-run': case 'asr-one': {
       try {
-        await api('/api/asr', act === 'asr-one' ? { ids: [id] } : {});
-        S.data.job = { running: true, log: '', kind: 'asr' };
+        const res = await api('/api/asr', act === 'asr-one' ? { ids: [id] } : {});
         S.busy = { asr: act === 'asr-one' ? [id] : videos().filter(v => v.details?.asr_reason).map(v => v.video_id) };
-        if (route() === 'sources') updateJob(); else { toast('Transcribing locally…'); renderDrawer(); }
-        pollJob();
+        await queued(res, 'Local transcription'); renderDrawer();
       } catch (err) { toast(err.message, true); }
       break;
     }
@@ -1961,15 +2016,15 @@ document.addEventListener('click', async e => {
     case 'rate-one': startRate([id]); break;
     case 'details-fetch': case 'details-one': {
       try {
-        await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : {});
+        const res = await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : {});
         if (act === 'details-one') delete S.detailCache[id];
-        S.data.job = { running: true, log: '', kind: 'details' };
-        if (act === 'details-fetch') updateJob(); else toast('Fetching details…');
-        pollJob();
+        await queued(res, 'Fetching details');
       } catch (err) { toast(err.message, true); }
       break;
     }
-    case 'job-stop': try { await api('/api/job/cancel', {}); toast('Stopping after the current video…'); } catch (err) { toast(err.message, true); } break;
+    case 'job-stop': try { await api('/api/job/cancel', {}); toast('Stopping after the current step…'); } catch (err) { toast(err.message, true); } break;
+    case 'job-drop': try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); toast('Removed from the queue'); } catch (err) { toast(err.message, true); } break;
+    case 'jobs-toggle': S.jobsOpen = !S.jobsOpen; renderJobs(); break;
     case 'tri-undo': triageUndo(); break;
     case 'session-done': {
       const ids = el.dataset.ids.split(',').filter(Boolean);
@@ -2021,7 +2076,7 @@ document.addEventListener('click', async e => {
     case 'local-pull': {
       const model = el.dataset.model || $('#local-model')?.value.trim();
       if (!model) { toast('Type a model name first', true); break; }
-      try { await api('/api/local/pull', { model }); S.data.job = { running: true, log: '', kind: 'pull' }; updateJob(); pollJob(); }
+      try { await queued(await api('/api/local/pull', { model }), `Download of ${model}`); }
       catch (err) { toast(err.message, true); }
       break;
     }
@@ -2030,7 +2085,7 @@ document.addEventListener('click', async e => {
       try {
         await saveAi({ embed_model: el.dataset.model });
         const have = S.local?.embed?.choices.find(c => c.model === el.dataset.model)?.installed;
-        if (have && !S.data.job.running) { await api('/api/embed', {}); S.data.job = { running: true, log: '', kind: 'embed' }; pollJob(); }
+        if (have) await queued(await api('/api/embed', {}), 'Indexing');
         S.local = null; loadLocal();
         toast(have ? `Indexing with ${el.dataset.model}…` : `Now download ${el.dataset.model}; it is indexed right after`);
       }
@@ -2038,7 +2093,7 @@ document.addEventListener('click', async e => {
       break;
     case 'embed-run': case 'embed-rebuild':
       if (act === 'embed-rebuild' && !confirm('Rebuild the meaning index from scratch? Questions use keywords only until it finishes.')) break;
-      try { await api('/api/embed', { rebuild: act === 'embed-rebuild' }); S.data.job = { running: true, log: '', kind: 'embed' }; updateJob(); pollJob(); }
+      try { await queued(await api('/api/embed', { rebuild: act === 'embed-rebuild' }), act === 'embed-rebuild' ? 'Rebuild' : 'Index update'); }
       catch (err) { toast(err.message, true); }
       break;
     case 'local-use':

@@ -232,14 +232,14 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
 
     settings = _context(llm.load_settings())
     videos = [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
-    print(f"⭐ Rating {len(videos)} videos with {llm.describe(settings, 'rate')} (in {settings.get('language') or 'English'}).")
+    print(f"Rating {len(videos)} videos with {llm.describe(settings, 'rate')} (in {settings.get('language') or 'English'}).")
     if not videos:
         print("   Nothing to rate.")
         return True
     try:
         complete = llm.make_completer(settings, "rate")
     except LLMError as e:
-        print(f"❌ {e}")
+        print(f"Error: {e}")
         return False
     budget, model = llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE), llm.model_for(settings, "rate")
     no_transcript = sum(1 for v in videos if v.get('details_status') != 'done')
@@ -250,20 +250,20 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     failed = 0
     for n, v in enumerate(videos, 1):
         if should_stop():
-            print("⏹️ Stopped. Ratings so far are saved.")
+            print("Stopped. Ratings so far are saved.")
             break
         try:
             rating = rate_video(v, storage.get_segments(v['video_id']), settings, complete, budget=budget)
         except LLMError as e:
             failed += 1
-            print(f"   [{n}/{len(videos)}] ⚠️ {v['title'][:60]}: {e}")
+            print(f"   [{n}/{len(videos)}] Warning: {v['title'][:60]}: {e}")
             if failed >= 3 and failed == n:
-                print("❌ The first three ratings all failed. Check the AI settings.")
+                print("Error: The first three ratings all failed. Check the AI settings.")
                 return False
             continue
         storage.save_rating(v['video_id'], rating, model=model)
         counts[rating['verdict']] += 1
         print(f"   [{n}/{len(videos)}] {rating['score']:>4} {rating['verdict'].upper():<5} {v['title'][:60]}")
-    print(f"✅ {counts['watch']} watch, {counts['skim']} skim, {counts['skip']} skip"
+    print(f"{counts['watch']} watch, {counts['skim']} skim, {counts['skip']} skip"
           + (f", {failed} failed" if failed else "") + ". Review them in Triage.")
     return True

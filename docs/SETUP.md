@@ -1,6 +1,6 @@
-# YT KB setup guide
+# YourTube setup guide
 
-Everything you need to install, configure and run YT KB on your own computer. YT KB runs **locally**: your library, YouTube sign-in and API keys never leave your machine.
+Everything you need to install, configure and run YourTube on your own computer. YourTube runs **locally**: your library, YouTube sign-in and API keys never leave your machine.
 
 ---
 
@@ -19,7 +19,7 @@ Everything you need to install, configure and run YT KB on your own computer. YT
 
 ## 2. Quick start
 
-Download the setup script from the dashboard (**Setup** page) or use the copy in `scripts/`, then run it **inside the YT KB folder** (the one containing `dashboard.py`).
+Download the setup script from the dashboard (**Setup** page) or use the copy in `scripts/`, then run it **inside the YourTube folder** (the one containing `dashboard.py`).
 
 **Linux and macOS**
 
@@ -50,7 +50,7 @@ Then start the dashboard and open http://127.0.0.1:8765:
 | 3. ffmpeg | Checks that it is installed and tells you how to install it if not | — |
 | 4. Ollama *(local AI only)* | Installs Ollama with its official installer (Linux) or `winget` (Windows), then starts it | **Yes**. The installer may ask for your password |
 | 4b. Local transcription *(local AI only)* | Installs faster-whisper from `requirements-local.txt` (plus NVIDIA libraries on Linux/Windows; about 1.2 GB). The speech model downloads on first use (~1.6 GB) | **Yes** |
-| 5. Model *(local AI only)* | Downloads the model that fits your GPU and makes it YT KB's default AI | **Yes** |
+| 5. Model *(local AI only)* | Downloads the model that fits your GPU and makes it YourTube's default AI | **Yes** |
 | 6. Embedding model *(local AI only)* | Downloads `qwen3-embedding:0.6b` (0.64 GB) for questions and search by meaning | **Yes** |
 | Done | Prints the local AI check | — |
 
@@ -91,7 +91,7 @@ ollama serve                                      # if it isn't already running 
 
 ## 4. Adding playlists and signing in to YouTube
 
-YT KB **only reads** your playlists. It never adds, removes or reorders anything on YouTube.
+YourTube **only reads** your playlists. It never adds, removes or reorders anything on YouTube.
 
 | Playlist type | Sign-in needed | How |
 |---|---|---|
@@ -152,7 +152,7 @@ Command line: `ollama pull qwen3-embedding:0.6b`, then `.venv/bin/python main.py
 
 ### Local transcription (videos without usable captions)
 
-For videos with **no captions**, or captions in the **wrong script** (for example English speech that YouTube auto-captioned in Devanagari), YT KB can transcribe the audio on your computer with Whisper.
+For videos with **no captions**, or captions in the **wrong script** (for example English speech that YouTube auto-captioned in Devanagari), YourTube can transcribe the audio on your computer with Whisper.
 
 - **Run it:** Playlists → *Video details and transcripts* → **Transcribe N videos locally** (shows the audio length and an estimate), or **Transcribe locally** in a video's panel.
 - **What happens:** only the original-language audio is downloaded, anonymously; the AI model is unloaded from the GPU; Whisper transcribes; and the audio is deleted.
@@ -162,7 +162,7 @@ For videos with **no captions**, or captions in the **wrong script** (for exampl
 
 ### Slides, whiteboards and on-screen code
 
-Many tutorials put the real content on screen. YT KB can read it with the local vision model (the Ollama model, for example `qwen3.5:4b`, which reads images).
+Many tutorials put the real content on screen. YourTube can read it with the local vision model (the Ollama model, for example `qwen3.5:4b`, which reads images).
 
 - **Choose videos:** tick **Has slides / whiteboard / on-screen code** in a video's panel, switch on **Slides** for a category (Categories page), or click **Mark N suggested videos** (Playlists page). Suggestions come from titles ("lecture", "explained", "system design"…) and from transcripts where the speaker refers to the screen.
 - **Run it:** Playlists → *Slides and whiteboards* → **Read slides for N videos**, or **Read slides now** in a video's panel.
@@ -214,7 +214,7 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 
 ## 7. Configuration reference
 
-### Files (all in the YT KB folder, none committed to git)
+### Files (all in the YourTube folder, none committed to git)
 
 | File | Contents | Safe to delete? |
 |---|---|---|
@@ -276,7 +276,7 @@ main.py        --embed          # update the meaning-based search index
 ## 8. Updating
 
 ```bash
-git pull                                   # if you got YT KB with git
+git pull                                   # if you got YourTube with git
 bash scripts/setup.sh                      # refresh dependencies
 .venv/bin/python -m pip install -U yt-dlp  # when syncs suddenly fail: YouTube changed something
 ```
@@ -307,11 +307,11 @@ Your database is upgraded automatically when the dashboard starts. Back up `yt_k
 ## 10. Privacy and safety
 
 - **YouTube:** read-only. Playlists are read with your browser sign-in, and per-video details are read **without** it.
-- **Cookies:** read locally and sent only to youtube.com; never stored or logged by YT KB.
+- **Cookies:** read locally and sent only to youtube.com; never stored or logged by YourTube.
 - **AI:** only titles, descriptions and transcripts are sent, and only to the AI you choose. A question sends the question and about 8 matching excerpts. With **Local only**, nothing leaves your computer.
 - **Dashboard:** listens only on 127.0.0.1 and refuses requests from other websites. It has no password, so on a shared computer other local users could open it.
 - **API keys:** stored in `settings.json`, which is created readable only by you. On NTFS/FAT drives that protection doesn't apply, so prefer environment variables there.
 
 ## 11. Uninstall
 
-Delete the YT KB folder. If you installed Ollama only for YT KB, remove its models with `ollama rm <model>` and uninstall it as described at https://ollama.com.
+Delete the YourTube folder. If you installed Ollama only for YourTube, remove its models with `ollama rm <model>` and uninstall it as described at https://ollama.com.

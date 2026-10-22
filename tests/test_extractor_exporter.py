@@ -31,7 +31,7 @@ class MarkdownTest(unittest.TestCase):
         from exporter import video_markdown
         md = video_markdown(self.V, {"upload_date": "20240105", "chapters": [{"start": 0, "title": "Intro"}]})
         self.assertTrue(md.startswith('---\ntitle: "Graph | RAG # [demo]"\n'))
-        for needle in ("uploaded: 2024-01-05", "duration_minutes: 62", "verdict: skim", "tags: [yt-kb, ai-ml]",
+        for needle in ("uploaded: 2024-01-05", "duration_minutes: 62", "verdict: skim", "tags: [yourtube, ai-ml]",
                        "# Graph \\| RAG \\# \\[demo\\]", "· 1h 2m",
                        "- [1:05](https://www.youtube.com/watch?v=abc&t=65s) point one", "- untimed",
                        "- [1:00–1:01:40](https://www.youtube.com/watch?v=abc&t=60s) core",
@@ -46,6 +46,6 @@ class MarkdownTest(unittest.TestCase):
         two = [self.V, {**self.V, "video_id": "xyz", "rating": None}]
         z = zipfile.ZipFile(io.BytesIO(markdown_zip(two, {})))
         names = sorted(z.namelist())
-        self.assertEqual(names, ["YT KB/AI & ML/Graph RAG # [demo] (xyz).md", "YT KB/AI & ML/Graph RAG # [demo].md",
-                                 "YT KB/AI & ML/_AI & ML.md"])
-        self.assertIn("[[Graph RAG # [demo] (xyz)]]", z.read("YT KB/AI & ML/_AI & ML.md").decode())
+        self.assertEqual(names, ["YourTube/AI & ML/Graph RAG # [demo] (xyz).md", "YourTube/AI & ML/Graph RAG # [demo].md",
+                                 "YourTube/AI & ML/_AI & ML.md"])
+        self.assertIn("[[Graph RAG # [demo] (xyz)]]", z.read("YourTube/AI & ML/_AI & ML.md").decode())

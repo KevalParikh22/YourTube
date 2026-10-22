@@ -188,16 +188,16 @@ def run_visual(
 
     settings = llm.load_settings()
     queue = storage.videos_needing_visuals(video_ids, visual_categories(settings))
-    print(f"🖼️ Reading slides and whiteboards: {len(queue)} video{'s' if len(queue) != 1 else ''}.")
+    print(f"Reading slides and whiteboards: {len(queue)} video{'s' if len(queue) != 1 else ''}.")
     if not queue:
         return True
     model, base = vision_model(settings), settings["providers"]["ollama"].get("base_url")
     if read is None:
         if not available():
-            print("❌ Reading slides needs ffmpeg and Pillow. Run: bash scripts/setup.sh --local-ai")
+            print("Error: Reading slides needs ffmpeg and Pillow. Run: bash scripts/setup.sh --local-ai")
             return False
         if not model or not model_sees_images(base, model):
-            print(f"❌ The vision model ({model or 'none'}) isn't available in Ollama or can't read images. "
+            print(f"Error: The vision model ({model or 'none'}) isn't available in Ollama or can't read images. "
                   "Choose one on the AI page (e.g. qwen3.5:4b).")
             return False
         read = lambda path: read_frame(path, model, base)
@@ -215,7 +215,7 @@ def run_visual(
         for n, v in enumerate(queue, 1):
             vid, label = v["video_id"], (v.get("title") or v["video_id"])[:60]
             if should_stop():
-                print("⏹️ Stopped. Finished videos are saved; run again for the rest.")
+                print("Stopped. Finished videos are saved; run again for the rest.")
                 break
             timings: Dict[str, float] = {}
             work = os.path.join(CACHE, vid)
@@ -249,16 +249,16 @@ def run_visual(
                       f"{timings['read_s']:.0f} s reading")
             except BotCheck:
                 storage.set_job(vid, "visual", status="queued")
-                print("🛑 YouTube asked to confirm we're not a bot. Stopping; try again in an hour or two.")
+                print("YouTube asked to confirm we're not a bot. Stopping; try again in an hour or two.")
                 return False
             except InterruptedError:
                 storage.set_job(vid, "visual", status="queued")
-                print("⏹️ Stopped mid-video; it will start over next time.")
+                print("Stopped mid-video; it will start over next time.")
                 break
             except Exception as e:   # one bad video shouldn't stop the run
                 failed += 1
                 storage.set_job(vid, "visual", status="failed", error=str(e)[:300], timings=timings)
-                print(f"   [{n}/{len(queue)}] ⚠️ {label}: {str(e)[:120]}")
+                print(f"   [{n}/{len(queue)}] Warning: {label}: {str(e)[:120]}")
             finally:
                 if path and os.path.exists(path):
                     os.remove(path)            # videos are temporary (Phase 2.5 rule)
@@ -268,5 +268,5 @@ def run_visual(
                 sleep(DOWNLOAD_DELAY + random.uniform(0, DOWNLOAD_DELAY / 2))
     finally:
         _clear_cache()
-    print(f"✅ {done} read" + (f", {failed} failed" if failed else "") + ".")
+    print(f"{done} read" + (f", {failed} failed" if failed else "") + ".")
     return done > 0 or failed == 0

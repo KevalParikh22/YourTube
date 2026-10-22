@@ -154,7 +154,7 @@ class DashboardTest(unittest.TestCase):
         code, headers, body = self.raw("/docs/setup")
         self.assertEqual(code, 200)
         self.assertIsNone(headers["Content-Disposition"])
-        self.assertTrue(body.startswith(b"# YT KB setup guide"))
+        self.assertTrue(body.startswith(b"# YourTube setup guide"))
         for bad in ("/download/settings.json", "/download/../llm.py", "/download/%2e%2e/yt_kb.db", "/download/"):
             self.assertEqual(self.raw(bad)[0], 404, bad)
 

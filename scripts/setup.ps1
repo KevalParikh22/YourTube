@@ -1,14 +1,14 @@
-# YT KB setup for Windows (PowerShell). NOT YET TESTED ON WINDOWS — please report problems. Guide: docs/SETUP.md
+# YourTube setup for Windows (PowerShell). NOT YET TESTED ON WINDOWS — please report problems. Guide: docs/SETUP.md
 #   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1            # app only
 #   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -LocalAI   # also Ollama + a model for this PC
 # Safe to run again; asks before installing anything system-wide.
 param([switch]$LocalAI, [switch]$Yes)
 $ErrorActionPreference = "Stop"
-# Find the YT KB folder: the current folder, next to this script, or one level up (scripts\)
+# Find the YourTube folder: the current folder, next to this script, or one level up (scripts\)
 $root = @((Get-Location).Path, $PSScriptRoot, (Split-Path $PSScriptRoot -Parent)) |
   Where-Object { (Test-Path (Join-Path $_ "dashboard.py")) -and (Test-Path (Join-Path $_ "requirements.txt")) } |
   Select-Object -First 1
-if (-not $root) { Write-Warning "Run this inside the YT KB folder (the one with dashboard.py)."; exit 1 }
+if (-not $root) { Write-Warning "Run this inside the YourTube folder (the one with dashboard.py)."; exit 1 }
 Set-Location $root
 function Ask($q) { if ($Yes) { return $true }; return (Read-Host "  $q [y/N]") -match '^[Yy]' }
 

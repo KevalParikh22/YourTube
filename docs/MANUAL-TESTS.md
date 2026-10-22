@@ -38,7 +38,7 @@ These need your eyes, your YouTube account or your hardware. Start the dashboard
 | 4.1 | Setup guide | Read the Setup page as if you were a new user | Clear; note anything missing or confusing | |
 | 4.2 | Windows script | On a Windows PC (if available): `scripts\setup.ps1 -LocalAI` | It sets up the app; report any error | |
 | 4.3 | Test data | Decide: remove the "Test Engineering Playlist" (`v1`–`v5`)? | Your call (removing it needs a one-off cleanup that you approve) | |
-| 4.4 | Write-back | Decide: create real `[YT-KB]` playlists on your YouTube account, or keep queue links? | Your call | |
+| 4.4 | Write-back | Decide: create real `[YourTube]` playlists on your YouTube account, or keep queue links? | Your call | |
 | 4.5 | Notes export | Library → Export → Notes; open the zip in Obsidian or any Markdown app | Readable notes; timestamp links open the right moment | |
 
 ## 5. Cloud AI with your own keys

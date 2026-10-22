@@ -177,7 +177,7 @@ def assign_categories(
     failed = 0
     batches = _pack(videos, batch_size, max(2_000, max_chars - len(cat_text)))
     for n, batch in enumerate(batches, 1):
-        log(f"   🤖 Batch {n}/{len(batches)} ({len(batch)} videos)…")
+        log(f"   Batch {n}/{len(batches)} ({len(batch)} videos)…")
         prompt = f"""Categories:
 {cat_text}
 
@@ -192,7 +192,7 @@ Reply with JSON:
             data = parse_json(complete(ASSIGN_SYSTEM, prompt))
         except LLMError as e:
             failed += 1
-            log(f"   ⚠️ Batch {n} failed: {e}")
+            log(f"   Warning: Batch {n} failed: {e}")
             continue
         items = data.get("items") if isinstance(data, dict) else data
         for it in items if isinstance(items, list) else []:
@@ -226,7 +226,7 @@ def run_suggest(scope: str = "unsorted") -> bool:
 
     settings = llm.load_settings()
     videos = storage.videos_for_ai(scope)
-    print(f"🤖 AI suggestions with {llm.describe(settings, 'categorize')}")
+    print(f"AI suggestions with {llm.describe(settings, 'categorize')}")
     if not videos:
         print("   Nothing to sort: no unlocked videos without a pending suggestion.")
         return True
@@ -241,12 +241,12 @@ def run_suggest(scope: str = "unsorted") -> bool:
         result = assign_categories(videos, list(taxonomy), complete, notes=settings.get("category_notes"),
                                    max_chars=min(BATCH_CHARS, llm.context_chars(settings, "categorize")))
     except LLMError as e:
-        print(f"❌ {e}")
+        print(f"Error: {e}")
         return False
     model = llm.model_for(settings, "categorize")
     stored = storage.save_suggestions(result["suggestions"], model=model)
     same = len(result["suggestions"]) - stored
-    print(f"✅ {stored} suggestion{'' if stored == 1 else 's'} ready for review"
+    print(f"{stored} suggestion{'' if stored == 1 else 's'} ready for review"
           + (f", {same} already in the suggested category" if same else "")
           + (f", {result['failed_batches']} batches failed" if result["failed_batches"] else "") + ".")
     print("   Nothing changes until you accept them (Library → AI suggestions).")
@@ -261,7 +261,7 @@ def run_discover(max_categories: int = 12) -> bool:
 
     settings = llm.load_settings()
     videos = [v for v in storage.get_library() if v.get("status") not in storage.DONE_STATUSES] or storage.get_library()
-    print(f"🤖 Proposing categories with {llm.describe(settings, 'categorize')} from {len(videos)} videos…")
+    print(f"Proposing categories with {llm.describe(settings, 'categorize')} from {len(videos)} videos…")
     try:
         complete = llm.make_completer(settings, "categorize")
         # Leave room for the instructions and a reply of ~12 categories with keywords
@@ -269,10 +269,10 @@ def run_discover(max_categories: int = 12) -> bool:
         cats = discover_categories(videos, complete, presets=settings.get("presets"),
                                    taxonomy=load_taxonomy(), max_categories=max_categories, max_chars=budget)
     except LLMError as e:
-        print(f"❌ {e}")
+        print(f"Error: {e}")
         return False
     settings = llm.load_settings()  # re-read: the user may have saved settings meanwhile
     settings["proposal"] = {"categories": cats, "model": llm.describe(settings, "categorize")}
     llm.save_settings(settings)
-    print(f"✅ Proposed {len(cats)} categories. Review them on the Categories page.")
+    print(f"Proposed {len(cats)} categories. Review them on the Categories page.")
     return True

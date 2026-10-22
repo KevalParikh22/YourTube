@@ -1,4 +1,4 @@
-# ⚡ YT KB — YouTube Knowledge Base (Phase 0)
+# ⚡ YourTube (Phase 0)
 
 A non-destructive ingestion, classification, and watch-time optimization engine for your private and unlisted YouTube playlists.
 

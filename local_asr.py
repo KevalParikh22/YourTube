@@ -170,13 +170,13 @@ def run_asr(
 
     settings = llm.load_settings()
     queue = storage.videos_needing_asr(video_ids)
-    print(f"🎙️ Local transcription: {len(queue)} video{'s' if len(queue) != 1 else ''}"
+    print(f"Local transcription: {len(queue)} video{'s' if len(queue) != 1 else ''}"
           + (f" ({sum(1 for v in queue if v.get('reason') == 'no_captions')} without captions, "
              f"{sum(1 for v in queue if v.get('reason') == 'wrong_script')} with captions in the wrong script)" if queue else "") + ".")
     if not queue:
         return True
     if not available():
-        print("❌ Local transcription needs faster-whisper and ffmpeg. Run: bash scripts/setup.sh --local-ai")
+        print("Error: Local transcription needs faster-whisper and ffmpeg. Run: bash scripts/setup.sh --local-ai")
         return False
     _clear_cache()
     dev = device() if make_transcriber is Transcriber else "cpu"
@@ -193,7 +193,7 @@ def run_asr(
         for n, v in enumerate(queue, 1):
             vid, label = v["video_id"], (v.get("title") or v["video_id"])[:60]
             if should_stop():
-                print("⏹️ Stopped. Finished videos are saved; run again for the rest.")
+                print("Stopped. Finished videos are saved; run again for the rest.")
                 break
             timings: Dict[str, float] = {}
             path = None
@@ -229,12 +229,12 @@ def run_asr(
                 print(f"   [{n}/{len(queue)}] ✓ {label} · {language} · {len(segments)} lines · {speed:.0f}× real time{note}")
             except BotCheck:
                 storage.set_job(vid, "asr", status="queued")
-                print("🛑 YouTube asked to confirm we're not a bot. Stopping; try again in an hour or two.")
+                print("YouTube asked to confirm we're not a bot. Stopping; try again in an hour or two.")
                 return False
             except Exception as e:  # one bad video shouldn't stop the run
                 failed += 1
                 storage.set_job(vid, "asr", status="failed", error=str(e)[:300], timings=timings)
-                print(f"   [{n}/{len(queue)}] ⚠️ {label}: {str(e)[:120]}")
+                print(f"   [{n}/{len(queue)}] Warning: {label}: {str(e)[:120]}")
             finally:
                 if path and os.path.exists(path):
                     os.remove(path)   # media is temporary (Phase 2.5 rule)
@@ -243,7 +243,7 @@ def run_asr(
                 sleep(DOWNLOAD_DELAY + random.uniform(0, DOWNLOAD_DELAY / 2))
     finally:
         _clear_cache()   # jobs never reached stay "queued", which the UI shows as not started
-    print(f"✅ {done} transcribed" + (f", {failed} failed" if failed else "") + ".")
+    print(f"{done} transcribed" + (f", {failed} failed" if failed else "") + ".")
     return done > 0 or failed == 0
 
 
@@ -251,7 +251,7 @@ def _cool_down(sleep: Callable[[float], None], max_wait: float = 90) -> None:
     temp = gpu_temperature()
     if temp is None or temp < COOL_DOWN_C:
         return
-    print(f"   🌡️ GPU at {temp} °C: pausing to cool down…")
+    print(f"   GPU at {temp} °C: pausing to cool down…")
     waited = 0.0
     while waited < max_wait:
         sleep(5)

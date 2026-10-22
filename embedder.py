@@ -66,7 +66,7 @@ def run_embed(
     if embed_fn is None:
         if not available(settings):
             if not quiet:
-                print(f"ℹ️ Meaning-based search is off: the embedding model {model} isn't in Ollama "
+                print(f"Meaning-based search is off: the embedding model {model} isn't in Ollama "
                       f"(download it on the AI page or: ollama pull {model}). Keyword search still works.")
             return False
         base = settings["providers"]["ollama"].get("base_url")
@@ -75,14 +75,14 @@ def run_embed(
     todo = storage.docs_missing_embeddings(model)
     if not todo:
         if not quiet:
-            print(f"🧭 Meaning index is up to date ({model}).")
+            print(f"Meaning index is up to date ({model}).")
         return True
-    print(f"🧭 Updating the meaning index: {len(todo)} new or changed pieces with {model}"
+    print(f"Updating the meaning index: {len(todo)} new or changed pieces with {model}"
           + (f" (removed {pruned} stale)" if pruned else "") + f". About {max(1, round(len(todo) / 12 / 60))} min.")
     done = 0
     for i in range(0, len(todo), BATCH):
         if should_stop():
-            print("⏹️ Stopped. The meaning index is partly updated; it continues next time.")
+            print("Stopped. The meaning index is partly updated; it continues next time.")
             return False
         chunk = todo[i:i + BATCH]
         vecs = np.asarray(embed_fn([doc_text(d["kind"], d["text"]) for d in chunk]), dtype=np.float32)
@@ -91,5 +91,5 @@ def run_embed(
         done += len(chunk)
         if len(todo) > BATCH * 4 and (i // BATCH) % 10 == 0:
             print(f"   {done}/{len(todo)}")
-    print(f"✅ Meaning index updated ({done} pieces).")
+    print(f"Meaning index updated ({done} pieces).")
     return True

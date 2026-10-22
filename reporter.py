@@ -1,5 +1,5 @@
 """
-Report generator for YT KB.
+Report generator for YourTube.
 Generates an interactive visual HTML dashboard and a comprehensive Markdown knowledge base file.
 """
 import os
@@ -31,16 +31,16 @@ def generate_markdown_report(
     overall_metrics = calculate_category_metrics(videos)
     
     lines = [
-        f"# 📚 YouTube Knowledge Base: {playlist_info.get('title', 'Playlist Overview')}",
+        f"# YouTube Knowledge Base: {playlist_info.get('title', 'Playlist Overview')}",
         f"**Source URL**: {playlist_info.get('url', 'N/A')}  ",
         f"**Total Videos**: {overall_metrics['total_videos']}  ",
         f"**Total Duration (1.0x)**: {overall_metrics['durations']['1.0x']['formatted']}  ",
-        f"**Total Duration at 2.0x Speed**: **{overall_metrics['durations']['2.0x']['formatted']}** (⚡ Saves {overall_metrics['time_saved_2x']['formatted']})  ",
+        f"**Total Duration at 2.0x Speed**: **{overall_metrics['durations']['2.0x']['formatted']}** (Saves {overall_metrics['time_saved_2x']['formatted']})  ",
         f"**Progress**: {overall_metrics['completed_videos']} watched, {overall_metrics['skipped_videos']} skipped, of {overall_metrics['total_videos']} ({overall_metrics['completion_percentage']}% done)",
         "",
         "---",
         "",
-        "## ⏱️ Category Time-to-Complete Matrix",
+        "## Category Time-to-Complete Matrix",
         "",
         "| Category | Videos | Duration (1.0x) | Duration (1.5x) | Duration (2.0x) | Time Saved (2x) | Instant Playlist |",
         "| :--- | :---: | :---: | :---: | :---: | :---: | :---: |"
@@ -59,18 +59,18 @@ def generate_markdown_report(
             f"{play_link} |"
         )
         
-    lines.extend(["", "---", "", "## 📂 Detailed Categorized Video Library", ""])
+    lines.extend(["", "---", "", "## Detailed Categorized Video Library", ""])
     
     for cat_name, cat_videos in sorted(categories.items(), key=lambda x: -len(x[1])):
         m = calculate_category_metrics(cat_videos)
         queue_url = generate_youtube_watch_queue_url([v['video_id'] for v in cat_videos])
         queue_btn = f" — [▶️ Launch {cat_name} Playlist on YouTube]({queue_url})" if queue_url else ""
-        lines.append(f"### 🏷️ {cat_name} ({m['total_videos']} videos • {m['durations']['2.0x']['formatted']} @ 2x){queue_btn}")
+        lines.append(f"### {cat_name} ({m['total_videos']} videos • {m['durations']['2.0x']['formatted']} @ 2x){queue_btn}")
         lines.append("")
         for idx, v in enumerate(cat_videos, 1):
             dur_fmt = format_seconds(v.get('duration_seconds', 0))
             dur_2x = format_seconds(v.get('duration_seconds', 0) / 2.0)
-            status_icon = {"completed": "✅", "skipped": "⏭️"}.get(v.get('status'), "⏳")
+            status_icon = {"completed": "", "skipped": ""}.get(v.get('status'), "")
             lines.append(f"{idx}. {status_icon} [{v['title']}]({v['url']}) — `{dur_fmt}` *(2x: `{dur_2x}`)* | *{v.get('channel', 'Channel')}*")
         lines.append("")
         
@@ -124,7 +124,7 @@ def generate_html_dashboard(
                     <span class="val">{m['durations']['1.0x']['formatted']}</span>
                 </div>
                 <div class="speed-stat highlight">
-                    <span class="label">⚡ 2.0x Speed</span>
+                    <span class="label">2.0x Speed</span>
                     <span class="val">{m['durations']['2.0x']['formatted']}</span>
                 </div>
             </div>
@@ -180,7 +180,7 @@ def generate_html_dashboard(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>YT KB — {playlist_info.get('title', 'Playlist Overview')}</title>
+    <title>YourTube — {playlist_info.get('title', 'Playlist Overview')}</title>
     <style>
         :root {{
             --bg-color: #0f172a;
@@ -289,7 +289,7 @@ def generate_html_dashboard(
 <body>
     <div class="container">
         <header>
-            <h1 class="header-title">⚡ YT KB: {playlist_info.get('title', 'YouTube Knowledge Base')}</h1>
+            <h1 class="header-title">YourTube: {playlist_info.get('title', 'YouTube Knowledge Base')}</h1>
             <p class="header-subtitle">Non-destructive intelligent categorization & 2x watch duration metrics</p>
         </header>
 
@@ -305,9 +305,9 @@ def generate_html_dashboard(
                 <div class="hero-sub">Normal playback</div>
             </div>
             <div class="hero-card speed">
-                <div class="hero-label">⚡ Watch Time @ 2.0x</div>
+                <div class="hero-label">Watch Time @ 2.0x</div>
                 <div class="hero-val">{overall['durations']['2.0x']['formatted']}</div>
-                <div class="hero-sub">⚡ Saves {overall['time_saved_2x']['formatted']}</div>
+                <div class="hero-sub">Saves {overall['time_saved_2x']['formatted']}</div>
             </div>
             <div class="hero-card">
                 <div class="hero-label">Watch Time @ 1.5x</div>

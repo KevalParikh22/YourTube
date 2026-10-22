@@ -1,5 +1,5 @@
 """
-Main Command Line Interface for YouTube Knowledge Base (YT KB) - Phase 0.
+Main Command Line Interface for YourTube - Phase 0.
 Safely extracts private or unlisted playlist metadata, classifies videos into categories,
 computes watch durations (1x vs 2x), and generates visual reports.
 """
@@ -21,16 +21,16 @@ def run_pipeline(
     ai_suggest: bool = False
 ):
     print("\n" + "="*60)
-    print("  ⚡ YouTube Knowledge Base (YT KB) — Phase 0 Pipeline")
+    print("  YourTube — playlist sync")
     print("="*60 + "\n")
     
-    print(f"📥 Step 1: Connecting to playlist: {playlist_url}")
+    print(f"Step 1: Connecting to playlist: {playlist_url}")
     if browser_cookies:
-        print(f"   🔒 Using local read-only session cookies from browser: {browser_cookies}")
+        print(f"   Using local read-only session cookies from browser: {browser_cookies}")
     elif cookies_file:
-        print(f"   🔒 Using local cookie file: {cookies_file}")
+        print(f"   Using local cookie file: {cookies_file}")
     else:
-        print("   🌐 Ingesting as public/unlisted playlist (no cookies provided)...")
+        print("   Ingesting as public/unlisted playlist (no cookies provided)...")
         
     try:
         data = extract_playlist_metadata(
@@ -39,8 +39,8 @@ def run_pipeline(
             cookies_file=cookies_file
         )
     except Exception as e:
-        print(f"\n❌ Ingestion error: {e}")
-        print("\n💡 Troubleshooting Tips:")
+        print(f"\nError: could not read the playlist: {e}")
+        print("\nTroubleshooting Tips:")
         print("   1. If your playlist is private (or Watch Later), use a signed-in browser: --browser auto")
         print("      On Linux, Chrome needs the 'secretstorage' package (pip install -r requirements.txt).")
         print("      On Windows, Chrome/Edge cookies are app-bound encrypted and often can't be read;")
@@ -52,21 +52,21 @@ def run_pipeline(
         
     videos = data['videos']
     if browser_cookies == 'auto' and data.get('browser'):
-        print(f"   🔎 Found a YouTube sign-in in: {data['browser']}")
-    print(f"   ✅ Successfully extracted {len(videos)} videos (0 bytes downloaded, non-destructive).")
+        print(f"   Found a YouTube sign-in in: {data['browser']}")
+    print(f"   Successfully extracted {len(videos)} videos (0 bytes downloaded, non-destructive).")
     if data.get('skipped_unavailable'):
-        print(f"   ⚠️ Skipped {data['skipped_unavailable']} private/deleted/unavailable entries.")
+        print(f"   Warning: Skipped {data['skipped_unavailable']} private/deleted/unavailable entries.")
     if not videos:
-        print("\n❌ No videos were extracted. Nothing was saved.")
+        print("\nError: No videos were extracted. Nothing was saved.")
         print("   If the playlist is private, check that the browser/cookies you chose are logged into YouTube.")
         return False
 
-    print("\n🏷️ Step 2: Classifying videos into semantic categories...")
+    print("\nStep 2: Classifying videos into semantic categories...")
     classify_playlist_videos(videos)
 
-    print("\n💾 Step 3: Saving metadata & state to local database (yt_kb.db)...")
+    print("\nStep 3: Saving metadata & state to local database (yt_kb.db)...")
     counts = save_playlist(data, videos)
-    print(f"   ✅ Saved: {counts['added']} new, {counts['updated']} refreshed, "
+    print(f"   Saved: {counts['added']} new, {counts['updated']} refreshed, "
           f"{counts['removed']} no longer in source (kept locally, flagged as removed).")
     if ai_suggest:
         print()
@@ -75,7 +75,7 @@ def run_pipeline(
     # Reload so manual categories and existing watch statuses are reflected in the reports
     classified_videos = get_all_videos(data['id'])
     
-    print("\n⏱️ Step 4: Computing watch time metrics (1.0x vs 2.0x speeds)...")
+    print("\nStep 4: Computing watch time metrics (1.0x vs 2.0x speeds)...")
     overall = calculate_category_metrics(classified_videos)
     
     # Group videos by category
@@ -88,30 +88,30 @@ def run_pipeline(
     print("-"*70)
     for cat_name, cat_videos in sorted(categories.items(), key=lambda x: -len(x[1])):
         m = calculate_category_metrics(cat_videos)
-        print(f"{cat_name:<35} | {m['total_videos']:<7} | {m['durations']['1.0x']['formatted']:<12} | ⚡ {m['durations']['2.0x']['formatted']:<10}")
+        print(f"{cat_name:<35} | {m['total_videos']:<7} | {m['durations']['1.0x']['formatted']:<12} | {m['durations']['2.0x']['formatted']:<10}")
     print("-"*70)
-    print(f"{'TOTAL SUMMARY':<35} | {overall['total_videos']:<7} | {overall['durations']['1.0x']['formatted']:<12} | ⚡ {overall['durations']['2.0x']['formatted']:<10}")
-    print(f"🎉 Time saved at 2.0x speed: {overall['time_saved_2x']['formatted']}")
+    print(f"{'TOTAL SUMMARY':<35} | {overall['total_videos']:<7} | {overall['durations']['1.0x']['formatted']:<12} | {overall['durations']['2.0x']['formatted']:<10}")
+    print(f"Time saved at 2.0x speed: {overall['time_saved_2x']['formatted']}")
     print("-"*70 + "\n")
     
-    print("📊 Step 5: Generating reports...")
+    print("Step 5: Generating reports...")
     md_path = generate_markdown_report(data, classified_videos)
     html_path = generate_html_dashboard(data, classified_videos)
-    print(f"   📄 Markdown Knowledge Base: {md_path}")
-    print(f"   🌐 Interactive HTML Dashboard: {html_path}")
+    print(f"   Markdown Knowledge Base: {md_path}")
+    print(f"   Interactive HTML Dashboard: {html_path}")
     
     if open_browser:
-        print("\n🚀 Opening interactive dashboard in your default browser...")
+        print("\nOpening interactive dashboard in your default browser...")
         webbrowser.open(f"file:///{os.path.abspath(html_path)}")
         
-    print("\n✅ Phase 0 Pipeline completed successfully!")
+    print("\nSync finished.")
     print("   Your source playlist was NOT modified or deleted (100% non-destructive).")
     print("   Browse, track progress and re-categorize with: python dashboard.py")
     return True
 
 def interactive_mode():
     print("\n" + "="*60)
-    print("  ⚡ YouTube Knowledge Base (YT KB) — Setup")
+    print("  YourTube — Setup")
     print("="*60 + "\n")
     
     playlist_url = input("Enter YouTube Playlist URL or ID: ").strip()
@@ -133,7 +133,7 @@ def interactive_mode():
     run_pipeline(playlist_url=playlist_url, browser_cookies=browser)
 
 def main():
-    parser = argparse.ArgumentParser(description="YouTube Knowledge Base (YT KB) - Phase 0")
+    parser = argparse.ArgumentParser(description="YourTube - Phase 0")
     parser.add_argument("url", nargs="?", help="YouTube playlist URL or ID")
     parser.add_argument("--browser", "-b", help="Browser to read session cookies from: auto (detect), firefox, chrome, brave, edge")
     parser.add_argument("--cookies", "-c", help="Path to cookies.txt file")
@@ -161,7 +161,7 @@ def main():
         try:
             playlists = list_my_playlists(args.browser or "auto", args.cookies)
         except Exception as e:
-            print(f"❌ Could not list playlists: {e}")
+            print(f"Error: Could not list playlists: {e}")
             return
         width = max((len(p['id']) for p in playlists), default=2)
         for p in playlists:

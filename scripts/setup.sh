@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# YT KB setup for Linux and macOS. Full guide: docs/SETUP.md
+# YourTube setup for Linux and macOS. Full guide: docs/SETUP.md
 #   bash scripts/setup.sh            # app only: Python environment and dependencies
 #   bash scripts/setup.sh --local-ai # also local AI: Ollama plus a model sized for this computer
 #   options: -y/--yes (no questions), YTKB_MODEL=name (choose the model)
@@ -7,13 +7,13 @@
 # It asks before installing anything system-wide (Ollama's installer may ask for your password).
 set -euo pipefail
 
-# Find the YT KB folder: where you run it from, next to this script, or one level up (scripts/)
+# Find the YourTube folder: where you run it from, next to this script, or one level up (scripts/)
 HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT=""
 for d in "$PWD" "$HERE" "$(dirname "$HERE")"; do
   if [ -f "$d/dashboard.py" ] && [ -f "$d/requirements.txt" ]; then ROOT="$d"; break; fi
 done
-[ -n "$ROOT" ] || { echo "Run this inside the YT KB folder (the one with dashboard.py), e.g.: cd ~/yt-kb && bash setup.sh"; exit 1; }
+[ -n "$ROOT" ] || { echo "Run this inside the YourTube folder (the one with dashboard.py), e.g.: cd ~/yourtube && bash setup.sh"; exit 1; }
 cd "$ROOT"
 LOCAL_AI=0; ASSUME_YES=0
 for arg in "$@"; do
@@ -26,8 +26,8 @@ for arg in "$@"; do
 done
 
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
-ok()   { printf '  ✅ %s\n' "$*"; }
-warn() { printf '  ⚠️  %s\n' "$*"; }
+ok()   { printf '  [ok] %s\n' "$*"; }
+warn() { printf '  [!] %s\n' "$*"; }
 ask()  { [ "$ASSUME_YES" = 1 ] && return 0; read -r -p "  $1 [y/N] " a; [[ "$a" =~ ^[Yy] ]]; }
 
 say "1. Python"

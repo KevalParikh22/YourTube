@@ -119,7 +119,7 @@ def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
         front.append(f"uploaded: {uploaded}")
     if r:
         front += [f"rating: {r.get('score')}", f"verdict: {r.get('verdict')}"]
-    front += [f"tags: [yt-kb, {tag}]", "---", ""]
+    front += [f"tags: [yourtube, {tag}]", "---", ""]
 
     out = front + [f"# {_md_text(v.get('title'))}", "",
                    f"[▶ Watch on YouTube]({url}) · {_md_text(v.get('channel'))} · {_length(v.get('duration_seconds'))}", ""]
@@ -154,12 +154,12 @@ def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
 def category_markdown(category: str, names: List[str]) -> str:
     """Index note for a category, linking each video note (Obsidian [[wiki links]])."""
     lines = [f"# {_md_text(category)}", "", f"{len(names)} video{'s' if len(names) != 1 else ''} · exported "
-             f"{_dt.date.today().isoformat()} from YT KB", ""]
+             f"{_dt.date.today().isoformat()} from YourTube", ""]
     lines += [f"- [[{n}]]" for n in names]
     return "\n".join(lines) + "\n"
 
 def markdown_zip(videos: List[Dict[str, Any]], details: Dict[str, Dict[str, Any]]) -> bytes:
-    """A zip of notes: YT KB/<Category>/<Title>.md plus one index note per category."""
+    """A zip of notes: YourTube/<Category>/<Title>.md plus one index note per category."""
     buf = io.BytesIO()
     by_cat: Dict[str, List[str]] = {}
     used = set()
@@ -170,10 +170,10 @@ def markdown_zip(videos: List[Dict[str, Any]], details: Dict[str, Dict[str, Any]
             if (cat, name.lower()) in used:          # two videos with the same title
                 name = f"{name} ({v['video_id']})"
             used.add((cat, name.lower()))
-            z.writestr(f"YT KB/{cat}/{name}.md", video_markdown(v, details.get(v["video_id"])))
+            z.writestr(f"YourTube/{cat}/{name}.md", video_markdown(v, details.get(v["video_id"])))
             by_cat.setdefault(v.get("category") or "Uncategorized", []).append(name)
         for cat, names in by_cat.items():
-            z.writestr(f"YT KB/{safe_filename(cat)}/_{safe_filename(cat)}.md", category_markdown(cat, names))
+            z.writestr(f"YourTube/{safe_filename(cat)}/_{safe_filename(cat)}.md", category_markdown(cat, names))
     return buf.getvalue()
 
 def ask_markdown(thread: List[Dict[str, Any]]) -> str:
@@ -182,7 +182,7 @@ def ask_markdown(thread: List[Dict[str, Any]]) -> str:
         thread = [thread]
     first = thread[0]
     lines = ["---", f"question: {_yaml(first.get('question'))}", f"asked: {_yaml(first.get('created_at'))}",
-             f"model: {_yaml(first.get('model'))}", "tags: [yt-kb, question]", "---", ""]
+             f"model: {_yaml(first.get('model'))}", "tags: [yourtube, question]", "---", ""]
     escape = lambda t: re.sub(r"([\\`*_\[\]<>|#])", r"\\\1", t)   # like _md_text, but keeps the spaces around marks
     for i, item in enumerate(thread):
         sources = {s["n"]: s for s in item.get("sources") or []}
