@@ -70,7 +70,8 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 - `run_rate` makes one call per unwatched, unrated video. It returns a score (0–10), a verdict (watch/skim/skip), a reason, skim ranges, a TL;DR and timestamped points, written in `settings["language"]`.
 - The prompt weighs depth and quality, fit with `settings["interests"]` and the categories (Keep presets marked), time against value, and freshness (`video_details.upload_date` against today).
 - It uses the transcript (merged into 30 s blocks, sampled to fit a character budget that is smaller for local models) or falls back to metadata only (`basis`).
-- `validate()` clamps the reply and drops timestamps outside the video.
+- `validate()` clamps the reply and drops timestamps outside the video. Ranges come back as `worth_watching` (stored as `skim`): parts to watch. Ranges described as filler (`_FILLER`: intro, sponsor, recap…) or spanning ≥85% of the video are dropped, and a weak skim with no parts becomes skip. The prompt states the video's age; "outdated" needs evidence from the content.
+- `discover_categories(max_chars=)`: `run_discover` sizes the title sample to the model's context (317 titles overflowed an 8k local context and cut the reply off).
 - Results go in `video_ratings`. A rating never changes a video; Triage applies the Skipped status when the user accepts. `rater.estimate()` powers the cost confirmation.
 
 **AI per task**: `settings["tasks"]` maps `categorize` and `rate` to a provider (unset = the default `provider`). Always call `llm.make_completer(settings, task)`, `is_configured(settings, task)` and `describe(settings, task)` with the task. `llm.PRICES` holds approximate prices per model for estimates; local models are free and unknown models show "cost unknown".
@@ -113,6 +114,7 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 **Search (`#/search?q=`)**:
 - `search_docs` holds one row per searchable piece (`kind`: title, chapter, summary, notes, description, transcript; `t` = second). The FTS5 table `search_index` (trigram tokenizer, external content) follows it through insert and delete triggers.
 - `storage._reindex(cursor, ids, kinds)` must run whenever indexed text changes. It is already called from `save_playlist` (title), `update_videos` (notes), `save_details` (description, chapter, transcript) and `save_rating` (summary). `init_db` fills the index for existing databases.
+- `storage.search()` also matches several unquoted words as one phrase (keeping short words like "no"); videos with the exact phrase are flagged `exact` and listed first (`PHRASE_BOOST`), in meaning search too.
 - `storage.search()` turns user text into quoted FTS terms (3+ characters; quotes stripped), weights hits by kind, groups them by video, and crops snippets with `\x02`/`\x03` markers that the client escapes and highlights. `GET /api/search?q=&kinds=`.
 
 **Smarter categories and notes export**: `run_suggest` adds `storage.ai_context()` (summary, description and transcript opening) to each video, and `ai_classifier._pack` sizes batches to `llm.context_chars(settings, "categorize")`. `exporter.video_markdown` and `markdown_zip` build the notes. They escape user and AI text with `_md_text` (but keep the user's own notes as Markdown) and never include transcripts. `GET /api/export/markdown?id=` returns one note; `POST /api/export/markdown {ids}` returns a zip.

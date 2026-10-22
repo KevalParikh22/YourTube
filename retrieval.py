@@ -171,5 +171,11 @@ def search_by_meaning(q: str, kinds: Optional[Iterable[str]] = None, limit: int 
         v["matches"] += 1
         text = mark.sub("\x02\\1\x03", p["text"]) if mark else p["text"]
         v["hits"].append({"kind": p["kind"], "t": p["t"], "snippet": storage._crop(text)})
-    results = list(by_video.values())[:limit]
+    # Videos containing the typed words as one phrase come first, as in keyword search
+    exact = {v["video_id"]: v for v in storage.search(q, kinds)["results"] if v.get("exact")} if " " in q else {}
+    for vid, v in exact.items():
+        by_video.setdefault(vid, {**v, "score": 0.0})["exact"] = True
+    results = sorted(by_video.values(), key=lambda v: not v.get("exact"))[:limit]
+    for v in results:
+        v.setdefault("exact", False)
     return {"results": results, "short": False, "mode": found["mode"]}

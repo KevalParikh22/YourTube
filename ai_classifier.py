@@ -66,6 +66,9 @@ def _sample(videos: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
     step = len(videos) / limit
     return [videos[int(i * step)] for i in range(limit)]
 
+# Names a model uses for a catch-all; "General / Other" always exists, so these are never proposed
+_CATCH_ALL = {FALLBACK_CATEGORY.lower(), "uncategorized", "none", "other", "others", "misc", "miscellaneous", "general", "n/a"}
+
 def _clean_name(name: Any) -> str:
     return " ".join(str(name or "").split())[:60]
 
@@ -76,10 +79,12 @@ def discover_categories(
     presets: Optional[List[str]] = None,
     taxonomy: Optional[Dict[str, List[str]]] = None,
     max_categories: int = 12,
+    max_chars: int = 60_000,
 ) -> List[Dict[str, Any]]:
     """
     Proposes a category set: every preset kept verbatim, plus new categories the library needs.
-    Returns [{'name', 'description', 'keywords', 'preset', 'existing'}].
+    max_chars caps the video list so the prompt and the reply fit the model's context (a local model
+    with an 8k context cut its reply off at 317 videos). Returns [{'name', 'description', 'keywords', 'preset', 'existing'}].
     """
     presets = [p for p in (presets or []) if p and p != FALLBACK_CATEGORY]
     taxonomy = taxonomy or {}
@@ -87,6 +92,8 @@ def discover_categories(
         raise LLMError("The library is empty. Sync a playlist first.")
 
     sample = _sample(videos, SAMPLE_LIMIT)
+    while len(sample) > 20 and sum(len(_line(v)) + 1 for v in sample) > max_chars:
+        sample = _sample(videos, int(len(sample) * 0.85))   # an even spread across the whole library, just fewer
     preset_text = "\n".join(f"- {p}" for p in presets) or "(none)"
     current = "\n".join(f"- {c}" for c in taxonomy if c not in presets) or "(none)"
     prompt = f"""Here are {len(sample)} videos (title | channel) from a library of {len(videos)}:
@@ -106,10 +113,16 @@ For each category give a one-sentence description and 5-12 lowercase keywords or
 Reply with JSON:
 {{"categories": [{{"name": "...", "description": "...", "keywords": ["...", "..."]}}]}}"""
 
-    data = parse_json(complete(DISCOVER_SYSTEM, prompt))
+    reply = complete(DISCOVER_SYSTEM, prompt)
+    try:
+        data = parse_json(reply)
+    except LLMError:
+        data = None
     raw = data.get("categories") if isinstance(data, dict) else data
     if not isinstance(raw, list):
-        raise LLMError("The model's reply had no category list")
+        cut = reply.count("{") > reply.count("}")
+        raise LLMError("The model's reply was cut off before the end. Raise the context size (Settings, Ollama) or use a "
+                       "model with a larger context." if cut else "The model's reply had no category list")
 
     out: Dict[str, Dict[str, Any]] = {}
     lower_presets = {p.lower(): p for p in presets}
@@ -117,7 +130,7 @@ Reply with JSON:
         if not isinstance(c, dict):
             continue
         name = _clean_name(c.get("name"))
-        if not name or name.lower() in (FALLBACK_CATEGORY.lower(), "uncategorized"):
+        if not name or name.lower() in _CATCH_ALL:
             continue
         name = lower_presets.get(name.lower(), name)
         if name.lower() in (k.lower() for k in out):
@@ -251,8 +264,10 @@ def run_discover(max_categories: int = 12) -> bool:
     print(f"🤖 Proposing categories with {llm.describe(settings, 'categorize')} from {len(videos)} videos…")
     try:
         complete = llm.make_completer(settings, "categorize")
+        # Leave room for the instructions and a reply of ~12 categories with keywords
+        budget = max(3_000, llm.context_chars(settings, "categorize") - 4_000)
         cats = discover_categories(videos, complete, presets=settings.get("presets"),
-                                   taxonomy=load_taxonomy(), max_categories=max_categories)
+                                   taxonomy=load_taxonomy(), max_categories=max_categories, max_chars=budget)
     except LLMError as e:
         print(f"❌ {e}")
         return False

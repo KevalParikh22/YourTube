@@ -939,7 +939,7 @@ function triRow(v) {
     <div class="tri-acts">
       ${skipped ? `<button class="btn btn-sm" data-act="tri-set" data-id="${esc(v.video_id)}" data-status="unwatched">Undo skip</button>`
         : `${r?.verdict === 'skip' ? `<button class="btn btn-dark btn-sm" data-act="tri-set" data-id="${esc(v.video_id)}" data-status="skipped">Skip it</button>` : ''}
-           <button class="btn ${r && r.verdict !== 'skip' ? 'btn-dark ' : ''}btn-sm" data-act="play-at" data-id="${esc(v.video_id)}" data-t="${firstAt}">▶ ${r?.verdict === 'skim' ? 'Skim' : 'Watch'}</button>
+           <button class="btn ${r && r.verdict !== 'skip' ? 'btn-dark ' : ''}btn-sm" data-act="play-at" data-id="${esc(v.video_id)}" data-t="${firstAt}">▶ ${r?.verdict === 'skim' && r.skim.length ? 'Skim' : 'Watch'}</button>
            ${r?.verdict !== 'skip' ? `<button class="btn btn-sm" data-act="tri-set" data-id="${esc(v.video_id)}" data-status="skipped">Skip</button>` : ''}
            ${!r && S.data.ai.ready_for.rate ? `<button class="btn-text" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>Rate</button>` : ''}`}
     </div>
@@ -1291,9 +1291,11 @@ function renderSearchResults() {
   const list = sr.res.results.filter(r => byId(r.video_id));
   if (!list.length) { box.innerHTML = `<div class="empty">No matches for “${esc(sr.q)}”.</div>`; return; }
   const off = sr.meaning && sr.res.mode === 'keyword' ? ' · meaning index is off, so these are keyword matches (AI page → download the embedding model)' : '';
-  box.innerHTML = `<div class="list-sum"><span>${plural(list.length, 'video')}${list.length >= 50 ? ' (top 50)' : ''}${sr.meaning ? ' · by meaning' : ''}${off}</span></div>` + list.map(r => {
+  const exact = list.filter(r => r.exact).length, words = sr.q.trim().split(/\s+/).length > 1;
+  box.innerHTML = `<div class="list-sum"><span>${plural(list.length, 'video')}${list.length >= 50 ? ' (top 50)' : ''}${sr.meaning ? ' · by meaning' : ''}${words && exact ? ` · ${exact} with the exact phrase` : ''}${off}</span></div>` + list.map((r, i) => {
     const v = byId(r.video_id);
-    return `<div class="s-row">
+    const divider = words && exact && i === exact ? `<div class="list-sum" style="margin-top:18px"><span>${sr.meaning ? 'Related by meaning' : 'With the words apart'}</span></div>` : '';
+    return `${divider}<div class="s-row">
       <button class="thumb-btn" data-act="open" data-id="${esc(v.video_id)}" tabindex="-1" aria-hidden="true">${thumb(v)}</button>
       <div style="min-width:0">
         <div class="tri-head">${v.rating ? badge(v) : ''}${isDone(v) ? `<span class="vb vb-none">${STATUS_LABEL[v.status]}</span>` : ''}</div>

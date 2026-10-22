@@ -916,6 +916,8 @@ def _fts_query(q: str) -> Optional[str]:
     terms = [t.strip() for t in terms if len(t.strip()) >= 3]
     return " ".join('"' + t.replace('"', '""') + '"' for t in terms) or None
 
+PHRASE_BOOST = 4   # a piece containing the typed words as one phrase outranks pieces with the words apart
+
 def search(q: str, kinds: Optional[Iterable[str]] = None, limit: int = 50, db_path: str = DB_PATH) -> Dict[str, Any]:
     """
     Full-text search. Returns {'results': [{'video_id', 'score', 'hits': [{'kind', 't', 'snippet'}]}], 'short': bool}.
@@ -924,13 +926,20 @@ def search(q: str, kinds: Optional[Iterable[str]] = None, limit: int = 50, db_pa
     init_db(db_path)
     kinds = [k for k in (kinds or SEARCH_KINDS) if k in SEARCH_KINDS]
     query = _fts_query(q)
+    # Several words typed without quotes also match as one phrase, ranked first; the phrase keeps short
+    # words like "no" that the word-by-word part has to drop (the index matches 3+ characters)
+    phrase = " ".join((q or "").replace('"', " ").split()).lower()
+    use_phrase = len(phrase) >= 3 and " " in phrase and '"' not in (q or "")
+    if use_phrase:
+        quoted = '"' + phrase.replace('"', '""') + '"'
+        query = f"{quoted} OR ({query})" if query else quoted
     if not query or not kinds:
         return {"results": [], "short": bool((q or "").strip())}
     marks = ",".join("?" * len(kinds))
     with get_connection(db_path) as conn:
         try:
             rows = conn.execute(f"""
-                SELECT d.video_id, d.kind, d.t,
+                SELECT d.video_id, d.kind, d.t, d.text,
                        highlight(search_index, 0, '{_HIT_START}', '{_HIT_END}') AS snip,
                        bm25(search_index) AS rank
                 FROM search_index JOIN search_docs d ON d.id = search_index.rowid
@@ -941,13 +950,15 @@ def search(q: str, kinds: Optional[Iterable[str]] = None, limit: int = 50, db_pa
             return {"results": [], "short": False}
     by_video: Dict[str, Dict[str, Any]] = {}
     for r in rows:
-        score = -r["rank"] * _KIND_WEIGHT[r["kind"]]
-        v = by_video.setdefault(r["video_id"], {"video_id": r["video_id"], "score": 0.0, "hits": [], "matches": 0})
+        exact = use_phrase and phrase in " ".join((r["text"] or "").lower().split())
+        score = -r["rank"] * _KIND_WEIGHT[r["kind"]] * (PHRASE_BOOST if exact else 1)
+        v = by_video.setdefault(r["video_id"], {"video_id": r["video_id"], "score": 0.0, "hits": [], "matches": 0, "exact": False})
         v["matches"] += 1
+        v["exact"] = v["exact"] or exact
         v["score"] = max(v["score"], score)
         if len(v["hits"]) < 4:
             v["hits"].append({"kind": r["kind"], "t": r["t"], "snippet": _crop(r["snip"])})
-    results = sorted(by_video.values(), key=lambda v: -(v["score"] + 0.05 * v["matches"]))[:limit]
+    results = sorted(by_video.values(), key=lambda v: (not v["exact"], -(v["score"] + 0.05 * v["matches"])))[:limit]
     for v in results:
         v["hits"].sort(key=lambda h: (SEARCH_KINDS.index(h["kind"]), h["t"] if h["t"] is not None else -1))
     return {"results": results, "short": False}

@@ -203,6 +203,13 @@ class SearchTest(unittest.TestCase):
     def find(self, q, **kw):
         return storage.search(q, db_path=self.db, **kw)
 
+    def test_phrase_first_and_short_words(self):
+        storage.save_playlist(playlist("PLP"), [video("p1", "Saying no to people", "X"), video("p2", "Stop saying sorry, there is no need", "Y")],
+                              db_path=self.db)
+        r = self.find("saying no")["results"]
+        self.assertEqual([(x["video_id"], x["exact"]) for x in r], [("p1", True), ("p2", False)])
+        self.assertEqual([x["video_id"] for x in self.find('"saying" no')["results"]][:1], ["p1"])   # quotes: words, no phrase rule
+
     def test_finds_each_kind_with_time(self):
         r = self.find("kube")["results"]
         self.assertEqual([x["video_id"] for x in r], ["a"])

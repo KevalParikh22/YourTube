@@ -131,3 +131,25 @@ class CostTest(unittest.TestCase):
         self.assertEqual(llm.estimate_cost(s, "rate", 1_000_000, 1_000_000), 0.6)
         s["providers"]["anthropic"]["model"] = "some-new-model"
         self.assertIsNone(llm.estimate_cost(s, "rate", 1000, 1000))
+
+
+class SkimAndAgeTest(unittest.TestCase):
+    def test_filler_and_whole_video_ranges_are_dropped(self):
+        r = rater.validate({"score": 6, "verdict": "skim", "worth_watching": [
+            {"start": "0:00", "end": "1:45", "why": "Introductory fluff about discipline"},
+            {"start": "2:00", "end": "5:00", "why": "The dopamine reset routine, step by step"},
+            {"start": "0:00", "end": "11:50", "why": "Covers the main ideas"}]}, 726)
+        self.assertEqual([(x["start"], x["end"]) for x in r["skim"]], [(120, 300)])
+        old = rater.validate({"score": 6, "verdict": "skim", "skim": [{"start": 10, "end": 60, "why": "Setup steps"}]}, 726)
+        self.assertEqual(len(old["skim"]), 1)                     # older replies used "skim"
+        skip = rater.validate({"score": 2, "verdict": "skip", "worth_watching": [{"start": 10, "end": 60, "why": "Tips"}]}, 726)
+        self.assertEqual(skip["skim"], [])
+        weak = rater.validate({"score": 3, "verdict": "skim", "worth_watching": []}, 726)
+        self.assertEqual(weak["verdict"], "skip")                   # nothing worth watching was marked
+
+    def test_age_is_spelled_out(self):
+        today = rater.dt.date(2026, 10, 23)
+        self.assertEqual(rater._date("20260523", today), "2026-05-23 (5 months ago)")
+        self.assertEqual(rater._date("20261010", today), "2026-10-10 (this month)")
+        self.assertEqual(rater._date("20230101", today), "2023-01-01 (about 3.8 years ago)")
+        self.assertEqual(rater._date(None, today), "unknown")

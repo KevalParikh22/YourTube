@@ -53,6 +53,18 @@ class DiscoverTest(unittest.TestCase):
         discover_categories(videos, complete)
         self.assertEqual(len(re.findall(r"^T\d+ \| ", complete.calls[0], re.M)), 600)
 
+    def test_list_fits_the_context_and_catch_alls_dropped(self):
+        videos = [{"video_id": str(i), "title": f"A fairly long video title number {i}", "channel": "Some channel"} for i in range(317)]
+        complete = fake('{"categories": [{"name": "Health"}, {"name": "None"}, {"name": "Misc"}]}')
+        cats = discover_categories(videos, complete, max_chars=5000)
+        shown = re.findall(r"^A fairly long video title number \d+ \| ", complete.calls[0], re.M)
+        self.assertTrue(20 < len(shown) < 317 and sum(len(x) for x in shown) <= 5000 + len(shown) * 20)
+        self.assertEqual([c["name"] for c in cats], ["Health"])
+
+    def test_cut_off_reply_is_explained(self):
+        with self.assertRaisesRegex(LLMError, "cut off"):
+            discover_categories(self.VIDEOS, fake('{"categories": [{"name": "Health", "descr'))
+
     def test_empty_library(self):
         with self.assertRaises(LLMError):
             discover_categories([], fake("{}"))

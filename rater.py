@@ -52,11 +52,20 @@ def fit_transcript(blocks: List[Dict[str, Any]], budget: int) -> (str, bool):
     step = len(lines) / keep
     return "\n".join(lines[int(i * step)] for i in range(keep)), True
 
-def _date(upload_date: Optional[str]) -> str:
+def _date(upload_date: Optional[str], today: Optional[dt.date] = None) -> str:
+    """'2026-05-23 (5 months ago)', or 'unknown'. The age is spelled out: a small model guessed "outdated" from the date alone."""
     try:
-        return dt.datetime.strptime(upload_date or "", "%Y%m%d").date().isoformat()
+        d = dt.datetime.strptime(upload_date or "", "%Y%m%d").date()
     except ValueError:
         return "unknown"
+    days = ((today or dt.date.today()) - d).days
+    age = ("this month" if days < 31 else f"{days // 30} months ago" if days < 365
+           else f"about {round(days / 365, 1):g} years ago")
+    return f"{d.isoformat()} ({age})"
+
+
+# Model-given ranges that describe parts to pass over, not parts worth watching
+_FILLER = re.compile(r"\b(intro|introduction|introductory|fluff|filler|sponsor|outro|recap|padding|skip|skippable|ad|ads)\b", re.I)
 
 
 def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
@@ -96,7 +105,7 @@ Title: {video.get('title')}
 Channel: {video.get('channel')}
 Category in their library: {video.get('category')}
 Length: {minutes} min
-Uploaded: {_date(video.get('upload_date'))}
+Uploaded: {_date(video.get('upload_date'), today)}
 Description: {desc or '(none)'}
 Chapters:
 {chapters or '(none)'}
@@ -107,19 +116,22 @@ Rate how worth watching this video is for this learner, from 0 to 10, weighing:
 1. Depth and quality: real substance and accuracy, versus hype, clickbait or padding.
 2. Fit with their interests and categories.
 3. Time against value: does it earn its length, or would a summary be enough?
-4. Freshness: for fast-moving topics, penalise content that is likely outdated today.
+4. Freshness: for fast-moving topics, penalise content that is outdated today. Call it outdated only when the content itself
+   relies on things that have since changed (old versions, prices, events). Age alone, or an unknown date, is not evidence.
 
 Use the whole scale. 8 to 10: exceptional and clearly worth the full time for this learner. 5 to 7: useful, but parts or a summary may be enough.
 Below 5: weak, off-topic, padded or outdated. A typical backlog has many videos below 5.
 
-Verdict: "watch" (worth the full time), "skim" (only parts are worth it: give those time ranges), or "skip" (not worth it, or the summary covers it).
+Verdict: "watch" (worth the full time), "skim" (only parts are worth it), or "skip" (not worth it, or the summary covers it).
+worth_watching: for "skim", the 1 to 4 best parts TO WATCH, with what each one teaches. Never the intro, sponsor, recap or outro.
+For "watch" and "skip", leave it empty.
 Write reason (at most 20 words), tldr (at most 2 sentences) and points (3 to 7 key takeaways) in {language}.
 Times: copy them exactly as written in the transcript or chapters, like "4:05" or "1:02:30" (hours:minutes:seconds). Only use times that appear there.
 
 Reply with JSON in this shape (replace every <...>):
 {{"score": <0-10>, "verdict": "<watch|skim|skip>", "reason": "<...>", "tldr": "<...>",
  "points": [{{"t": "<time>", "text": "<...>"}}],
- "skim": [{{"start": "<time>", "end": "<time>", "why": "<...>"}}]}}"""
+ "worth_watching": [{{"start": "<time>", "end": "<time>", "why": "<what this part teaches>"}}]}}"""
     return prompt, basis
 
 
@@ -162,12 +174,19 @@ def validate(raw: Any, duration: int) -> Dict[str, Any]:
         if isinstance(p, dict) and str(p.get("text") or "").strip():
             points.append({"t": sec(p.get("t")), "text": " ".join(str(p["text"]).split())[:300]})
     skim = []
-    for r in raw.get("skim") or []:
+    for r in raw.get("worth_watching") or raw.get("skim") or []:
         if not isinstance(r, dict):
             continue
         start, end = sec(r.get("start")), sec(r.get("end"))
-        if start is not None and end is not None and end > start:
+        why = str(r.get("why") or "")
+        if start is None or end is None or end <= start or _FILLER.search(why):
+            continue   # a part to pass over, not one to watch
+        if duration > 0 and end - start >= 0.85 * duration:
+            continue   # "the whole video" is not a skim
+        if verdict != "skip":
             skim.append({"start": start, "end": end, "why": " ".join(str(r.get("why") or "").split())[:160]})
+    if verdict == "skim" and not skim and score < 4:
+        verdict = "skip"   # nothing marked worth watching, and weak overall
     return {
         "score": score, "verdict": verdict,
         "reason": " ".join(str(raw.get("reason") or "").split())[:240],
