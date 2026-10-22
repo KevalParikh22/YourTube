@@ -110,6 +110,6 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 
 ## Not built yet
 
-- **Phase 2**: questions across the whole library, with answers citing videos and timestamps. No plan document yet.
+- **Phase 2** (`docs/PRD-Phase-2.md`, in progress): questions across the whole library, answered with citations to videos and timestamps. Hybrid retrieval (FTS5 + local `qwen3-embedding:0.6b`), saved history, and a *Questions and answers* AI task that follows the ratings provider by default.
 - Writing `[YT-KB]` playlists back via the Data API: 50 units per insert against a 10k/day quota, so it needs a paced multi-day queue, and the source playlist must be hard-blocked from every write. The user hasn't decided whether they want it.
 - Public release: the checklist in section 9 of the research doc (deferred).
