@@ -49,6 +49,12 @@ if ($LocalAI) {
     & .venv\Scripts\python.exe local_setup.py --pull $model
     if (-not $LASTEXITCODE) { & .venv\Scripts\python.exe local_setup.py --use $model }
   }
+
+  Write-Host "`n6. Embedding model for questions and meaning-based search" -ForegroundColor White
+  $embed = & .venv\Scripts\python.exe local_setup.py --embed-model
+  if (Ask "Download $embed (0.64 GB) so questions and search match by meaning, in any language?") {
+    & .venv\Scripts\python.exe local_setup.py --pull $embed
+  }
 }
 
 Write-Host "`nDone" -ForegroundColor White

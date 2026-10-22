@@ -93,6 +93,13 @@ if [ "$LOCAL_AI" = 1 ]; then
   if ollama list | awk 'NR>1 {print $1}' | grep -qx "$MODEL"; then
     .venv/bin/python local_setup.py --use "$MODEL"
   fi
+
+  say "6. Embedding model for questions and meaning-based search"
+  EMBED="$(.venv/bin/python local_setup.py --embed-model)"
+  if ollama list | awk 'NR>1 {print $1}' | grep -qx "$EMBED"; then ok "$EMBED already downloaded"
+  elif ask "Download $EMBED (0.64 GB) so questions and search match by meaning, in any language?"; then
+    .venv/bin/python local_setup.py --pull "$EMBED" && ok "The index builds after your next sync (or: .venv/bin/python main.py --embed)"
+  else warn "Skipped. Questions and search use keywords only until you download it on the AI page."; fi
 fi
 
 say "Done"

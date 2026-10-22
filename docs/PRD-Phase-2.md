@@ -1,6 +1,6 @@
 # PRD: Phase 2 — Ask your library
 
-**Status:** v0.2, decisions agreed (2026-10-22) · **Builds on:** Phase 1 (transcripts, search, summaries) and Phase 2.5 (local transcripts, slides, local AI)
+**Status:** complete (2026-10-22) · v0.2 decisions agreed (2026-10-22) · **Builds on:** Phase 1 (transcripts, search, summaries) and Phase 2.5 (local transcripts, slides, local AI)
 
 Phases 1 and 2.5 made every video *readable*: transcripts (captions or local), slides and code on screen, chapters, AI summaries and your notes. Phase 2 lets you **ask questions across all of it** and get an answer that **cites the exact videos and moments**, so you can check it or jump straight there.
 
@@ -89,7 +89,10 @@ Library: 360 search pieces from the 3 real videos. 18 hand-written questions, wo
    - Real library: "and what context length did he recommend for it?" after a question about local tools became "What context length did the assistant recommend for LM Studio?" and found 20,000 tokens at 12:56 (22 s, two model calls).
    - Ask about this video: a button in the video panel opens Ask limited to that video (`video_ids`; the per-video cap is lifted for a single video).
    - Semantic search: Search page → **By meaning** (`GET /api/search?meaning=1`, `retrieval.search_by_meaning`): hybrid retrieval with a kind filter, grouped by video in rank order, the question's words highlighted. "making models smaller to fit one GPU" finds nothing by keywords and the Fine-Tuning video first by meaning. Meaning search always returns a closest piece per video, so results are ranked, not filtered.
-5. Setup and status (A4), docs and setup script.
+5. Setup and status (A4), docs and setup script. **Done 2026-10-22.**
+   - AI page → Local AI → *Meaning-based search*: index status ("N of M pieces indexed", progress bar), embedding model choices (`local_setup.EMBED_MODELS`: 0.6b recommended, 4b) with **Download** (the index builds right after when it is the model in use) and **Use** (downloaded models only; re-indexes), **Update index** and **Rebuild** (`POST /api/embed {rebuild: true}` clears the model's vectors first). Real library: Rebuild re-embedded 360 pieces in about 10 s.
+   - `scripts/setup.sh` / `setup.ps1` step 6 offers the embedding model; `local_setup.py --embed-model` / `--use-embed MODEL`.
+   - Cloud providers: `tests/test_live.py` checks Claude, Gemini and OpenAI-compatible hosts (connection, categories, a rating, a cited answer) when run with `YTKB_LIVE=1` and keys; skipped otherwise. Keys are kept in memory for that file only. Human checks for cloud AI are in `docs/MANUAL-TESTS.md` §5; not yet run (needs the user's keys).
 
 Each step ships with tests and keeps the dashboard working.
 

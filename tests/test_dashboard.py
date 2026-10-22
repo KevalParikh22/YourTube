@@ -205,3 +205,8 @@ class DashboardTest(unittest.TestCase):
         code, st = self.call("/api/embed/status")
         self.assertEqual(code, 200)
         self.assertIn("embedded", st)
+        code, r = self.call("/api/ai/settings", {"embed_model": "qwen3-embedding:4b; x"})
+        self.assertEqual(r["ai"]["embed_model"], "qwen3-embedding:0.6b")          # invalid names are ignored
+        code, r = self.call("/api/ai/settings", {"embed_model": "qwen3-embedding:4b"})
+        self.assertEqual(r["ai"]["embed_model"], "qwen3-embedding:4b")
+        self.call("/api/ai/settings", {"embed_model": "qwen3-embedding:0.6b"})

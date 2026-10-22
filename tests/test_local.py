@@ -104,3 +104,34 @@ class SetupTest(unittest.TestCase):
         self.assertEqual((s["provider"], s["providers"]["ollama"]["model"], s["tasks"]["rate"]), ("ollama", "qwen3.5:4b", "ollama"))
         s.update(provider="none", tasks={})
         llm.save_settings(s)
+
+
+class EmbedSetupTest(unittest.TestCase):
+    def test_embed_status_and_choice(self):
+        import storage
+        e = local_setup.embed_status(llm.default_settings(), {"models": [{"name": "qwen3-embedding:0.6b"}]})
+        self.assertEqual((e["model"], e["installed"]), ("qwen3-embedding:0.6b", True))
+        self.assertEqual([c["installed"] for c in e["choices"]], [True, False])
+        self.assertIn("pieces", e)
+        self.assertFalse(local_setup.embed_status(llm.default_settings(), {})["installed"])   # Ollama not running
+        before = llm.load_settings().get("embed_model")
+        try:
+            local_setup.use_embed_model("qwen3-embedding:4b")
+            self.assertEqual(llm.load_settings()["embed_model"], "qwen3-embedding:4b")
+            with self.assertRaises(ValueError):
+                local_setup.use_embed_model("bad name; rm")
+        finally:
+            s = llm.load_settings()
+            s["embed_model"] = before
+            llm.save_settings(s)
+        storage.save_embeddings("m-clear", [("h1", b"\0" * 4, 1), ("h2", b"\0" * 4, 1)])
+        self.assertEqual(storage.clear_embeddings("m-clear"), 2)
+        self.assertEqual(storage.clear_embeddings("m-clear"), 0)
+
+    def test_pull_of_the_embedding_model_builds_the_index(self):
+        import dashboard
+        import embedder
+        with mock.patch("local_setup.pull_model", return_value=True), mock.patch("embedder.run_embed") as run:
+            self.assertTrue(dashboard._pull_then_index(embedder.model_name(llm.load_settings())))
+            self.assertTrue(dashboard._pull_then_index("qwen3.5:4b"))
+        run.assert_called_once()

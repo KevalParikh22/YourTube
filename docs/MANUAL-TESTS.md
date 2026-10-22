@@ -40,3 +40,35 @@ These need your eyes, your YouTube account or your hardware. Start the dashboard
 | 4.3 | Test data | Decide: remove the "Test Engineering Playlist" (`v1`–`v5`)? | Your call (removing it needs a one-off cleanup that you approve) | |
 | 4.4 | Write-back | Decide: create real `[YT-KB]` playlists on your YouTube account, or keep queue links? | Your call | |
 | 4.5 | Notes export | Library → Export → Notes; open the zip in Obsidian or any Markdown app | Readable notes; timestamp links open the right moment | |
+
+## 5. Cloud AI with your own keys
+
+Local models are tested; these check the cloud providers. Use cheap models first (Claude Haiku, Gemini Flash-Lite). The automated part runs only when you give it keys, and never saves them:
+
+```bash
+YTKB_LIVE=1 ANTHROPIC_API_KEY=... GEMINI_API_KEY=... .venv/bin/python -m unittest tests.test_live -v
+```
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| 5.1 | Automated live check | Run the command above with the keys you have (optionally `OPENAI_API_KEY` + `YTKB_LIVE_OPENAI_MODEL` for an OpenRouter model) | 4 tests pass per provider: connection, categories, a rating, an answer with a correct citation | |
+| 5.2 | Add a key | AI → Your AIs → Claude (or Gemini) → paste key → Save and test | "Works"; after a reload the page says *A key is saved* and never shows the key | |
+| 5.3 | Key from environment | Remove the saved key (Clear), start the dashboard with `ANTHROPIC_API_KEY=... .venv/bin/python dashboard.py` | The page says it uses the key from your environment | |
+| 5.4 | Wrong key | Save an invalid key → Save and test | A clear error, nothing crashes | |
+| 5.5 | Mixed routing | Which AI does what: Categories = local, Ratings = cloud, Questions = same as ratings | Each job uses the AI shown; Ask's hint names the cloud AI | |
+| 5.6 | Cost estimate | Triage → Rate a few videos with the cloud AI | The estimate appears before it starts and is in line with what the provider's billing page shows afterwards | |
+| 5.7 | Cloud quality | Rate the same 5 videos with local and cloud; ask the same 3 questions with both | Note which is better: score spread, Skip reasons, answer accuracy and citations | |
+| 5.8 | Cloud categories | Categories → Propose with AI and Sort unsorted with the cloud AI | Sensible results; compare with local | |
+| 5.9 | Local only | AI → tick Local only | Cloud AIs show as blocked; rating or asking with a cloud AI gives a clear message; nothing is sent | |
+
+## 6. Ask your library (Phase 2)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| 6.1 | Questions | Ask → 5 questions on topics you know are in your videos (one in Hindi or another language) | Correct short answers, or "not covered" when they aren't | |
+| 6.2 | Citations | Click the numbers in a few answers | Each opens the video at the moment that supports the sentence | |
+| 6.3 | Follow-ups | Ask a follow-up like "and where does he show the code?" | "Searched for" makes sense; the answer continues the topic | |
+| 6.4 | One video | Open a video → Ask about this video | Answers come only from that video | |
+| 6.5 | Search by meaning | Search → tick By meaning → search an idea in other words | The right videos near the top, even without the same words | |
+| 6.6 | Index status | AI → Local AI → Meaning-based search | Shows all pieces indexed; Update index and Rebuild work and show progress | |
+| 6.7 | History | Reopen, filter, export and delete earlier questions | Works; the exported note's links open the right moments | |

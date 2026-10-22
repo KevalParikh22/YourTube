@@ -1212,6 +1212,14 @@ def prune_embeddings(model: Optional[str] = None, db_path: str = DB_PATH) -> int
         conn.commit()
         return n
 
+def clear_embeddings(model: str, db_path: str = DB_PATH) -> int:
+    """Drops every vector of a model, so the next update embeds the whole library again (Rebuild)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        n = conn.execute("DELETE FROM embedding_cache WHERE model = ?", (model,)).rowcount
+        conn.commit()
+        return n
+
 def embedding_status(model: str, db_path: str = DB_PATH) -> Dict[str, int]:
     init_db(db_path)
     with get_connection(db_path) as conn:

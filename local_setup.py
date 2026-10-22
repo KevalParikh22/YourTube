@@ -24,6 +24,13 @@ RECOMMENDED = [
     {"model": "qwen3.5:2b", "size": "2.7 GB", "vram_mb": 3000, "why": "Light and fast, also usable on the CPU. Less accurate."},
 ]
 
+# Embedding models for meaning-based search and questions (Phase 2), recommended first
+EMBED_MODELS = [
+    {"model": "qwen3-embedding:0.6b", "size": "0.64 GB",
+     "why": "Recommended. Fast and multilingual: finds a Hindi question's answer in an English video (tested)."},
+    {"model": "qwen3-embedding:4b", "size": "2.5 GB", "why": "Matches meaning better, about 5x slower to index. Needs ~3 GB of GPU memory."},
+]
+
 def _run(cmd: List[str], timeout: int = 5) -> Optional[str]:
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -102,7 +109,26 @@ def status() -> Dict[str, Any]:
     g = gpu()
     o = ollama(settings["providers"]["ollama"].get("base_url"))
     return {"gpu": g, "memory": memory(), "ffmpeg": ffmpeg(), "ollama": o, "whisper": whisper(),
-            "recommended": recommend(g.get("vram_mb", 0) if g["ok"] else 0)}
+            "recommended": recommend(g.get("vram_mb", 0) if g["ok"] else 0), "embed": embed_status(settings, o)}
+
+
+def embed_status(settings: Dict[str, Any], ollama_state: Dict[str, Any]) -> Dict[str, Any]:
+    """The meaning index: which embedding model, whether Ollama has it, and how many pieces have vectors."""
+    import embedder
+    import storage
+    model = embedder.model_name(settings)
+    names = {m["name"] for m in ollama_state.get("models", [])}
+    return {"model": model, "installed": model in names, "choices": [{**m, "installed": m["model"] in names} for m in EMBED_MODELS],
+            **storage.embedding_status(model)}
+
+
+def use_embed_model(model: str) -> None:
+    """Makes this Ollama model the embedding model; the index is rebuilt for it on the next update."""
+    if not re.fullmatch(r"[\w.\-/]+(:[\w.\-]+)?", model or ""):
+        raise ValueError("Not a valid model name")
+    settings = llm.load_settings()
+    settings["embed_model"] = model
+    llm.save_settings(settings)
 
 
 def pull_model(model: str, should_stop: Callable[[], bool] = lambda: False) -> bool:
@@ -157,8 +183,18 @@ def main() -> None:
     parser.add_argument("--pull", metavar="MODEL", help="download a model into Ollama")
     parser.add_argument("--recommended", action="store_true", help="print only the best-fit model name")
     parser.add_argument("--use", metavar="MODEL", help="make this Ollama model YT KB's default AI")
+    parser.add_argument("--embed-model", action="store_true", help="print only the embedding model YT KB uses")
+    parser.add_argument("--use-embed", metavar="MODEL", help="make this Ollama model YT KB's embedding model")
     args = parser.parse_args()
 
+    if args.embed_model:
+        import embedder
+        print(embedder.model_name(llm.load_settings()))
+        return
+    if args.use_embed:
+        use_embed_model(args.use_embed)
+        print(f"✅ Meaning-based search now uses {args.use_embed}. Build the index: .venv/bin/python main.py --embed")
+        return
     st = status()
     best = next(r for r in st["recommended"] if r["best"])
     if args.recommended:
@@ -177,6 +213,9 @@ def main() -> None:
     for m in st["ollama"].get("models", []):
         print(f"       · {m['name']} ({m['size_gb']} GB)")
     print(f"\nRecommended for this computer: {best['model']} ({best['size']}): {best['why']}")
+    e = st["embed"]
+    print(f"Meaning-based search: {e['model']} {'downloaded' if e['installed'] else 'not downloaded (ollama pull ' + e['model'] + ')'}, "
+          f"{e['embedded']} of {e['pieces']} pieces indexed")
 
 
 if __name__ == "__main__":

@@ -478,6 +478,7 @@ const JOB_TEXT = {
   pull: ['Downloading the model into Ollama…', 'Model downloaded', 'Download stopped. See the log.'],
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
+  embed: ['Updating the meaning index…', 'Meaning index updated', 'Index update stopped or failed. See the log.'],
 };
 const DETAIL_LABEL = { done: 'Transcript', no_captions: 'No captions', music: 'Music, no transcript', unavailable: 'Unavailable', failed: 'Failed, will retry' };
 
@@ -1119,11 +1120,11 @@ function updateJob() {
   for (const b of $$('[data-job-btn]')) b.disabled = !!job.running;
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
-    : route() === 'ai' ? job.kind === 'pull'
+    : route() === 'ai' ? ['pull', 'embed'].includes(job.kind)
     : ['sync', 'details', 'asr', 'visual'].includes(job.kind) || !job.kind;
   if (!mine || (!job.log && !job.running)) { box.innerHTML = ''; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate', 'pull', 'asr', 'visual'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
+  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate', 'pull', 'asr', 'visual', 'embed'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
     : `<span class="status-line">${job.ok ? 'Finished' : '<span class="warn-text">Failed</span>'} · ${esc(fmtLocal(job.finished_at))}</span>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div><pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
@@ -1146,7 +1147,7 @@ async function pollJob() {
     const t = JOB_TEXT[job.kind] || JOB_TEXT.sync;
     if (['details', 'sync', 'asr', 'visual'].includes(job.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
     S.busy = {};
-    if (job.kind === 'pull') S.local = null;                                // new model downloaded
+    if (job.kind === 'pull' || job.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
     toast(job.ok ? t[1] : t[2], !job.ok); await load();
   }
 }
@@ -1617,11 +1618,36 @@ function viewLocal() {
         ${(L.ollama.models || []).map(m => `<option value="${esc(m.name)}" ${ai.vision_model === m.name ? 'selected' : ''} ${m.vision ? '' : 'disabled'}>${esc(m.name)}${m.vision ? '' : ' (no image support)'}</option>`).join('')}</select></div>
     <div class="route"><span class="field-label" style="margin:0">Slide frame quality</span>
       <select data-change="visual-height" style="width:100%">${[[480, '480p (default, smaller downloads)'], [720, '720p (small text, ~2× download)']].map(([k, l]) => `<option value="${k}" ${ai.visual_height === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
+    ${viewEmbed(L, running)}
     <label class="check" style="margin-top:16px"><input type="checkbox" data-change="local-only" ${ai.local_only ? 'checked' : ''}>
       <span><b style="font-weight:500">Local only</b>: never send anything to a cloud AI (Claude, Gemini, hosted open-weight models)</span></label>
     <div class="actions"><button class="btn-text" data-act="local-check">Check again</button></div>
     <div id="job"></div>
   </section>`;
+}
+function viewEmbed(L, running) {
+  const E = L.embed;
+  if (!E) return '';
+  const pct = E.pieces ? Math.round(E.embedded / E.pieces * 100) : 0;
+  const state = !L.ollama.running ? 'Ollama is not running: questions and search use keywords only.'
+    : !E.installed ? `${E.model} isn't downloaded yet: questions and search use keywords only.`
+    : !E.pieces ? 'Nothing to index yet: sync a playlist and fetch details.'
+    : E.embedded >= E.pieces ? `All ${E.pieces} pieces indexed.` : `${E.embedded} of ${E.pieces} pieces indexed (${pct}%). The rest are added after the next sync or with Update index.`;
+  const known = E.choices.some(c => c.model === E.model) ? E.choices : [{ model: E.model, size: '', why: 'Your choice.', installed: E.installed }, ...E.choices];
+  return `
+    <h3 style="font-size:14px;margin:22px 0 4px">Meaning-based search</h3>
+    <p class="note">Ask and Search → By meaning find pieces by what they mean, in any language, using a small embedding model.
+      The index updates by itself after syncs, details, transcription, slide reading and ratings.</p>
+    <div class="prov"><div><span class="dot ${E.installed && E.embedded >= E.pieces && E.pieces ? 'ok' : ''}"></span><b style="font-weight:500">Index</b>
+      <span class="faint" style="font-size:12.5px"> · ${esc(state)}</span></div><span></span></div>
+    ${E.pieces ? `<div class="progress" style="margin:6px 0 4px"><i style="width:${pct}%"></i></div>` : ''}
+    ${L.ollama.running ? known.map(c => `<div class="prov"><div>${c.model === E.model ? '<span class="vb vb-watch" style="margin-right:6px">In use</span>' : ''}<b style="font-weight:500">${esc(c.model)}</b>
+      <span class="faint" style="font-size:12.5px">${c.size ? ' · ' + esc(c.size) : ''} · ${esc(c.why)}</span></div>
+      <span style="display:flex;gap:6px">${!c.installed ? `<button class="btn btn-sm ${c.model === E.model ? 'btn-dark' : ''}" data-act="local-pull" data-model="${esc(c.model)}" data-job-btn ${running ? 'disabled' : ''}>Download</button>` : ''}
+        ${c.model !== E.model && c.installed ? `<button class="btn btn-sm" data-act="embed-use" data-model="${esc(c.model)}">Use</button>` : ''}</span></div>`).join('') : ''}
+    ${L.ollama.running && E.installed ? `<div class="actions">
+      <button class="btn btn-sm" data-act="embed-run" data-job-btn ${running ? 'disabled' : ''}>Update index</button>
+      <button class="btn btn-sm" data-act="embed-rebuild" data-job-btn ${running ? 'disabled' : ''} title="Embed every piece again, e.g. after an Ollama or model update">Rebuild</button></div>` : ''}`;
 }
 function aiEditor(k, p) {
   const models = [...new Set([...(p.models || []), ...(S.ai.models[k] || [])])];
@@ -1997,6 +2023,22 @@ document.addEventListener('click', async e => {
       catch (err) { toast(err.message, true); }
       break;
     }
+    case 'embed-use':
+      if (!confirm(`Use ${el.dataset.model} for meaning-based search? The whole library is indexed again with it (the small model does about 12 pieces a second).`)) break;
+      try {
+        await saveAi({ embed_model: el.dataset.model });
+        const have = S.local?.embed?.choices.find(c => c.model === el.dataset.model)?.installed;
+        if (have && !S.data.job.running) { await api('/api/embed', {}); S.data.job = { running: true, log: '', kind: 'embed' }; pollJob(); }
+        S.local = null; loadLocal();
+        toast(have ? `Indexing with ${el.dataset.model}…` : `Now download ${el.dataset.model}; it is indexed right after`);
+      }
+      catch (err) { toast(err.message, true); }
+      break;
+    case 'embed-run': case 'embed-rebuild':
+      if (act === 'embed-rebuild' && !confirm('Rebuild the meaning index from scratch? Questions use keywords only until it finishes.')) break;
+      try { await api('/api/embed', { rebuild: act === 'embed-rebuild' }); S.data.job = { running: true, log: '', kind: 'embed' }; updateJob(); pollJob(); }
+      catch (err) { toast(err.message, true); }
+      break;
     case 'local-use':
       try { S.data.ai = (await api('/api/local/use', { model: el.dataset.model })).ai; refresh(); toast(`Using ${el.dataset.model}`); }
       catch (err) { toast(err.message, true); }

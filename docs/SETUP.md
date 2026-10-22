@@ -51,6 +51,7 @@ Then start the dashboard and open http://127.0.0.1:8765:
 | 4. Ollama *(local AI only)* | Installs Ollama with its official installer (Linux) or `winget` (Windows), then starts it | **Yes**. The installer may ask for your password |
 | 4b. Local transcription *(local AI only)* | Installs faster-whisper from `requirements-local.txt` (plus NVIDIA libraries on Linux/Windows; about 1.2 GB). The speech model downloads on first use (~1.6 GB) | **Yes** |
 | 5. Model *(local AI only)* | Downloads the model that fits your GPU and makes it YT KB's default AI | **Yes** |
+| 6. Embedding model *(local AI only)* | Downloads `qwen3-embedding:0.6b` (0.64 GB) for questions and search by meaning | **Yes** |
 | Done | Prints the local AI check | — |
 
 The script is safe to run again: every step skips what is already done.
@@ -137,6 +138,17 @@ Any Ollama model can be downloaded by name on the AI page (for example `gemma4:e
 
 - **Context size** (AI page → Ollama → Edit): how much transcript the model reads at once. The default is 8192 tokens. Larger values use more memory.
 - **Local only** (AI page): blocks every cloud AI, so nothing is sent off your computer.
+
+### Questions and search by meaning
+
+**Ask** and **Search → By meaning** match pieces by what they mean, in any language, using a small local embedding model. Without it they still work with keywords only.
+
+AI page → *Local AI on this computer* → **Meaning-based search**:
+- **Download** the embedding model (`qwen3-embedding:0.6b`, 0.64 GB, recommended; `qwen3-embedding:4b`, 2.5 GB, matches better but indexes about 5× slower). The index is built right after the download.
+- The status line shows how many pieces are indexed. The index updates by itself after syncs, details, transcription, slide reading and ratings; **Update index** does it now.
+- **Rebuild** embeds everything again (for example after an Ollama or model update). **Use** switches to another downloaded model and re-indexes the library with it; vectors from the old model are dropped.
+
+Command line: `ollama pull qwen3-embedding:0.6b`, then `.venv/bin/python main.py --embed`. Choose another model with `.venv/bin/python local_setup.py --use-embed MODEL`.
 
 ### Local transcription (videos without usable captions)
 
@@ -255,7 +267,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 dashboard.py   [--port 8765] [--no-open]
 main.py        [URL|ID|WL] [--browser auto|firefox|chrome|chromium|brave|edge] [--cookies FILE]
                [--ai] [--no-open] [--list] [--details [N]]
-local_setup.py [--pull MODEL] [--use MODEL] [--recommended]
+local_setup.py [--pull MODEL] [--use MODEL] [--recommended] [--embed-model] [--use-embed MODEL]
 main.py        --embed          # update the meaning-based search index
 ```
 

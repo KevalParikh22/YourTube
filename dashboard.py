@@ -102,6 +102,16 @@ def _sync(url, browser, cookies_file):
 
 AFTER_SYNC_DETAILS_LIMIT = 50
 
+def _pull_then_index(model):
+    """Downloads a model; when it is the embedding model, builds the meaning index right away."""
+    import embedder
+    import local_setup
+    ok = local_setup.pull_model(model, should_stop=JOB.stop_requested)
+    if ok and model == embedder.model_name(llm.load_settings()) and not JOB.stop_requested():
+        print()
+        embedder.run_embed(should_stop=JOB.stop_requested)
+    return ok
+
 AUTO_EMBED_KINDS = {"sync", "details", "asr", "visual", "rate"}
 JOB = Job()
 
@@ -404,8 +414,7 @@ class Handler(BaseHTTPRequestHandler):
                 model = _clean(body.get("model"))
                 if not isinstance(model, str) or not re.fullmatch(r"[\w.\-/]+(:[\w.\-]+)?", model):
                     return self._error("Not a valid model name")
-                if not JOB.start("pull", f"Download {model}",
-                                 lambda: local_setup.pull_model(model, should_stop=JOB.stop_requested)):
+                if not JOB.start("pull", f"Download {model}", lambda: _pull_then_index(model)):
                     return self._error("Another task is already running", 409)
                 return self._json({"ok": True})
 
@@ -453,7 +462,14 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/embed":
                 import embedder
-                if not JOB.start("embed", "Update meaning index", lambda: embedder.run_embed(should_stop=JOB.stop_requested)):
+                rebuild = body.get("rebuild") is True
+
+                def run():
+                    if rebuild:
+                        model = embedder.model_name(llm.load_settings())
+                        print(f"🧹 Rebuilding the meaning index: cleared {storage.clear_embeddings(model)} vectors of {model}.")
+                    return embedder.run_embed(should_stop=JOB.stop_requested)
+                if not JOB.start("embed", "Rebuild meaning index" if rebuild else "Update meaning index", run):
                     return self._error("Another task is already running", 409)
                 return self._json({"ok": True})
 
@@ -562,6 +578,8 @@ class Handler(BaseHTTPRequestHandler):
                 settings["asr_model"] = body["asr_model"]
             if isinstance(body.get("vision_model"), str) and re.fullmatch(r"[\w.\-/:]*", body["vision_model"]):
                 settings["vision_model"] = body["vision_model"]
+            if isinstance(body.get("embed_model"), str) and re.fullmatch(r"[\w.\-/]+(:[\w.\-]+)?", body["embed_model"]):
+                settings["embed_model"] = body["embed_model"]
             if body.get("visual_height") in (480, 720):
                 settings["visual_height"] = body["visual_height"]
             if isinstance(body.get("interests"), str):

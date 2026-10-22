@@ -7,7 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 YT KB (YouTube Knowledge Base): a local Python tool that reads YouTube playlists (often a private "Watch Later"-style backlog), sorts videos into topic categories, works out watch time at 1x through 2x speed, fetches transcripts, rates videos with AI (Watch / Skim / Skip), searches everything, and tracks progress in a local dashboard. Specs:
 - `docs/PRD-Phase-0.md` (original) and `docs/Phase-0-Research-and-Improvements.md` (research, revised requirements v0.2, roadmap, release checklist). The second supersedes the first where they disagree.
 - `docs/PRD-Phase-1.md`: complete.
-- `docs/PRD-Phase-2.5.md`: everything processed locally (in progress).
+- `docs/PRD-Phase-2.5.md`: everything processed locally (complete).
+- `docs/PRD-Phase-2.md`: ask your library, answers cited to videos and moments (complete).
+- `docs/MANUAL-TESTS.md`: checks that need the user (real playlists, hardware, cloud keys).
 - `docs/SETUP.md`: the user-facing setup guide.
 
 **Hard rule: the source playlist is never modified.** Non-destructiveness is a core requirement. Many playlists can be ingested; each is a *source* feeding one deduplicated library. A video that disappears from a source is flagged (`playlist_items.removed = 1`), never deleted, and **stays in the library (and in remaining-time totals) until it is marked watched**.
@@ -21,7 +23,8 @@ python3 -m venv --without-pip .venv && python3 -m pip --python .venv/bin/python 
 .venv/bin/python main.py --list [--browser auto]   # list the signed-in account's playlists and IDs
 .venv/bin/python main.py --details [N]             # fetch details/captions for up to N videos (default 200)
 .venv/bin/python main.py --embed                   # update the meaning-based search index (Ollama embedding model)
-.venv/bin/python -m unittest             # test suite (tests/), runs against temp files
+.venv/bin/python -m unittest             # test suite (tests/), runs against temp files; API keys are stripped
+YTKB_LIVE=1 ANTHROPIC_API_KEY=... .venv/bin/python -m unittest tests.test_live -v   # opt-in checks against real cloud AIs
 bash scripts/setup.sh [--local-ai]       # first-time setup for users (venv, deps, optional Ollama + model); guide: docs/SETUP.md
 .venv/bin/python local_setup.py [--pull M | --use M | --recommended]   # local AI check and model setup
 ```
@@ -105,7 +108,7 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 - `storage.get_connection()` returns a connection that **closes** when its `with` block ends. Always use it in a `with` block.
 - Retrieval keeps the top `KEEP_TOP` (6) pieces, then caps 4 per video.
 
-**Ask (`#/ask`, `asker.py`)**: `ask()` retrieves 8 pieces, numbers them as excerpts, calls the `ask` task (`llm.TASK_FOLLOWS`: unset `tasks.ask` uses `tasks.rate`, then the default) and runs `check_citations`: invalid numbers dropped; a citation moves to another excerpt only when that one matches its sentence ≥ `MOVE_MARGIN` better and ≥ `MOVE_FLOOR` (embedding cosine; skipped when pieces have no vectors or Ollama is down). Answers are kept in `ask_history` (`storage.save_ask/list_asks/get_ask/delete_ask`), with the excerpts sent. Follow-ups: `ask(..., follow_up_of=id)` joins that conversation (`thread_id` = first question's id), keeps its filters, and rewrites the question with `standalone_question` before retrieval. `list_asks` returns conversations; `get_thread`, `delete_ask` (whole conversation) and `exporter.ask_markdown(thread)` work on conversations. Search page **By meaning** = `retrieval.search_by_meaning` (`/api/search?meaning=1`), shaped like `storage.search`. One answer at a time (`asker._lock`); `POST /api/ask` runs synchronously, not in the Job slot. API: `POST /api/ask`, `GET /api/ask/history?q=`, `/api/ask/item?id=`, `/api/export/ask?id=`, `POST /api/ask/delete`.
+**Ask (`#/ask`, `asker.py`)**: `ask()` retrieves 8 pieces, numbers them as excerpts, calls the `ask` task (`llm.TASK_FOLLOWS`: unset `tasks.ask` uses `tasks.rate`, then the default) and runs `check_citations`: invalid numbers dropped; a citation moves to another excerpt only when that one matches its sentence ≥ `MOVE_MARGIN` better and ≥ `MOVE_FLOOR` (embedding cosine; skipped when pieces have no vectors or Ollama is down). The AI page's *Meaning-based search* card (`local_setup.embed_status`, `EMBED_MODELS`) downloads/switches the embedding model, shows index status, and runs `POST /api/embed {rebuild}`; downloading the model in use builds the index (`dashboard._pull_then_index`). Answers are kept in `ask_history` (`storage.save_ask/list_asks/get_ask/delete_ask`), with the excerpts sent. Follow-ups: `ask(..., follow_up_of=id)` joins that conversation (`thread_id` = first question's id), keeps its filters, and rewrites the question with `standalone_question` before retrieval. `list_asks` returns conversations; `get_thread`, `delete_ask` (whole conversation) and `exporter.ask_markdown(thread)` work on conversations. Search page **By meaning** = `retrieval.search_by_meaning` (`/api/search?meaning=1`), shaped like `storage.search`. One answer at a time (`asker._lock`); `POST /api/ask` runs synchronously, not in the Job slot. API: `POST /api/ask`, `GET /api/ask/history?q=`, `/api/ask/item?id=`, `/api/export/ask?id=`, `POST /api/ask/delete`.
 
 **Search (`#/search?q=`)**:
 - `search_docs` holds one row per searchable piece (`kind`: title, chapter, summary, notes, description, transcript; `t` = second). The FTS5 table `search_index` (trigram tokenizer, external content) follows it through insert and delete triggers.
@@ -120,6 +123,5 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 
 ## Not built yet
 
-- **Phase 2** (`docs/PRD-Phase-2.md`, in progress): steps 1–4 done (index, retrieval, Ask page with follow-ups, Ask about this video, meaning search). Left: step 5, embedding model setup and index status on the AI page, the setup script and docs.
 - Writing `[YT-KB]` playlists back via the Data API: 50 units per insert against a 10k/day quota, so it needs a paced multi-day queue, and the source playlist must be hard-blocked from every write. The user hasn't decided whether they want it.
 - Public release: the checklist in section 9 of the research doc (deferred).
