@@ -45,7 +45,9 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
 }
 
 # Jobs that can each use their own provider; unset ones use the default ("provider")
-TASKS = {"categorize": "Categories", "rate": "Ratings and summaries"}
+TASKS = {"categorize": "Categories", "rate": "Ratings and summaries", "ask": "Questions and answers"}
+# Tasks that follow another task's choice when they have none of their own
+TASK_FOLLOWS = {"ask": "rate"}
 
 # Approximate USD per 1M tokens (input, output), for cost estimates only
 PRICES = {
@@ -141,7 +143,7 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         "provider": settings["provider"], "auto_after_sync": settings["auto_after_sync"],
         "providers": providers, "presets": settings["presets"],
         "category_notes": settings["category_notes"], "proposal": settings["proposal"],
-        "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS,
+        "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS, "task_follows": TASK_FOLLOWS,
         "interests": settings["interests"], "language": settings["language"],
         "local_only": bool(settings.get("local_only")),
         "asr_model": settings.get("asr_model") or "auto",
@@ -154,8 +156,11 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 def provider_for(settings: Dict[str, Any], task: Optional[str] = None) -> Optional[str]:
-    """The provider a job uses: its own choice if set and known, else the default."""
-    chosen = (settings.get("tasks") or {}).get(task) if task else None
+    """The provider a job uses: its own choice if set and known, else the task it follows, else the default."""
+    tasks = settings.get("tasks") or {}
+    chosen = tasks.get(task) if task else None
+    if chosen not in PROVIDERS and task in TASK_FOLLOWS:
+        chosen = tasks.get(TASK_FOLLOWS[task])
     return chosen if chosen in PROVIDERS else settings.get("provider")
 
 def is_configured(settings: Dict[str, Any], task: Optional[str] = None) -> bool:

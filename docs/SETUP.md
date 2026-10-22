@@ -172,7 +172,7 @@ On the **AI** page, click **Set up** next to a provider, paste the key, then **S
 
 ### Which AI does what
 
-On the AI page under **Which AI does what**, pick a **Default** AI, then optionally a different one for **Categories** and for **Ratings and summaries**. Example: a free local model for categories and Claude for ratings. A rating run shows the estimated tokens and cost before it starts.
+On the AI page under **Which AI does what**, pick a **Default** AI, then optionally a different one for **Categories**, **Ratings and summaries** and **Questions and answers**. Example: a free local model for categories and Claude for ratings. A rating run shows the estimated tokens and cost before it starts. **Questions and answers** uses the same AI as ratings unless you pick one.
 
 ### About you
 
@@ -191,6 +191,7 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 | Read slides, whiteboards and on-screen code | Mark videos (panel, category **Slides** switch, or suggestions), then Playlists → Read slides | — |
 | Transcribe videos without usable captions on this computer | Playlists → Transcribe N videos locally, or a video's panel | — |
 | Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment | — |
+| Ask a question across your videos | **Ask** → type the question → click a number in the answer to play that moment. Past questions stay in the list on the right; **Export note** saves one as Markdown | — |
 | Category suggestions after sync | AI → About you → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
 | Export notes for Obsidian / note apps (Markdown) | Library → Export → Notes (.zip), the selection bar's **Export notes**, or **Export note** in a video's panel | — |
@@ -204,7 +205,7 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 
 | File | Contents | Safe to delete? |
 |---|---|---|
-| `yt_kb.db` | Your library: playlists, videos, statuses, notes, transcripts, ratings | **No**. This is your data; back it up |
+| `yt_kb.db` | Your library: playlists, videos, statuses, notes, transcripts, ratings, questions and answers | **No**. This is your data; back it up |
 | `settings.json` | AI settings and API keys, interests, language, transcript switches | Yes (you lose AI settings and keys) |
 | `taxonomy.json` | Your categories and their keywords | Yes (built-in categories come back) |
 | `reports/` | Static HTML and Markdown snapshots written by `main.py` | Yes |
@@ -223,7 +224,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `providers.<name>.base_url` | per provider | Server URL (Ollama: `http://localhost:11434`) |
 | `providers.<name>.api_key` | `""` | API key (or use the environment variable) |
 | `providers.ollama.num_ctx` | `8192` | Ollama context size in tokens |
-| `tasks.categorize`, `tasks.rate` | unset | Provider for that job; unset means the default |
+| `tasks.categorize`, `tasks.rate`, `tasks.ask` | unset | Provider for that job; unset means the default (`ask` follows `rate`) |
 | `local_only` | `false` | Block every cloud AI |
 | `visuals.<category>` | off | Read slides for videos in this category |
 | `vision_model` | `""` | Ollama model that reads frames; empty means the Ollama text model |
@@ -283,6 +284,8 @@ Your database is upgraded automatically when the dashboard starts. Back up `yt_k
 | AI returns errors | AI page → **Save and test** shows the exact error. |
 | Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai`, or `.venv/bin/python -m pip install -r requirements-local.txt` |
 | Local transcription very slow | It runs on the CPU: check the AI page's GPU line; with an NVIDIA GPU, reinstall `requirements-local.txt` for the CUDA libraries. |
+| Answers say "keywords only" | The meaning index is off: download the embedding model (`ollama pull qwen3-embedding:0.6b`), then run `.venv/bin/python main.py --embed`. |
+| An answer misses something you know is in a video | Fetch details (or transcribe) for that video first. Try other words: the small local model links meanings well but not always (it misses "offline" for "running locally"). |
 | Dashboard won't start: port in use | `.venv/bin/python dashboard.py --port 8770` |
 | Windows script blocked | Run it with `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1` |
 
@@ -292,7 +295,7 @@ Your database is upgraded automatically when the dashboard starts. Back up `yt_k
 
 - **YouTube:** read-only. Playlists are read with your browser sign-in, and per-video details are read **without** it.
 - **Cookies:** read locally and sent only to youtube.com; never stored or logged by YT KB.
-- **AI:** only titles, descriptions and transcripts are sent, and only to the AI you choose. With **Local only**, nothing leaves your computer.
+- **AI:** only titles, descriptions and transcripts are sent, and only to the AI you choose. A question sends the question and about 8 matching excerpts. With **Local only**, nothing leaves your computer.
 - **Dashboard:** listens only on 127.0.0.1 and refuses requests from other websites. It has no password, so on a shared computer other local users could open it.
 - **API keys:** stored in `settings.json`, which is created readable only by you. On NTFS/FAT drives that protection doesn't apply, so prefer environment variables there.
 

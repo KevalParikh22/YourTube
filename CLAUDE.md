@@ -49,7 +49,7 @@ Every stage passes around a list of plain video dicts with the keys `video_id, t
 
 6. **`exporter.py`**: builds `watch_videos?video_ids=` queue URLs. The endpoint is undocumented and capped at 50 IDs, so use the chunked `generate_youtube_watch_queue_urls`. Also handles CSV and JSON export.
 
-**Dashboard**: `dashboard.py` is a stdlib `ThreadingHTTPServer` bound to 127.0.0.1. It serves `web/index.html`, a single-file vanilla JS app with hash routing (`#/` library with status/category/playlist filters in the left rail, including an "AI suggestions" view, `#/plan`, `#/sources`, `#/categories` with presets ("Keep") and proposal review, `#/ai` provider settings, `#/triage`, `#/search`, `#/setup`). `/api/state` returns the whole library via `storage.get_library()` (every video with its `sources` and `in_source`); all filtering happens client-side, and a JSON API:
+**Dashboard**: `dashboard.py` is a stdlib `ThreadingHTTPServer` bound to 127.0.0.1. It serves `web/index.html`, a single-file vanilla JS app with hash routing (`#/` library with status/category/playlist filters in the left rail, including an "AI suggestions" view, `#/plan`, `#/sources`, `#/categories` with presets ("Keep") and proposal review, `#/ai` provider settings, `#/triage`, `#/search`, `#/ask`, `#/setup`). `/api/state` returns the whole library via `storage.get_library()` (every video with its `sources` and `in_source`); all filtering happens client-side, and a JSON API:
 - `GET /api/state`, `/api/job`, `/api/export?format=&playlist=`, `/api/export/markdown?id=`, `/api/video?id=`, `/api/search?q=&kinds=`, `/api/local/status`, `/docs/setup`, `/download/<name>`
 - `POST /api/videos/update`, `/api/taxonomy`, `/api/categories/{rename,delete}`, `/api/reclassify`, `/api/ingest`, `/api/presets`, `/api/job/cancel`
 - `POST /api/ai/{settings,test,models,discover,suggest}`, `/api/ai/proposal/{apply,dismiss}`, `/api/ai/suggestions/{accept,dismiss}`
@@ -103,6 +103,9 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 - `embedder.run_embed` embeds only missing hashes through Ollama `/api/embed` (`settings["embed_model"]`, default `qwen3-embedding:0.6b`) and prunes orphans. The dashboard `Job` runs it after `sync`, `details`, `asr`, `visual` and `rate` jobs (`AUTO_EMBED_KINDS`).
 - `retrieval.retrieve(q, k, filters)` fuses meaning (cosine over an in-memory matrix, refreshed when `storage.index_version()` changes; queries use `embedder.QUERY_PREFIX`) with FTS any-term keywords at weight 0.5 (RRF k=60). It caps 4 pieces per video and falls back to keywords alone. `GET /api/retrieve?q=&k=&categories=&playlists=&videos=&done=`.
 - `storage.get_connection()` returns a connection that **closes** when its `with` block ends. Always use it in a `with` block.
+- Retrieval keeps the top `KEEP_TOP` (6) pieces, then caps 4 per video.
+
+**Ask (`#/ask`, `asker.py`)**: `ask()` retrieves 8 pieces, numbers them as excerpts, calls the `ask` task (`llm.TASK_FOLLOWS`: unset `tasks.ask` uses `tasks.rate`, then the default) and runs `check_citations`: invalid numbers dropped; a citation moves to another excerpt only when that one matches its sentence ≥ `MOVE_MARGIN` better and ≥ `MOVE_FLOOR` (embedding cosine; skipped when pieces have no vectors or Ollama is down). Answers are kept in `ask_history` (`storage.save_ask/list_asks/get_ask/delete_ask`), with the excerpts sent. `exporter.ask_markdown` makes a note. One answer at a time (`asker._lock`); `POST /api/ask` runs synchronously, not in the Job slot. API: `POST /api/ask`, `GET /api/ask/history?q=`, `/api/ask/item?id=`, `/api/export/ask?id=`, `POST /api/ask/delete`.
 
 **Search (`#/search?q=`)**:
 - `search_docs` holds one row per searchable piece (`kind`: title, chapter, summary, notes, description, transcript; `t` = second). The FTS5 table `search_index` (trigram tokenizer, external content) follows it through insert and delete triggers.
@@ -117,6 +120,6 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 
 ## Not built yet
 
-- **Phase 2** (`docs/PRD-Phase-2.md`, in progress): questions across the whole library, answered with citations to videos and timestamps. Hybrid retrieval (FTS5 + local `qwen3-embedding:0.6b`), saved history, and a *Questions and answers* AI task that follows the ratings provider by default.
+- **Phase 2** (`docs/PRD-Phase-2.md`, in progress): steps 1–3 done (index, retrieval, Ask page). Left: follow-up questions, Ask about this video, semantic search on the Search page, and embedding setup/status on the AI page.
 - Writing `[YT-KB]` playlists back via the Data API: 50 units per insert against a 10k/day quota, so it needs a paced multi-day queue, and the source playlist must be hard-blocked from every write. The user hasn't decided whether they want it.
 - Public release: the checklist in section 9 of the research doc (deferred).

@@ -40,7 +40,7 @@ Library: 360 search pieces from the 3 real videos. 18 hand-written questions, wo
 |---|---|---|
 | Embedding speed (`qwen3-embedding:0.6b`, Ollama, RTX 3050) | 360 pieces in 31 s (**12 pieces/s**); 1024 dimensions; **1.5 MB** of float32; a query embeds in **12 ms** | Indexing a 1,000-video library (~100k pieces) takes about 2.5 h once, in the background, then is incremental. Brute-force cosine search is instant at this size. |
 | Keyword only (FTS5, any term) | 14/18 found, MRR 0.63; **missed both Hindi questions** | Not enough on its own. |
-| Meaning only (embeddings) | **18/18**, MRR **0.875**, including both Hindi questions | Meaning-based retrieval is the core. |
+| Meaning only (embeddings) | **18/18**, MRR **0.875**, including both Hindi questions | Meaning-based retrieval is the core. *Correction (step 3): the "offline coding assistant" question counted as found only because its ±30 s window caught neighbouring pieces. The real answer (LM Studio, 12:56) ranks ~55th for "offline" but in the top 7 for "with a local model": the 0.6B model doesn't link "offline" to "running locally".* |
 | Hybrid, equal weights (RRF) | 17/18, MRR 0.817; keywords add noise on paraphrases | Don't weight keywords equally. |
 | **Hybrid, keyword weight 0.5** | 17/18, MRR **0.872** (≈ meaning only); keeps exact-term matches ("Neo4j", error text) that paraphrased tests can't show | **Chosen.** Send about 8 pieces to the answer model, so rank-6 answers still reach it. |
 | Local answers (`qwen3.5:4b`, 8 excerpts) | About **6 s per answer** once warm. **0 invalid citation numbers** out of 20. 4 of 6 answers fully correct; the Hindi question got a correct English answer with 1 unrelated citation. | Usable locally. |
@@ -66,7 +66,7 @@ Library: 360 search pieces from the 3 real videos. 18 hand-written questions, wo
 ## 5. Data model (additions)
 
 - `embeddings(doc_id → search_docs.id, model, dim, vector BLOB float32)`, with a "stale" flag when the piece's text changes.
-- `ask_history` (only if decided in §7): question, answer, citations JSON, filters, model, created_at.
+- `ask_history`: question, answer, citations JSON, sources JSON (the excerpts sent, cut to 600 characters), filters, mode, model, seconds, created_at.
 
 ## 6. Build order (proposed)
 
@@ -77,7 +77,13 @@ Library: 360 search pieces from the 3 real videos. 18 hand-written questions, wo
    - `retrieval.retrieve()`: meaning + keywords (half weight), filters (videos, categories, playlists, include done), at most 4 pieces per video, and keyword-only fallback.
    - Real library: 360 pieces embedded in 9 s. A paraphrased English question finds the LoRA explanation; a Hindi question finds the Neo4j Docker setup in an English video.
    - Fixed along the way: database connections were never closed (a Phase 0 bug); `get_connection()` now closes them on leaving a `with` block.
-3. Ask page (A1): answers with checked citations and sources.
+3. Ask page (A1): answers with checked citations and sources. **Done 2026-10-22.**
+   - `asker.ask()`: retrieve 8 pieces → numbered excerpts (cut to the model's context) → the *Questions and answers* task (`tasks.ask`, follows `tasks.rate`) → `check_citations` → saved in `ask_history`.
+   - Citation check, in place: `[1, 3]` → `[1][3]`; numbers that weren't sent are dropped; marks on a line of their own join the sentence above; a citation moves to another excerpt only when that one matches the sentence ≥ 0.12 better (cosine) **and** ≥ 0.5 on its own, so "not covered" sentences with equally weak matches aren't shuffled. Duplicates collapse.
+   - Calibration on the real library: the local model's citations were the best or tied-best match in every cited sentence of 4 answers (0 moves), at 5–10 s per answer (23 s cold).
+   - Retrieval change: the 4-per-video cap now applies after the top 6 pieces, so one clearly relevant video isn't cut short.
+   - Ask page: question box, filters (category, playlist, include watched/skipped), the answer with numbered citations that play that moment, cited-video chips, the sources sent (uncited ones dimmed), history with a filter, Copy, Export note (Markdown with timestamp links) and Delete.
+   - API: `POST /api/ask {question, filters}`, `GET /api/ask/history?q=`, `GET /api/ask/item?id=`, `GET /api/export/ask?id=`, `POST /api/ask/delete {id}`.
 4. Follow-ups, Ask about this video (A2) and semantic search (A3).
 5. Setup and status (A4), docs and setup script.
 

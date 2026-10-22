@@ -92,7 +92,8 @@ class RetrievalTest(unittest.TestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             embedder.run_embed(embed_fn=fake_embed)
         r = self.ask("lora adapters", k=8)
-        self.assertLessEqual(sum(p["video_id"] == "r_ft" for p in r["pieces"]), retrieval.PER_VIDEO)
+        self.assertEqual(sum(p["video_id"] == "r_ft" for p in r["pieces"][:retrieval.KEEP_TOP]), retrieval.KEEP_TOP)
+        self.assertEqual([p["video_id"] for p in r["pieces"][retrieval.KEEP_TOP:]].count("r_ft"), 0)   # capped after the top
         self.assertGreater(sum(p["video_id"] == "r_ft" for p in self.ask("lora adapters", k=8, video_ids=["r_ft"])["pieces"]), 4)
 
 

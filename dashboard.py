@@ -212,6 +212,22 @@ class Handler(BaseHTTPRequestHandler):
                        "include_done": (qs.get("done") or ["1"])[0] != "0"}
             k = max(1, min(30, int((qs.get("k") or ["8"])[0] or 8)))
             return self._json(retrieval.retrieve(q, k=k, filters=filters))
+        if url.path == "/api/ask/history":
+            return self._json({"items": storage.list_asks((qs.get("q") or [""])[0][:200])})
+        if url.path in ("/api/ask/item", "/api/export/ask"):
+            import asker
+            from exporter import ask_markdown
+            try:
+                item = storage.get_ask(int((qs.get("id") or ["0"])[0]))
+            except ValueError:
+                item = None
+            if item is None:
+                return self._error("Unknown question", 404)
+            if url.path == "/api/ask/item":
+                return self._json(asker.from_history(item))
+            name = safe_filename("Q " + item["question"]) + ".md"
+            return self._send(200, ask_markdown(item), "text/markdown; charset=utf-8",
+                              extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/embed/status":
             import embedder
             settings = llm.load_settings()
@@ -409,6 +425,25 @@ class Handler(BaseHTTPRequestHandler):
                 if not JOB.start("asr", "Transcribe locally", lambda: local_asr.run_asr(ids, should_stop=JOB.stop_requested)):
                     return self._error("Another task is already running", 409)
                 return self._json({"ok": True})
+
+            if path == "/api/ask":
+                import asker
+                question = body.get("question")
+                if not isinstance(question, str) or not question.strip():
+                    return self._error("Type a question")
+                f = body.get("filters") or {}
+                lists = lambda k: [x for x in f.get(k) or [] if isinstance(x, str)][:200] if isinstance(f.get(k), list) else []
+                filters = {"categories": lists("categories"), "playlists": lists("playlists"), "video_ids": lists("video_ids"),
+                           "include_done": f.get("include_done", True) is not False}
+                if not llm.is_configured(llm.load_settings(), "ask"):
+                    return self._error("Choose an AI for questions and answers on the AI page first")
+                return self._json(asker.ask(question.strip()[:1000], filters=filters))
+
+            if path == "/api/ask/delete":
+                ask_id = body.get("id")
+                if not isinstance(ask_id, int) or isinstance(ask_id, bool):
+                    return self._error("id must be a number")
+                return self._json({"ok": storage.delete_ask(ask_id)})
 
             if path == "/api/embed":
                 import embedder

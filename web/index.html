@@ -324,6 +324,36 @@
   /* ---------- search ---------- */
   #gsearch { width: 220px; height: 32px; }
   #gsearch-btn { display: none; font-size: 18px; text-decoration: none; }
+  .ask { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 32px; align-items: start; margin-top: 8px; }
+  .ask-box { display: flex; gap: 8px; margin-top: 18px; }
+  .ask-box .search-big { margin-top: 0; }
+  .ask-box .btn { height: 46px; padding: 0 20px; font-size: 15px; }
+  .ask-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+  .ask-filters select { max-width: 220px; }
+  .answer { margin-top: 24px; }
+  .answer h2 { font-size: 19px; font-weight: 600; margin: 0 0 12px; line-height: 1.35; }
+  .answer .body { font-size: 15.5px; line-height: 1.65; }
+  .answer .body p { margin: 0 0 12px; }
+  .cite { all: unset; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px;
+    margin: 0 1px; border-radius: 9px; background: var(--sunken); border: 1px solid var(--line-strong); color: var(--accent); font-size: 11px; font-weight: 700;
+    font-variant-numeric: tabular-nums; vertical-align: 2px; line-height: 1; }
+  .cite:hover, .cite:focus-visible { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .cited-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; }
+  .cited-row .chip { height: 26px; font-size: 12.5px; max-width: 100%; }
+  .cited-row .chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src { all: unset; cursor: pointer; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 9px 8px; margin: 0 -8px; border-radius: 6px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+  .src:hover { background: var(--sunken); }
+  .src .n { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .src.uncited { opacity: .62; }
+  .src .t { display: block; color: var(--ink); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .src .t time { color: var(--accent); font-variant-numeric: tabular-nums; margin-left: 6px; font-weight: 500; }
+  .src .x { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .hist h4 { font-size: 12.5px; color: var(--ink-3); font-weight: 500; margin: 0 0 8px; }
+  .hist input { width: 100%; margin-bottom: 8px; }
+  .hist a { display: block; padding: 7px 8px; margin: 0 -8px; border-radius: 6px; color: var(--ink-2); text-decoration: none; font-size: 13px; line-height: 1.4; }
+  .hist a:hover { background: var(--sunken); color: var(--ink); }
+  .hist a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
+  .hist a small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
   .search-big { width: 100%; height: 46px !important; font-size: 17px !important; padding: 0 14px !important; margin-top: 18px; }
   .s-row { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .hits { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -393,6 +423,8 @@
     .tri-row { grid-template-columns: 120px minmax(0, 1fr); gap: 14px; }
     .tri-acts { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; min-width: 0; }
     .route { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    .ask { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+    .ask-box .btn { padding: 0 14px; }
     .form-grid { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 640px) {
@@ -432,7 +464,7 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['', 'Library'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['ai', 'AI'], ['setup', 'Setup']];
+const TABS = [['', 'Library'], ['ask', 'Ask'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['ai', 'AI'], ['setup', 'Setup']];
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
 const JOB_TEXT = {
@@ -465,6 +497,7 @@ const S = {
   drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   search: { q: '', kind: 'all', res: null, seq: 0 },
+  ask: { q: '', cat: '', src: '', done: true, busy: false, res: null, hist: null, hq: '', seq: 0 },
 };
 
 /* ---------------- helpers ---------------- */
@@ -606,6 +639,13 @@ function renderView() {
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
   else if (r === 'ai') { v.innerHTML = viewAI(); updateJob(); if (!S.local) loadLocal(); }
   else if (r === 'setup') { v.innerHTML = viewSetup(); if (!S.guide) loadGuide(); }
+  else if (r === 'ask') {
+    const id = +routeParam('id') || null;
+    if (id && S.ask.res?.id !== id && !S.ask.busy) openAsk(id);
+    v.innerHTML = viewAsk();
+    if (!S.ask.hist) loadAskHistory();
+    if (!S.ask.res && !S.ask.busy) $('#aq')?.focus();
+  }
   else if (r === 'search') {
     const q = routeParam('q');
     if (q != null && q !== S.search.q) { S.search.q = q; S.search.res = null; }
@@ -1272,6 +1312,105 @@ function goSearch(q) {
   if (location.hash !== target) location.hash = target; else { refresh(); }
 }
 
+/* ---------------- ask ---------------- */
+const MODE_LABEL = { hybrid: 'meaning + keywords', keyword: 'keywords only (meaning index off)' };
+function viewAsk() {
+  const a = S.ask, ai = S.data.ai, ready = ai.ready_for.ask;
+  return `
+  <section>
+    <div class="eyebrow">Ask</div>
+    <h1 class="display">Ask your library<em>answers cite the exact videos and moments</em></h1>
+    <div class="ask-box">
+      <input type="text" id="aq" class="search-big" value="${esc(a.q)}" maxlength="1000" placeholder="e.g. How do I fine-tune a big model on one GPU?" aria-label="Question" ${a.busy ? 'disabled' : ''}>
+      <button class="btn btn-dark" data-act="ask-go" ${a.busy || !ready ? 'disabled' : ''}>${a.busy ? '<span class="spin" style="display:inline-block"></span>' : 'Ask'}</button>
+    </div>
+    <div class="ask-filters">
+      <select data-change="ask-cat" aria-label="Category"><option value="">All categories</option>
+        ${categoryNames().map(c => `<option value="${esc(c)}" ${a.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      ${S.data.playlists.length > 1 ? `<select data-change="ask-src" aria-label="Playlist"><option value="">All playlists</option>
+        ${S.data.playlists.map(p => `<option value="${esc(p.id)}" ${a.src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>` : ''}
+      <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched and skipped videos</span></label>
+    </div>
+    <p class="hint">${ready ? `Answered by ${esc(ai.uses.ask)}${ai.providers[ai.tasks.ask || ai.tasks.rate || ai.provider]?.local ? ', on this computer: about 5–30 s' : ''}.`
+      : 'Choose an AI for questions first: <a href="#/ai">AI page</a> → Which AI does what.'}
+      Answers use only your videos' transcripts, slides, chapters, summaries and notes. Click a number to play that moment.</p>
+  </section>
+  <div class="ask">
+    <div id="aresult">${askResult()}</div>
+    <aside class="hist">${askHistory()}</aside>
+  </div>`;
+}
+function askResult() {
+  const a = S.ask, r = a.res;
+  if (a.busy) return `<p class="note" style="margin-top:24px"><span class="spin" style="display:inline-block"></span> Reading your videos and writing an answer…</p>`;
+  if (!r) return '';
+  const src = Object.fromEntries(r.sources.map(x => [x.n, x]));
+  const label = x => `${x.title}${x.t != null ? ' @ ' + clock(x.t) : ''}`;
+  const cite = n => src[n] ? `<button class="cite" data-act="play-at" data-id="${esc(src[n].video_id)}" data-t="${Math.floor(src[n].t || 0)}" title="${esc(label(src[n]))}">${n}</button>` : '';
+  const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+  const body = r.answer.split(/\n\s*\n/).map(par => `<p>${par.split(/(\[\d+\])/).map(x => /^\[\d+\]$/.test(x) ? cite(+x.slice(1, -1)) : inline(x).replace(/\n/g, '<br>')).join('')}</p>`).join('');
+  const cited = r.sources.filter(x => x.cited);
+  const ch = r.checked || {};
+  const fixes = [ch.moved && `${plural(ch.moved, 'citation')} moved to a better-matching excerpt`, ch.dropped && `${plural(ch.dropped, 'invalid citation')} removed`].filter(Boolean);
+  return `<article class="answer">
+    <h2>${esc(r.question)}</h2>
+    <div class="body">${body}</div>
+    ${cited.length ? `<div class="cited-row">${cited.map(x => `<button class="chip" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${Math.floor(x.t || 0)}" title="${esc(label(x))}"><b style="color:var(--accent)">${x.n}</b><span>${esc(label(x))}</span></button>`).join('')}</div>` : ''}
+    <p class="kv-line">${[r.model, MODE_LABEL[r.mode], r.seconds != null ? r.seconds + ' s' : '', ...fixes, r.created_at ? 'asked ' + esc(r.created_at.slice(0, 16)) : ''].filter(Boolean).map(esc).join(' · ')}</p>
+    ${r.id ? `<div class="actions" style="margin-top:10px">
+      <button class="btn btn-sm" data-act="ask-copy">Copy</button>
+      <a class="btn btn-sm" href="/api/export/ask?id=${r.id}" download>Export note</a>
+      <button class="btn btn-sm" data-act="ask-del" data-ask="${r.id}">Delete</button>
+    </div>` : ''}
+    ${r.sources.length ? `<h3 class="field-label" style="margin:26px 0 6px">Sources (${r.sources.length} excerpts sent to the AI)</h3>
+    ${r.sources.map(x => `<button class="src ${x.cited ? '' : 'uncited'}" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${Math.floor(x.t || 0)}">
+      <span class="n">${x.n}</span><span style="min-width:0"><span class="t">${esc(x.title)}${x.t != null ? `<time>${clock(x.t)}</time>` : ''}</span>
+      <span class="faint" style="font-size:12px">${KIND_LABEL[x.kind] || esc(x.kind)}${x.cited ? '' : ' · not cited'}</span>
+      <span class="x">${esc(x.text)}</span></span></button>`).join('')}` : ''}
+  </article>`;
+}
+function askHistory() {
+  const a = S.ask, items = a.hist || [];
+  return `<h4>Earlier questions</h4>
+    <input type="search" id="ahq" value="${esc(a.hq)}" placeholder="Filter" aria-label="Filter earlier questions">
+    ${a.hist == null ? '<p class="note faint">Loading…</p>' : !items.length ? `<p class="note faint">${a.hq ? 'No matches.' : 'Your questions and answers are kept here.'}</p>`
+      : items.map(h => `<a href="#/ask?id=${h.id}" class="${a.res?.id === h.id ? 'on' : ''}">${esc(h.question)}<small>${esc((h.created_at || '').slice(0, 16))}</small></a>`).join('')}`;
+}
+function renderAsk() {
+  if (route() !== 'ask') return;
+  const box = $('#aresult'), side = $('.hist');
+  if (box) box.innerHTML = askResult();
+  if (side && document.activeElement?.id !== 'ahq') side.innerHTML = askHistory();
+}
+async function loadAskHistory() {
+  try { S.ask.hist = (await api(`/api/ask/history?q=${encodeURIComponent(S.ask.hq)}`)).items; } catch (e) { S.ask.hist = []; }
+  const side = $('.hist');
+  if (route() === 'ask' && side) {
+    const focused = document.activeElement?.id === 'ahq', pos = $('#ahq')?.selectionStart;
+    side.innerHTML = askHistory();
+    if (focused) { const f = $('#ahq'); f.focus(); f.setSelectionRange(pos, pos); }
+  }
+}
+async function openAsk(id) {
+  try { S.ask.res = await api(`/api/ask/item?id=${id}`); S.ask.q = ''; } catch (e) { toast(e.message, true); }
+  renderAsk();
+}
+async function runAsk() {
+  const a = S.ask, q = ($('#aq')?.value || a.q).trim();
+  if (!q || a.busy) return;
+  a.q = q; a.busy = true; a.res = null;
+  if (location.hash !== '#/ask') history.replaceState(null, '', '#/ask');
+  refresh();
+  try {
+    a.res = await api('/api/ask', { question: q, filters: { categories: a.cat ? [a.cat] : [], playlists: a.src ? [a.src] : [], include_done: a.done } });
+    a.q = '';
+    history.replaceState(null, '', `#/ask?id=${a.res.id}`);
+  } catch (e) { toast(e.message, true); }
+  a.busy = false;
+  if (route() === 'ask') refresh();
+  loadAskHistory();
+}
+
 /* ---------------- setup guide ---------------- */
 async function loadGuide() {
   try {
@@ -1351,8 +1490,12 @@ const LANGUAGES = ['English', 'Hindi', 'Gujarati', 'Marathi', 'Bengali', 'Tamil'
   'Spanish', 'French', 'German', 'Portuguese', 'Japanese', 'Korean', 'Chinese', 'Arabic'];
 function viewAI() {
   const ai = S.data.ai, edit = S.ai.provider, ready = Object.entries(ai.providers).filter(([, p]) => p.ready);
+  const sameAs = name => {
+    const f = ai.task_follows?.[name], p = f ? ai.tasks[f] || ai.provider : ai.provider;
+    return `Same as ${f ? esc(ai.task_labels[f].split(' ')[0].toLowerCase()) : 'default'}${p !== 'none' && ai.providers[p] ? ` (${esc(ai.providers[p].label)})` : ''}`;
+  };
   const pick = (name, value, allowSame) => `<select data-ai-route="${name}" style="width:100%">
-      ${allowSame ? `<option value="" ${!value ? 'selected' : ''}>Same as default${ai.provider !== 'none' && ai.providers[ai.provider] ? ` (${esc(ai.providers[ai.provider].label)})` : ''}</option>`
+      ${allowSame ? `<option value="" ${!value ? 'selected' : ''}>${sameAs(name)}</option>`
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
@@ -1381,7 +1524,8 @@ function viewAI() {
       <div class="route"><span class="field-label" style="margin:0">Default</span>${pick('provider', ai.provider, false)}</div>
       ${Object.entries(ai.task_labels).map(([t, label]) => `<div class="route"><span class="field-label" style="margin:0">${esc(label)}</span>${pick(t, ai.tasks[t] || '', true)}</div>`).join('')}
     </div>
-    <p class="hint">Tip: a cheap or local model works well for categories. Ratings read whole transcripts, so a model with a large context window gives better ratings.</p>
+    <p class="hint">Tip: a cheap or local model works well for categories. Ratings read whole transcripts, so a model with a large context window gives better ratings.
+      Questions follow the ratings choice unless you pick one.</p>
   </section>
 
   <section class="section card">
@@ -1697,6 +1841,19 @@ document.addEventListener('click', async e => {
     }
     case 'more': S.limit += 150; renderList(); break;
     case 'seek': seek(+el.dataset.t); break;
+    case 'ask-go': runAsk(); break;
+    case 'ask-copy': {
+      const r = S.ask.res;
+      if (!r) break;
+      const text = r.answer + '\n\n' + r.sources.filter(x => x.cited).map(x => `[${x.n}] ${x.title}${x.t != null ? ' @ ' + clock(x.t) : ''} https://www.youtube.com/watch?v=${x.video_id}&t=${Math.floor(x.t || 0)}s`).join('\n');
+      try { await navigator.clipboard.writeText(text); toast('Copied'); } catch (err) { toast('Copy failed: select the text instead', true); }
+      break;
+    }
+    case 'ask-del':
+      if (!confirm('Delete this question and its answer?')) break;
+      try { await api('/api/ask/delete', { id: +el.dataset.ask }); S.ask.res = null; history.replaceState(null, '', '#/ask'); refresh(); loadAskHistory(); toast('Deleted'); }
+      catch (err) { toast(err.message, true); }
+      break;
     case 'vis-run': case 'vis-one': {
       try {
         await api('/api/visuals', act === 'vis-one' ? { ids: [id] } : {});
@@ -1888,6 +2045,9 @@ document.addEventListener('change', async e => {
     case 's-mins': S.session.mins = Math.max(5, +el.value || 45); refresh(); break;
     case 's-cat': S.session.cat = el.value; refresh(); break;
     case 's-order': S.session.order = el.value; refresh(); break;
+    case 'ask-cat': S.ask.cat = el.value; break;
+    case 'ask-src': S.ask.src = el.value; break;
+    case 'ask-done': S.ask.done = el.checked; break;
     case 't-cat': S.triage.cat = el.value; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
     case 'has-visuals': {
@@ -1930,7 +2090,7 @@ document.addEventListener('change', async e => {
     }
   }
 });
-let qT, sT;
+let qT, sT, aT;
 document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'sq') {
@@ -1938,6 +2098,8 @@ document.addEventListener('input', e => {
     sT = setTimeout(() => { history.replaceState(null, '', `#/search?q=${encodeURIComponent(S.search.q)}`); runSearch(); }, 250);
     return;
   }
+  if (el.id === 'aq') { S.ask.q = el.value; return; }
+  if (el.id === 'ahq') { S.ask.hq = el.value; clearTimeout(aT); aT = setTimeout(loadAskHistory, 200); return; }
   if (el.id === 'q') { S.view.q = el.value; clearTimeout(qT); qT = setTimeout(() => { S.limit = 150; renderList(); }, 120); }
   else if (el.dataset.input === 'i-url') S.ingest.url = el.value;
   else if (el.dataset.input === 'i-cookies') { S.ingest.cookies = el.value; store.set('ytkb.cookies', el.value); }
@@ -1951,6 +2113,7 @@ document.addEventListener('keydown', e => {
   if (S.drawer && (e.key === 'j' || e.key === 'k')) $(`[data-act="step"][data-dir="${e.key === 'j' ? 1 : -1}"]`)?.click();
 
 });
+document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); } });
 $('#gsearch').addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.value.trim()) { goSearch(e.target.value.trim()); e.target.value = ''; e.target.blur(); }
 });

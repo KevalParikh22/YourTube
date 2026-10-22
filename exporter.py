@@ -175,3 +175,20 @@ def markdown_zip(videos: List[Dict[str, Any]], details: Dict[str, Dict[str, Any]
         for cat, names in by_cat.items():
             z.writestr(f"YT KB/{safe_filename(cat)}/_{safe_filename(cat)}.md", category_markdown(cat, names))
     return buf.getvalue()
+
+def ask_markdown(item: Dict[str, Any]) -> str:
+    """A saved answer (storage.get_ask) as a note: [n] marks link to the cited moments, sources listed below."""
+    sources = {s["n"]: s for s in item.get("sources") or []}
+    link = lambda n: (f"[\\[{n}\\]]({_at(sources[n]['video_id'], sources[n].get('t'))})" if n in sources else "")
+    parts = re.split(r"(\[\d+\])", item.get("answer") or "")
+    escape = lambda t: re.sub(r"([\\`*_\[\]<>|#])", r"\\\1", t)   # like _md_text, but keeps the spaces around marks
+    answer = "".join(link(int(p[1:-1])) if re.fullmatch(r"\[\d+\]", p) else escape(p) for p in parts)
+    lines = ["---", f"question: {_yaml(item.get('question'))}", f"asked: {_yaml(item.get('created_at'))}",
+             f"model: {_yaml(item.get('model'))}", "tags: [yt-kb, question]", "---", "",
+             f"# {_md_text(item.get('question'))}", "", answer.strip(), "", "## Sources", ""]
+    for n, s in sorted(sources.items()):
+        at = f" @ {_clock(s['t'])}" if s.get("t") is not None else ""
+        mark = "" if s.get("cited") else " (not cited)"
+        lines.append(f"{n}. [{_md_text(s.get('title'))}{at}]({_at(s['video_id'], s.get('t'))}){mark}: "
+                     f"{_md_text(' '.join((s.get('text') or '').split())[:300])}")
+    return "\n".join(lines) + "\n"

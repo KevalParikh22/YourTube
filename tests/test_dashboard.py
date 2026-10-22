@@ -65,10 +65,11 @@ class DashboardTest(unittest.TestCase):
         code, r = self.call("/api/ai/settings", {"edit": "ollama", "config": {"model": "llama3.1:8b"},
                                                   "interests": "  RAG, agents  ", "language": "Hindi"})
         ai = r["ai"]
-        self.assertEqual(ai["tasks"], {"categorize": None, "rate": "ollama"})
+        self.assertEqual(ai["tasks"], {"categorize": None, "rate": "ollama", "ask": None})
         self.assertEqual((ai["interests"], ai["language"]), ("RAG, agents", "Hindi"))
-        self.assertEqual(ai["ready_for"], {"categorize": True, "rate": True})
+        self.assertEqual(ai["ready_for"], {"categorize": True, "rate": True, "ask": True})
         self.assertIn("Ollama", ai["uses"]["rate"])
+        self.assertIn("Ollama", ai["uses"]["ask"])          # questions follow the ratings choice
         self.assertIn("Claude", ai["uses"]["categorize"])
         self.call("/api/ai/settings", {"provider": "none", "tasks": {"rate": None}, "edit": "anthropic",
                                        "config": {"api_key": "__clear__"}, "language": "English", "interests": ""})

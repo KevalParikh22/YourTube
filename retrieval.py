@@ -10,7 +10,8 @@ from typing import Any, Callable, Dict, Iterable, List, Optional
 KEYWORD_WEIGHT = 0.5
 RRF_K = 60
 POOL = 60            # candidates taken from each list before fusing
-PER_VIDEO = 4        # at most this many pieces from one video (unless filtered to that video)
+PER_VIDEO = 4        # at most this many pieces from one video (unless filtered to that video) ...
+KEEP_TOP = 6         # ... after the best few, which are always kept, so one clearly relevant video isn't cut short
 _STOP = set("the a an and or of to in on for with by is are be how what why when where do does did can could should "
             "would i my me we our you your this that these those it its from into about only own every like any which "
             "their as at before after than then there here who whom whose not no yes also just more most some".split())
@@ -129,7 +130,7 @@ def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None
     pieces = []
     for doc_id in ranked:
         d = docs.get(doc_id)
-        if not d or per_video.get(d["video_id"], 0) >= cap:
+        if not d or (per_video.get(d["video_id"], 0) >= cap and len(pieces) >= KEEP_TOP):
             continue
         per_video[d["video_id"]] = per_video.get(d["video_id"], 0) + 1
         pieces.append({**d, "title": videos.get(d["video_id"], {}).get("title", ""), "score": round(scores[doc_id], 5)})

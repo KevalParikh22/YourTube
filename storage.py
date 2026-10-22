@@ -214,6 +214,21 @@ def init_db(db_path: str = DB_PATH) -> None:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_category ON videos(category)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_playlist ON videos(playlist_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_video ON playlist_items(video_id)")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ask_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question TEXT NOT NULL,
+                answer TEXT NOT NULL DEFAULT '',
+                citations TEXT NOT NULL DEFAULT '[]',
+                sources TEXT NOT NULL DEFAULT '[]',
+                filters TEXT NOT NULL DEFAULT '{}',
+                mode TEXT,
+                model TEXT,
+                seconds REAL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
         if _create_search_tables(cursor):
             _reindex(cursor, [r[0] for r in cursor.execute("SELECT video_id FROM videos")])
         conn.commit()
@@ -1212,3 +1227,48 @@ def index_version(db_path: str = DB_PATH) -> tuple:
     with get_connection(db_path) as conn:
         return conn.execute("SELECT (SELECT COUNT(*) FROM search_docs), (SELECT MAX(id) FROM search_docs), "
                             "(SELECT COUNT(*) FROM embedding_cache)").fetchone()[:]
+
+
+# --- Questions and answers (Phase 2) ------------------------------------------------------
+
+_ASK_JSON = ("citations", "sources", "filters")
+
+def _ask_row(r: sqlite3.Row) -> Dict[str, Any]:
+    d = dict(r)
+    for k in _ASK_JSON:
+        d[k] = json.loads(d[k] or ("{}" if k == "filters" else "[]"))
+    return d
+
+def save_ask(item: Dict[str, Any], db_path: str = DB_PATH) -> int:
+    """Keeps one answered question; returns its id."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "INSERT INTO ask_history (question, answer, citations, sources, filters, mode, model, seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (item["question"], item.get("answer", ""), *(json.dumps(item.get(k) or ({} if k == "filters" else []), ensure_ascii=False) for k in _ASK_JSON),
+             item.get("mode"), item.get("model"), item.get("seconds")))
+        conn.commit()
+        return cur.lastrowid
+
+def list_asks(q: str = "", limit: int = 50, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Past questions, newest first, without their sources: [{'id', 'question', 'answer', 'created_at'}]."""
+    init_db(db_path)
+    like = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with get_connection(db_path) as conn:
+        rows = conn.execute("SELECT id, question, answer, created_at FROM ask_history "
+                            "WHERE question LIKE ? ESCAPE '\\' OR answer LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?",
+                            (like, like, int(limit))).fetchall()
+        return [dict(r) for r in rows]
+
+def get_ask(ask_id: int, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        r = conn.execute("SELECT * FROM ask_history WHERE id = ?", (int(ask_id),)).fetchone()
+        return _ask_row(r) if r else None
+
+def delete_ask(ask_id: int, db_path: str = DB_PATH) -> bool:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        n = conn.execute("DELETE FROM ask_history WHERE id = ?", (int(ask_id),)).rowcount
+        conn.commit()
+        return bool(n)
