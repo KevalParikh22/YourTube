@@ -86,6 +86,16 @@ class RetrievalTest(unittest.TestCase):
         storage.update_videos(["r_ck"], notes="")
         self.assertGreaterEqual(storage.prune_embeddings(model), 1)      # the notes vector is orphaned now
 
+    def test_kinds_filter_and_meaning_search(self):
+        r = self.ask("lora adapters weights", k=10, kinds=["title"])
+        self.assertTrue(r["pieces"] and all(p["kind"] == "title" for p in r["pieces"]))
+        res = retrieval.search_by_meaning("cheaply adapt with few parameters", embed_query=fake_vec)
+        self.assertEqual(res["mode"], "hybrid")
+        top = res["results"][0]
+        self.assertEqual(top["video_id"], "r_ft")
+        self.assertIn("\x02few\x03", " ".join(h["snippet"] for h in top["hits"]))   # the question's words are marked
+        self.assertEqual(retrieval.search_by_meaning("ab")["short"], True)
+
     def test_per_video_cap(self):
         many = [{"start": i * 40, "text": f"lora adapters part {i}"} for i in range(8)]
         storage.save_details("r_ft", {"status": "done", "segments": many})

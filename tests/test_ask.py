@@ -101,6 +101,42 @@ class AskTest(unittest.TestCase):
         self.assertEqual(llm.provider_for({**s, "tasks": {}}, "ask"), "gemini")
 
 
+class FollowUpTest(unittest.TestCase):
+    def test_follow_up_is_rewritten_and_keeps_filters(self):
+        first = asker.ask("How does LoRA work?", filters={"video_ids": ["q_ft"]}, settings=llm.load_settings(),
+                          complete=lambda s, p: json.dumps({"answer": "It trains adapters [1]."}), retrieve_fn=found, sim_fn=None)
+        self.addCleanup(storage.delete_ask, first["id"])
+        calls, seen = [], {}
+
+        def complete(system, prompt):
+            calls.append(system)
+            if system == asker.REWRITE_SYSTEM:
+                seen["rewrite"] = prompt
+                return json.dumps({"question": "Where does the LoRA video show the code?"})
+            return json.dumps({"answer": "At 4:14 [1]."})
+
+        def retrieve(question, k, filters):
+            seen["retrieve"] = (question, filters)
+            return found(question, k, filters)
+        r = asker.ask("and where is the code?", filters={"categories": ["ignored"]}, settings=llm.load_settings(),
+                      complete=complete, retrieve_fn=retrieve, sim_fn=None, follow_up_of=first["id"])
+        self.assertEqual(calls, [asker.REWRITE_SYSTEM, asker.SYSTEM])
+        self.assertIn("Q: How does LoRA work?\nA: It trains adapters.", seen["rewrite"])       # marks stripped
+        self.assertEqual(seen["retrieve"], ("Where does the LoRA video show the code?", {"video_ids": ["q_ft"]}))
+        self.assertEqual((r["question"], r["standalone"], r["thread_id"]),
+                         ("and where is the code?", "Where does the LoRA video show the code?", first["id"]))
+        self.assertEqual([x["id"] for x in storage.get_thread(first["id"])], [first["id"], r["id"]])
+
+    def test_bad_rewrite_falls_back_to_the_question(self):
+        thread = [{"question": "q1", "answer": "a1"}]
+        self.assertEqual(asker.standalone_question("and that?", thread, lambda s, p: "no json"), "and that?")
+        self.assertEqual(asker.standalone_question("and that?", thread, lambda s, p: '{"question": ""}'), "and that?")
+
+    def test_missing_conversation(self):
+        with self.assertRaises(ValueError):
+            asker.ask("x", follow_up_of=999999, complete=lambda s, p: "", retrieve_fn=found, save=False)
+
+
 class HistoryTest(unittest.TestCase):
     def test_list_filter_get_delete(self):
         a = storage.save_ask({"question": "What is 100% LoRA?", "answer": "It trains adapters [1].", "citations": [1],
@@ -117,9 +153,28 @@ class HistoryTest(unittest.TestCase):
         self.assertIn("# What is 100% LoRA?", md)
         self.assertIn("It trains adapters [\\[1\\]](https://www.youtube.com/watch?v=v&t=75s).", md)
         self.assertIn("1. [T @ 1:15](https://www.youtube.com/watch?v=v&t=75s): x", md)
-        self.assertTrue(storage.delete_ask(a))
+        self.assertEqual(storage.delete_ask(a), 1)
         self.assertIsNone(storage.get_ask(a))
-        self.assertFalse(storage.delete_ask(a))
+        self.assertEqual(storage.delete_ask(a), 0)
+
+    def test_conversations(self):
+        root = storage.save_ask({"question": "Thread root zq", "answer": "A."})
+        f1 = storage.save_ask({"question": "and then?", "answer": "B zq-follow.", "standalone": "And then, root?"}, thread_id=root)
+        lone = storage.save_ask({"question": "Lone zq", "answer": "C."})
+        rows = {x["id"]: x for x in storage.list_asks("zq")}
+        self.assertEqual(set(rows), {root, lone})                          # follow-ups aren't listed on their own
+        self.assertEqual((rows[root]["follow_ups"], rows[lone]["follow_ups"]), (1, 0))
+        self.assertEqual([x["id"] for x in storage.list_asks("zq-follow")], [root])   # found through its follow-up
+        self.assertEqual([x["id"] for x in storage.list_asks("zq")][0], lone)        # newest activity first
+        thread = storage.get_thread(f1)
+        self.assertEqual([x["id"] for x in thread], [root, f1])
+        md = ask_markdown(thread)
+        self.assertIn("# Thread root zq", md)
+        self.assertIn("## and then?", md)
+        self.assertIn("Searched for: And then, root?", md)
+        self.assertEqual(storage.delete_ask(f1), 2)                         # deleting removes the conversation
+        self.assertEqual(storage.get_thread(root), [])
+        storage.delete_ask(lone)
 
 
 class AskEndpointTest(unittest.TestCase):
@@ -152,25 +207,34 @@ class AskEndpointTest(unittest.TestCase):
             code, r = self.call("/api/ask", {"question": "lora?"})
         self.assertEqual((code, "AI page" in r["error"]), (400, True))
         with mock.patch("llm.is_configured", return_value=True), \
-                mock.patch("asker.ask", side_effect=lambda q, filters: {"question": q, "filters": filters}) as fake:
+                mock.patch("asker.ask", side_effect=lambda q, filters, follow_up_of: {"question": q, "filters": filters,
+                                                                                    "follow": follow_up_of}) as fake:
             code, r = self.call("/api/ask", {"question": "lora?", "filters": {"categories": ["AI", 3], "include_done": False}})
+            self.assertEqual(self.call("/api/ask", {"question": "more?", "follow_up_of": 7})[1]["follow"], 7)
+            self.assertEqual(self.call("/api/ask", {"question": "more?", "follow_up_of": "7"})[0], 400)
         self.assertEqual(code, 200)
         self.assertEqual(r["filters"], {"categories": ["AI"], "playlists": [], "video_ids": [], "include_done": False})
-        fake.assert_called_once()
+        self.assertEqual(fake.call_count, 2)
 
         ask_id = storage.save_ask({"question": "Saved q", "answer": "A [1].", "citations": [1],
                                    "sources": [{"n": 1, "video_id": "v", "title": "T", "kind": "transcript", "t": 5, "text": "x", "cited": True}]})
         code, h = self.call("/api/ask/history?q=Saved")
         self.assertEqual((code, h["items"][0]["id"]), (200, ask_id))
         code, item = self.call(f"/api/ask/item?id={ask_id}")
-        self.assertEqual((code, item["cited"], item["sources"][0]["t"]), (200, [1], 5))
+        self.assertEqual((code, item["thread"][0]["cited"], item["thread"][0]["sources"][0]["t"]), (200, [1], 5))
         code, md = self.call(f"/api/export/ask?id={ask_id}")
         self.assertEqual(code, 200)
         self.assertIn("# Saved q", md)
         self.assertEqual(self.call("/api/ask/item?id=nope")[0], 404)
         self.assertEqual(self.call("/api/ask/delete", {"id": "1"})[0], 400)
-        self.assertEqual(self.call("/api/ask/delete", {"id": ask_id}), (200, {"ok": True}))
+        self.assertEqual(self.call("/api/ask/delete", {"id": ask_id}), (200, {"ok": True, "deleted": 1}))
         self.assertEqual(self.call(f"/api/ask/item?id={ask_id}")[0], 404)
+
+    def test_search_by_meaning_endpoint(self):
+        with mock.patch("retrieval.search_by_meaning", return_value={"results": [], "short": False, "mode": "keyword"}) as m:
+            code, r = self.call("/api/search?q=lora&kinds=transcript,bogus&meaning=1")
+        self.assertEqual((code, r["mode"]), (200, "keyword"))
+        m.assert_called_once_with("lora", ["transcript"])
 
 
 if __name__ == "__main__":

@@ -176,19 +176,27 @@ def markdown_zip(videos: List[Dict[str, Any]], details: Dict[str, Dict[str, Any]
             z.writestr(f"YT KB/{safe_filename(cat)}/_{safe_filename(cat)}.md", category_markdown(cat, names))
     return buf.getvalue()
 
-def ask_markdown(item: Dict[str, Any]) -> str:
-    """A saved answer (storage.get_ask) as a note: [n] marks link to the cited moments, sources listed below."""
-    sources = {s["n"]: s for s in item.get("sources") or []}
-    link = lambda n: (f"[\\[{n}\\]]({_at(sources[n]['video_id'], sources[n].get('t'))})" if n in sources else "")
-    parts = re.split(r"(\[\d+\])", item.get("answer") or "")
+def ask_markdown(thread: List[Dict[str, Any]]) -> str:
+    """A saved conversation (storage.get_thread) as a note: [n] marks link to the cited moments, sources under each answer."""
+    if isinstance(thread, dict):
+        thread = [thread]
+    first = thread[0]
+    lines = ["---", f"question: {_yaml(first.get('question'))}", f"asked: {_yaml(first.get('created_at'))}",
+             f"model: {_yaml(first.get('model'))}", "tags: [yt-kb, question]", "---", ""]
     escape = lambda t: re.sub(r"([\\`*_\[\]<>|#])", r"\\\1", t)   # like _md_text, but keeps the spaces around marks
-    answer = "".join(link(int(p[1:-1])) if re.fullmatch(r"\[\d+\]", p) else escape(p) for p in parts)
-    lines = ["---", f"question: {_yaml(item.get('question'))}", f"asked: {_yaml(item.get('created_at'))}",
-             f"model: {_yaml(item.get('model'))}", "tags: [yt-kb, question]", "---", "",
-             f"# {_md_text(item.get('question'))}", "", answer.strip(), "", "## Sources", ""]
-    for n, s in sorted(sources.items()):
-        at = f" @ {_clock(s['t'])}" if s.get("t") is not None else ""
-        mark = "" if s.get("cited") else " (not cited)"
-        lines.append(f"{n}. [{_md_text(s.get('title'))}{at}]({_at(s['video_id'], s.get('t'))}){mark}: "
-                     f"{_md_text(' '.join((s.get('text') or '').split())[:300])}")
-    return "\n".join(lines) + "\n"
+    for i, item in enumerate(thread):
+        sources = {s["n"]: s for s in item.get("sources") or []}
+        link = lambda n: (f"[\\[{n}\\]]({_at(sources[n]['video_id'], sources[n].get('t'))})" if n in sources else "")
+        parts = re.split(r"(\[\d+\])", item.get("answer") or "")
+        answer = "".join(link(int(p[1:-1])) if re.fullmatch(r"\[\d+\]", p) else escape(p) for p in parts)
+        lines += [f"{'#' if i == 0 else '##'} {_md_text(item.get('question'))}", ""]
+        if item.get("standalone"):
+            lines += [f"*Searched for: {_md_text(item['standalone'])}*", ""]
+        lines += [answer.strip(), "", "Sources:", ""]
+        for n, src in sorted(sources.items()):
+            at = f" @ {_clock(src['t'])}" if src.get("t") is not None else ""
+            mark = "" if src.get("cited") else " (not cited)"
+            lines.append(f"{n}. [{_md_text(src.get('title'))}{at}]({_at(src['video_id'], src.get('t'))}){mark}: "
+                         f"{_md_text(' '.join((src.get('text') or '').split())[:300])}")
+        lines.append("")
+    return "\n".join(lines)

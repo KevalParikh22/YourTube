@@ -348,6 +348,8 @@
   .src .t { display: block; color: var(--ink); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .src .t time { color: var(--accent); font-variant-numeric: tabular-nums; margin-left: 6px; font-weight: 500; }
   .src .x { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .ask-sep { border: 0; border-top: 1px solid var(--line); margin: 26px 0 0; }
+  .srcs summary::-webkit-details-marker { color: var(--ink-3); }
   .hist h4 { font-size: 12.5px; color: var(--ink-3); font-weight: 500; margin: 0 0 8px; }
   .hist input { width: 100%; margin-bottom: 8px; }
   .hist a { display: block; padding: 7px 8px; margin: 0 -8px; border-radius: 6px; color: var(--ink-2); text-decoration: none; font-size: 13px; line-height: 1.4; }
@@ -496,8 +498,8 @@ const S = {
   triage: { verdict: 'all', cat: '', undo: [] },
   drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
-  search: { q: '', kind: 'all', res: null, seq: 0 },
-  ask: { q: '', cat: '', src: '', done: true, busy: false, res: null, hist: null, hq: '', seq: 0 },
+  search: { q: '', kind: 'all', res: null, seq: 0, meaning: store.get('ytkb.meaning') === '1' },
+  ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '' },
 };
 
 /* ---------------- helpers ---------------- */
@@ -641,10 +643,11 @@ function renderView() {
   else if (r === 'setup') { v.innerHTML = viewSetup(); if (!S.guide) loadGuide(); }
   else if (r === 'ask') {
     const id = +routeParam('id') || null;
-    if (id && S.ask.res?.id !== id && !S.ask.busy) openAsk(id);
+    if (id && !S.ask.thread.some(t => t.id === id) && !S.ask.busy) openAsk(id);
+    if (!id && S.ask.thread.length && !S.ask.busy) S.ask.thread = [];
     v.innerHTML = viewAsk();
     if (!S.ask.hist) loadAskHistory();
-    if (!S.ask.res && !S.ask.busy) $('#aq')?.focus();
+    if (!S.ask.busy) $('#aq')?.focus({ preventScroll: true });
   }
   else if (r === 'search') {
     const q = routeParam('q');
@@ -1269,8 +1272,11 @@ function viewSearch() {
     <h1 class="display">Find it again<em>titles, chapters, transcripts, AI summaries and your notes</em></h1>
     <input type="search" id="sq" class="search-big" value="${esc(sr.q)}" placeholder="e.g. neo4j setup, &quot;plan mode&quot;, lora" aria-label="Search">
     <div class="chips" style="margin-top:14px">${SEARCH_KINDS.map(([k, l]) =>
-      `<button class="chip ${sr.kind === k ? 'on' : ''}" data-act="s-kind" data-v="${k}">${l}</button>`).join('')}</div>
-    <p class="hint">${indexed} of ${plural(videos().length, 'video')} have transcripts.
+      `<button class="chip ${sr.kind === k ? 'on' : ''}" data-act="s-kind" data-v="${k}">${l}</button>`).join('')}
+      <span style="flex:1"></span>
+      <label class="check" style="align-items:center" title="Also find pieces that mean the same thing in other words or another language">
+        <input type="checkbox" data-change="s-meaning" ${sr.meaning ? 'checked' : ''} style="margin:0"><span class="note">By meaning</span></label></div>
+    <p class="hint">${sr.meaning ? 'By meaning: closest pieces first, even without the same words (“make models smaller” finds “quantization”). Every video gets a closest piece, so look at the top results. ' : ''}${indexed} of ${plural(videos().length, 'video')} have transcripts.
       ${indexed < videos().length ? '<a href="#/sources">Fetch details</a> to search inside more of them.' : ''} Use quotes for an exact phrase; words of 3+ letters match inside longer words.</p>
   </section>
   <div id="sresults"></div>`;
@@ -1283,7 +1289,8 @@ function renderSearchResults() {
   if (sr.res.short) { box.innerHTML = '<div class="empty">Type at least 3 letters.</div>'; return; }
   const list = sr.res.results.filter(r => byId(r.video_id));
   if (!list.length) { box.innerHTML = `<div class="empty">No matches for “${esc(sr.q)}”.</div>`; return; }
-  box.innerHTML = `<div class="list-sum"><span>${plural(list.length, 'video')}${list.length >= 50 ? ' (top 50)' : ''}</span></div>` + list.map(r => {
+  const off = sr.meaning && sr.res.mode === 'keyword' ? ' · meaning index is off, so these are keyword matches (AI page → download the embedding model)' : '';
+  box.innerHTML = `<div class="list-sum"><span>${plural(list.length, 'video')}${list.length >= 50 ? ' (top 50)' : ''}${sr.meaning ? ' · by meaning' : ''}${off}</span></div>` + list.map(r => {
     const v = byId(r.video_id);
     return `<div class="s-row">
       <button class="thumb-btn" data-act="open" data-id="${esc(v.video_id)}" tabindex="-1" aria-hidden="true">${thumb(v)}</button>
@@ -1302,7 +1309,7 @@ async function runSearch() {
   if (!sr.q.trim()) { sr.res = null; renderSearchResults(); return; }
   sr.res = null; renderSearchResults();
   try {
-    const res = await api(`/api/search?q=${encodeURIComponent(sr.q)}${sr.kind !== 'all' ? `&kinds=${sr.kind}` : ''}`);
+    const res = await api(`/api/search?q=${encodeURIComponent(sr.q)}${sr.kind !== 'all' ? `&kinds=${sr.kind}` : ''}${sr.meaning ? '&meaning=1' : ''}`);
     if (seq === sr.seq) { sr.res = res; renderSearchResults(); }   // ignore answers to older keystrokes
   } catch (e) { if (seq === sr.seq) { sr.res = { results: [], short: false }; toast(e.message, true); renderSearchResults(); } }
 }
@@ -1314,39 +1321,48 @@ function goSearch(q) {
 
 /* ---------------- ask ---------------- */
 const MODE_LABEL = { hybrid: 'meaning + keywords', keyword: 'keywords only (meaning index off)' };
+const askLabel = x => `${x.title}${x.t != null ? ' @ ' + clock(x.t) : ''}`;
+function askScope(f) {
+  const vid = f?.video_ids?.length === 1 ? f.video_ids[0] : null;
+  return [vid && `about “${byId(vid)?.title || vid}”`, f?.categories?.length && f.categories.join(', '),
+    f?.playlists?.length && f.playlists.map(playlistName).join(', '), f && f.include_done === false && 'unwatched only'].filter(Boolean).join(' · ');
+}
 function viewAsk() {
-  const a = S.ask, ai = S.data.ai, ready = ai.ready_for.ask;
+  const a = S.ask, ai = S.data.ai, ready = ai.ready_for.ask, th = a.thread, follow = th.length > 0;
+  const local = ai.providers[ai.tasks.ask || ai.tasks.rate || ai.provider]?.local;
+  const box = `<div class="ask-box">
+      <input type="text" id="aq" class="search-big" value="${esc(a.q)}" maxlength="1000" aria-label="${follow ? 'Follow-up question' : 'Question'}" ${a.busy ? 'disabled' : ''}
+        placeholder="${follow ? 'Ask a follow-up, e.g. “and where does he show the code?”' : a.video ? 'Ask about this video' : 'e.g. How do I fine-tune a big model on one GPU?'}">
+      <button class="btn btn-dark" data-act="ask-go" ${a.busy || !ready ? 'disabled' : ''}>${a.busy ? '<span class="spin" style="display:inline-block"></span>' : follow ? 'Ask' : 'Ask'}</button>
+    </div>`;
+  const vid = a.video && byId(a.video);
   return `
   <section>
     <div class="eyebrow">Ask</div>
     <h1 class="display">Ask your library<em>answers cite the exact videos and moments</em></h1>
-    <div class="ask-box">
-      <input type="text" id="aq" class="search-big" value="${esc(a.q)}" maxlength="1000" placeholder="e.g. How do I fine-tune a big model on one GPU?" aria-label="Question" ${a.busy ? 'disabled' : ''}>
-      <button class="btn btn-dark" data-act="ask-go" ${a.busy || !ready ? 'disabled' : ''}>${a.busy ? '<span class="spin" style="display:inline-block"></span>' : 'Ask'}</button>
-    </div>
+    ${follow ? `<div class="ask-filters"><button class="btn btn-sm" data-act="ask-new">+ New question</button>
+        ${askScope(th[0].filters) ? `<span class="note faint">Within: ${esc(askScope(th[0].filters))}</span>` : ''}</div>` : `${box}
     <div class="ask-filters">
-      <select data-change="ask-cat" aria-label="Category"><option value="">All categories</option>
+      ${vid ? `<span class="chip on" style="max-width:100%"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Only: ${esc(vid.title)}</span>
+          <button class="btn-text" data-act="ask-unscope" aria-label="Ask across the whole library" style="color:inherit;height:auto;padding:0 0 0 4px">✕</button></span>`
+        : `<select data-change="ask-cat" aria-label="Category"><option value="">All categories</option>
         ${categoryNames().map(c => `<option value="${esc(c)}" ${a.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
       ${S.data.playlists.length > 1 ? `<select data-change="ask-src" aria-label="Playlist"><option value="">All playlists</option>
         ${S.data.playlists.map(p => `<option value="${esc(p.id)}" ${a.src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>` : ''}
-      <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched and skipped videos</span></label>
+      <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched and skipped videos</span></label>`}
     </div>
-    <p class="hint">${ready ? `Answered by ${esc(ai.uses.ask)}${ai.providers[ai.tasks.ask || ai.tasks.rate || ai.provider]?.local ? ', on this computer: about 5–30 s' : ''}.`
+    <p class="hint">${ready ? `Answered by ${esc(ai.uses.ask)}${local ? ', on this computer: about 5–30 s' : ''}.`
       : 'Choose an AI for questions first: <a href="#/ai">AI page</a> → Which AI does what.'}
-      Answers use only your videos' transcripts, slides, chapters, summaries and notes. Click a number to play that moment.</p>
+      Answers use only your videos' transcripts, slides, chapters, summaries and notes. Click a number to play that moment.</p>`}
   </section>
   <div class="ask">
-    <div id="aresult">${askResult()}</div>
+    <div id="aresult">${askResult()}${follow ? `<div style="margin-top:22px">${box}</div>` : ''}</div>
     <aside class="hist">${askHistory()}</aside>
   </div>`;
 }
-function askResult() {
-  const a = S.ask, r = a.res;
-  if (a.busy) return `<p class="note" style="margin-top:24px"><span class="spin" style="display:inline-block"></span> Reading your videos and writing an answer…</p>`;
-  if (!r) return '';
+function askTurn(r, last) {
   const src = Object.fromEntries(r.sources.map(x => [x.n, x]));
-  const label = x => `${x.title}${x.t != null ? ' @ ' + clock(x.t) : ''}`;
-  const cite = n => src[n] ? `<button class="cite" data-act="play-at" data-id="${esc(src[n].video_id)}" data-t="${Math.floor(src[n].t || 0)}" title="${esc(label(src[n]))}">${n}</button>` : '';
+  const cite = n => src[n] ? `<button class="cite" data-act="play-at" data-id="${esc(src[n].video_id)}" data-t="${Math.floor(src[n].t || 0)}" title="${esc(askLabel(src[n]))}">${n}</button>` : '';
   const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
   const body = r.answer.split(/\n\s*\n/).map(par => `<p>${par.split(/(\[\d+\])/).map(x => /^\[\d+\]$/.test(x) ? cite(+x.slice(1, -1)) : inline(x).replace(/\n/g, '<br>')).join('')}</p>`).join('');
   const cited = r.sources.filter(x => x.cited);
@@ -1354,33 +1370,38 @@ function askResult() {
   const fixes = [ch.moved && `${plural(ch.moved, 'citation')} moved to a better-matching excerpt`, ch.dropped && `${plural(ch.dropped, 'invalid citation')} removed`].filter(Boolean);
   return `<article class="answer">
     <h2>${esc(r.question)}</h2>
+    ${r.standalone ? `<p class="kv-line" style="margin:-6px 0 10px">Searched for: ${esc(r.standalone)}</p>` : ''}
     <div class="body">${body}</div>
-    ${cited.length ? `<div class="cited-row">${cited.map(x => `<button class="chip" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${Math.floor(x.t || 0)}" title="${esc(label(x))}"><b style="color:var(--accent)">${x.n}</b><span>${esc(label(x))}</span></button>`).join('')}</div>` : ''}
-    <p class="kv-line">${[r.model, MODE_LABEL[r.mode], r.seconds != null ? r.seconds + ' s' : '', ...fixes, r.created_at ? 'asked ' + esc(r.created_at.slice(0, 16)) : ''].filter(Boolean).map(esc).join(' · ')}</p>
-    ${r.id ? `<div class="actions" style="margin-top:10px">
-      <button class="btn btn-sm" data-act="ask-copy">Copy</button>
-      <a class="btn btn-sm" href="/api/export/ask?id=${r.id}" download>Export note</a>
-      <button class="btn btn-sm" data-act="ask-del" data-ask="${r.id}">Delete</button>
-    </div>` : ''}
-    ${r.sources.length ? `<h3 class="field-label" style="margin:26px 0 6px">Sources (${r.sources.length} excerpts sent to the AI)</h3>
+    ${cited.length ? `<div class="cited-row">${cited.map(x => `<button class="chip" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${Math.floor(x.t || 0)}" title="${esc(askLabel(x))}"><b style="color:var(--accent)">${x.n}</b><span>${esc(askLabel(x))}</span></button>`).join('')}</div>` : ''}
+    <p class="kv-line">${[r.model, MODE_LABEL[r.mode], r.seconds != null ? r.seconds + ' s' : '', ...fixes, r.created_at ? 'asked ' + r.created_at.slice(0, 16) : ''].filter(Boolean).map(esc).join(' · ')}</p>
+    ${r.sources.length ? `<details class="srcs" ${last ? 'open' : ''}><summary class="field-label" style="margin:16px 0 6px;cursor:pointer">Sources (${r.sources.length} excerpts sent to the AI)</summary>
     ${r.sources.map(x => `<button class="src ${x.cited ? '' : 'uncited'}" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${Math.floor(x.t || 0)}">
       <span class="n">${x.n}</span><span style="min-width:0"><span class="t">${esc(x.title)}${x.t != null ? `<time>${clock(x.t)}</time>` : ''}</span>
       <span class="faint" style="font-size:12px">${KIND_LABEL[x.kind] || esc(x.kind)}${x.cited ? '' : ' · not cited'}</span>
-      <span class="x">${esc(x.text)}</span></span></button>`).join('')}` : ''}
+      <span class="x">${esc(x.text)}</span></span></button>`).join('')}</details>` : ''}
   </article>`;
 }
+function askResult() {
+  const a = S.ask, th = a.thread;
+  const busy = a.busy ? `<p class="note" style="margin-top:24px"><span class="spin" style="display:inline-block"></span> ${th.length ? 'Working out the follow-up, reading' : 'Reading'} your videos and writing an answer…</p>` : '';
+  if (!th.length) return busy;
+  return th.map((r, i) => askTurn(r, i === th.length - 1)).join('<hr class="ask-sep">') + busy + `
+    <div class="actions" style="margin-top:14px">
+      <button class="btn btn-sm" data-act="ask-copy">Copy</button>
+      <a class="btn btn-sm" href="/api/export/ask?id=${th[0].id}" download>Export note</a>
+      <button class="btn btn-sm" data-act="ask-del" data-ask="${th[0].id}">Delete${th.length > 1 ? ' conversation' : ''}</button>
+    </div>`;
+}
 function askHistory() {
-  const a = S.ask, items = a.hist || [];
+  const a = S.ask, items = a.hist || [], open = a.thread[0]?.thread_id;
   return `<h4>Earlier questions</h4>
     <input type="search" id="ahq" value="${esc(a.hq)}" placeholder="Filter" aria-label="Filter earlier questions">
     ${a.hist == null ? '<p class="note faint">Loading…</p>' : !items.length ? `<p class="note faint">${a.hq ? 'No matches.' : 'Your questions and answers are kept here.'}</p>`
-      : items.map(h => `<a href="#/ask?id=${h.id}" class="${a.res?.id === h.id ? 'on' : ''}">${esc(h.question)}<small>${esc((h.created_at || '').slice(0, 16))}</small></a>`).join('')}`;
+      : items.map(h => `<a href="#/ask?id=${h.id}" class="${open === h.id ? 'on' : ''}">${esc(h.question)}<small>${esc((h.created_at || '').slice(0, 16))}${h.follow_ups ? ` · ${plural(h.follow_ups, 'follow-up')}` : ''}${h.filters?.video_ids?.length === 1 ? ` · ${esc(askScope(h.filters))}` : ''}</small></a>`).join('')}`;
 }
 function renderAsk() {
   if (route() !== 'ask') return;
-  const box = $('#aresult'), side = $('.hist');
-  if (box) box.innerHTML = askResult();
-  if (side && document.activeElement?.id !== 'ahq') side.innerHTML = askHistory();
+  const y = scrollY; renderView(); scrollTo(0, y);
 }
 async function loadAskHistory() {
   try { S.ask.hist = (await api(`/api/ask/history?q=${encodeURIComponent(S.ask.hq)}`)).items; } catch (e) { S.ask.hist = []; }
@@ -1392,22 +1413,30 @@ async function loadAskHistory() {
   }
 }
 async function openAsk(id) {
-  try { S.ask.res = await api(`/api/ask/item?id=${id}`); S.ask.q = ''; } catch (e) { toast(e.message, true); }
+  try { S.ask.thread = (await api(`/api/ask/item?id=${id}`)).thread; S.ask.q = ''; } catch (e) { S.ask.thread = []; toast(e.message, true); }
   renderAsk();
 }
+function askAbout(id) {
+  Object.assign(S.ask, { video: id, thread: [], q: '' });
+  closeDrawer();
+  if (location.hash !== '#/ask') location.hash = '#/ask'; else renderAsk();
+}
 async function runAsk() {
-  const a = S.ask, q = ($('#aq')?.value || a.q).trim();
+  const a = S.ask, q = ($('#aq')?.value || a.q).trim(), last = a.thread[a.thread.length - 1];
   if (!q || a.busy) return;
-  a.q = q; a.busy = true; a.res = null;
-  if (location.hash !== '#/ask') history.replaceState(null, '', '#/ask');
-  refresh();
+  a.q = q; a.busy = true;
+  renderAsk();
+  $('.ask-sep:last-of-type, #aresult .note')?.scrollIntoView({ block: 'nearest' });
   try {
-    a.res = await api('/api/ask', { question: q, filters: { categories: a.cat ? [a.cat] : [], playlists: a.src ? [a.src] : [], include_done: a.done } });
-    a.q = '';
-    history.replaceState(null, '', `#/ask?id=${a.res.id}`);
+    const filters = a.video ? { video_ids: [a.video] }
+      : { categories: a.cat ? [a.cat] : [], playlists: a.src ? [a.src] : [], include_done: a.done };
+    const r = await api('/api/ask', last ? { question: q, follow_up_of: last.id } : { question: q, filters });
+    a.thread = [...a.thread, r]; a.q = '';
+    history.replaceState(null, '', `#/ask?id=${r.id}`);
   } catch (e) { toast(e.message, true); }
   a.busy = false;
-  if (route() === 'ask') refresh();
+  renderAsk();
+  if (a.thread.length > 1) $$('.answer').pop()?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   loadAskHistory();
 }
 
@@ -1665,6 +1694,7 @@ function renderDrawer() {
       <button class="btn icon-btn" data-act="step" data-dir="-1" ${i > 0 ? '' : 'disabled'} aria-label="Previous video">↑</button>
       <button class="btn icon-btn" data-act="step" data-dir="1" ${i >= 0 && i < S.visible.length - 1 ? '' : 'disabled'} aria-label="Next video">↓</button>
       <span class="grow">${i >= 0 ? `${i + 1} of ${S.visible.length}` : ''}</span>
+      <button class="btn-text" data-act="ask-video" data-id="${esc(v.video_id)}" title="Ask a question answered from this video only">Ask about this video</button>
       <a class="btn-text" href="/api/export/markdown?id=${encodeURIComponent(v.video_id)}" download title="Download this video's notes, summary and key points as Markdown">Export note</a>
       <a class="btn-text" href="${esc(v.url)}" target="_blank" rel="noopener">Open on YouTube ↗</a>
       <button class="btn icon-btn" data-act="close" aria-label="Close">✕</button>
@@ -1842,16 +1872,19 @@ document.addEventListener('click', async e => {
     case 'more': S.limit += 150; renderList(); break;
     case 'seek': seek(+el.dataset.t); break;
     case 'ask-go': runAsk(); break;
+    case 'ask-new': S.ask.thread = []; S.ask.q = ''; location.hash = '#/ask'; break;
+    case 'ask-unscope': S.ask.video = null; renderAsk(); break;
+    case 'ask-video': askAbout(id); break;
     case 'ask-copy': {
-      const r = S.ask.res;
-      if (!r) break;
-      const text = r.answer + '\n\n' + r.sources.filter(x => x.cited).map(x => `[${x.n}] ${x.title}${x.t != null ? ' @ ' + clock(x.t) : ''} https://www.youtube.com/watch?v=${x.video_id}&t=${Math.floor(x.t || 0)}s`).join('\n');
+      const th = S.ask.thread;
+      if (!th.length) break;
+      const text = th.map(r => `Q: ${r.question}\n\n${r.answer}\n\n` + r.sources.filter(x => x.cited).map(x => `[${x.n}] ${askLabel(x)} https://www.youtube.com/watch?v=${x.video_id}&t=${Math.floor(x.t || 0)}s`).join('\n')).join('\n\n---\n\n');
       try { await navigator.clipboard.writeText(text); toast('Copied'); } catch (err) { toast('Copy failed: select the text instead', true); }
       break;
     }
     case 'ask-del':
-      if (!confirm('Delete this question and its answer?')) break;
-      try { await api('/api/ask/delete', { id: +el.dataset.ask }); S.ask.res = null; history.replaceState(null, '', '#/ask'); refresh(); loadAskHistory(); toast('Deleted'); }
+      if (!confirm(S.ask.thread.length > 1 ? 'Delete this conversation (all its questions and answers)?' : 'Delete this question and its answer?')) break;
+      try { await api('/api/ask/delete', { id: +el.dataset.ask }); S.ask.thread = []; history.replaceState(null, '', '#/ask'); refresh(); loadAskHistory(); toast('Deleted'); }
       catch (err) { toast(err.message, true); }
       break;
     case 'vis-run': case 'vis-one': {
@@ -2045,6 +2078,7 @@ document.addEventListener('change', async e => {
     case 's-mins': S.session.mins = Math.max(5, +el.value || 45); refresh(); break;
     case 's-cat': S.session.cat = el.value; refresh(); break;
     case 's-order': S.session.order = el.value; refresh(); break;
+    case 's-meaning': S.search.meaning = el.checked; store.set('ytkb.meaning', el.checked ? '1' : '0'); refresh(); runSearch(); break;
     case 'ask-cat': S.ask.cat = el.value; break;
     case 'ask-src': S.ask.src = el.value; break;
     case 'ask-done': S.ask.done = el.checked; break;

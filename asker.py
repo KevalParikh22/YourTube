@@ -33,6 +33,14 @@ SYSTEM = (
     'Reply as JSON: {"answer": "..."}'
 )
 
+REWRITE_SYSTEM = (
+    "Rewrite the user's follow-up question as one standalone question that makes sense without the conversation: "
+    "replace words like 'it', 'he', 'this', 'there' with what they refer to, and keep the topic of the conversation. "
+    "Keep the user's language. If it already stands alone, return it unchanged. Don't answer it. "
+    'Reply as JSON: {"question": "..."}'
+)
+FOLLOW_TURNS = 3       # earlier turns shown to the rewrite
+
 _CITE = re.compile(r"\[(\d+(?:\s*[,;]\s*\d+)*)\]")
 _SENTENCE_END = re.compile(r"(?<=[.!?।。])\s+(?![\s\[])|\n+")
 _lock = threading.Lock()   # one answer at a time: a local model can't run two at once anyway
@@ -97,6 +105,24 @@ def check_citations(answer: str, count: int,
     return {"answer": joined, "cited": sorted({n for m in marks for n in m}), "dropped": dropped, "moved": moved}
 
 
+def standalone_question(question: str, thread: List[Dict[str, Any]], complete: Callable[[str, str], str]) -> str:
+    """A follow-up rewritten so retrieval understands it alone; the original question when the rewrite fails."""
+    turns = "\n\n".join(f"Q: {t['question']}\nA: {' '.join(re.sub(r"\s*\[\d+(?:\s*[,;]\s*\d+)*\]", "", t.get('answer') or '').split())[:500]}"
+                         for t in thread[-FOLLOW_TURNS:])
+    try:
+        data = llm_parse(complete(REWRITE_SYSTEM, f"Conversation so far:\n{turns}\n\nFollow-up question: {question}"))
+        text = data.get("question") if isinstance(data, dict) else None
+    except Exception:
+        return question
+    text = " ".join(str(text or "").split())
+    return text if 3 <= len(text) <= 1000 else question
+
+
+def llm_parse(reply: str) -> Any:
+    import llm
+    return llm.parse_json(reply)
+
+
 def _embedding_similarity(settings: Dict[str, Any], pieces: List[Dict[str, Any]]):
     """sim(sentences) against the sent pieces' stored vectors, or None when they aren't all embedded."""
     import numpy as np
@@ -119,10 +145,12 @@ def _embedding_similarity(settings: Dict[str, Any], pieces: List[Dict[str, Any]]
 
 def ask(question: str, filters: Optional[Dict[str, Any]] = None, settings: Optional[Dict[str, Any]] = None,
         complete: Optional[Callable[[str, str], str]] = None, retrieve_fn: Optional[Callable[..., Dict[str, Any]]] = None,
-        sim_fn: Optional[Callable[[List[str]], Any]] = None, save: bool = True) -> Dict[str, Any]:
+        sim_fn: Optional[Callable[[List[str]], Any]] = None, save: bool = True, follow_up_of: Optional[int] = None) -> Dict[str, Any]:
     """
-    Answers one question from the library. Returns {'id', 'question', 'answer', 'cited', 'sources', 'mode', 'model',
-    'seconds', 'checked': {'dropped', 'moved'}, 'filters'}; sources are numbered like the [n] marks in the answer.
+    Answers one question from the library. Returns {'id', 'thread_id', 'question', 'standalone', 'answer', 'cited',
+    'sources', 'mode', 'model', 'seconds', 'checked': {'dropped', 'moved'}, 'filters'}; sources are numbered like the
+    [n] marks in the answer. follow_up_of (any answer's id) continues that conversation: its filters are kept and the
+    question is rewritten into a standalone one for retrieval.
     """
     import llm
     import retrieval
@@ -133,18 +161,28 @@ def ask(question: str, filters: Optional[Dict[str, Any]] = None, settings: Optio
         raise ValueError("Type a question")
     settings = settings or llm.load_settings()
     filters = filters or {}
+    thread = storage.get_thread(follow_up_of) if follow_up_of else []
+    if follow_up_of and not thread:
+        raise ValueError("That conversation no longer exists")
+    if thread:
+        filters = thread[0]["filters"]
     started = time.time()
     with _lock:
-        found = (retrieve_fn or retrieval.retrieve)(question, k=TOP, filters=filters)
+        standalone = question
+        if thread:
+            complete = complete or llm.make_completer(settings, "ask")
+            standalone = standalone_question(question, thread, complete)
+        found = (retrieve_fn or retrieval.retrieve)(standalone, k=TOP, filters=filters)
         pieces = found["pieces"]
-        result: Dict[str, Any] = {"question": question, "mode": found["mode"], "filters": filters,
+        result: Dict[str, Any] = {"question": question, "standalone": standalone if standalone != question else None,
+                                  "mode": found["mode"], "filters": filters,
                                   "model": llm.describe(settings, "ask"), "checked": {"dropped": 0, "moved": 0}}
         if not pieces:
             result.update(answer=NOTHING, cited=[])
         else:
             complete = complete or llm.make_completer(settings, "ask")
             budget = max(3000, llm.context_chars(settings, "ask") - len(SYSTEM) - 1500)
-            prompt = (f"Question: {question}\n\nExcerpts:\n{excerpts(pieces, budget)}\n\n"
+            prompt = (f"Question: {standalone}\n\nExcerpts:\n{excerpts(pieces, budget)}\n\n"
                       f"Write the answer in {settings.get('language') or 'English'}. Cite excerpts as [n].")
             reply = complete(SYSTEM, prompt)
             try:
@@ -168,12 +206,15 @@ def ask(question: str, filters: Optional[Dict[str, Any]] = None, settings: Optio
                              for n, p in enumerate(pieces, 1)]
         result["seconds"] = round(time.time() - started, 1)
         if save:
-            result["id"] = storage.save_ask({**result, "citations": result["cited"]})
+            thread_id = thread[0]["thread_id"] if thread else None
+            result["id"] = storage.save_ask({**result, "citations": result["cited"]}, thread_id=thread_id)
+            result["thread_id"] = thread_id or result["id"]
     return result
 
 
 def from_history(item: Dict[str, Any]) -> Dict[str, Any]:
     """A saved answer in the same shape ask() returns."""
-    return {"id": item["id"], "question": item["question"], "answer": item["answer"], "cited": item["citations"],
+    return {"id": item["id"], "thread_id": item.get("thread_id") or item["id"], "question": item["question"],
+            "standalone": item.get("standalone"), "answer": item["answer"], "cited": item["citations"],
             "sources": item["sources"], "mode": item["mode"], "model": item["model"], "seconds": item["seconds"],
             "filters": item["filters"], "created_at": item["created_at"], "checked": None}

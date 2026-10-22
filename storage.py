@@ -225,9 +225,17 @@ def init_db(db_path: str = DB_PATH) -> None:
                 mode TEXT,
                 model TEXT,
                 seconds REAL,
+                thread_id INTEGER,
+                standalone TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        asks = _columns(cursor, "ask_history")
+        for col, ddl in (("thread_id", "INTEGER"), ("standalone", "TEXT")):   # follow-ups (Phase 2 step 4)
+            if col not in asks:
+                cursor.execute(f"ALTER TABLE ask_history ADD COLUMN {col} {ddl}")
+        cursor.execute("UPDATE ask_history SET thread_id = id WHERE thread_id IS NULL")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_ask_thread ON ask_history(thread_id)")
 
         if _create_search_tables(cursor):
             _reindex(cursor, [r[0] for r in cursor.execute("SELECT video_id FROM videos")])
@@ -1239,26 +1247,41 @@ def _ask_row(r: sqlite3.Row) -> Dict[str, Any]:
         d[k] = json.loads(d[k] or ("{}" if k == "filters" else "[]"))
     return d
 
-def save_ask(item: Dict[str, Any], db_path: str = DB_PATH) -> int:
-    """Keeps one answered question; returns its id."""
+def save_ask(item: Dict[str, Any], thread_id: Optional[int] = None, db_path: str = DB_PATH) -> int:
+    """Keeps one answered question; a follow-up joins thread_id (the first question's id). Returns its id."""
     init_db(db_path)
     with get_connection(db_path) as conn:
         cur = conn.execute(
-            "INSERT INTO ask_history (question, answer, citations, sources, filters, mode, model, seconds) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO ask_history (question, answer, citations, sources, filters, mode, model, seconds, thread_id, standalone) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (item["question"], item.get("answer", ""), *(json.dumps(item.get(k) or ({} if k == "filters" else []), ensure_ascii=False) for k in _ASK_JSON),
-             item.get("mode"), item.get("model"), item.get("seconds")))
+             item.get("mode"), item.get("model"), item.get("seconds"), thread_id, item.get("standalone")))
+        if thread_id is None:
+            conn.execute("UPDATE ask_history SET thread_id = id WHERE id = ?", (cur.lastrowid,))
         conn.commit()
         return cur.lastrowid
 
 def list_asks(q: str = "", limit: int = 50, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
-    """Past questions, newest first, without their sources: [{'id', 'question', 'answer', 'created_at'}]."""
+    """
+    Conversations, newest activity first: [{'id' (= thread id), 'question' (the first one), 'answer', 'follow_ups',
+    'filters', 'created_at'}]. q matches any question or answer in the conversation.
+    """
     init_db(db_path)
     like = "%" + q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
     with get_connection(db_path) as conn:
-        rows = conn.execute("SELECT id, question, answer, created_at FROM ask_history "
-                            "WHERE question LIKE ? ESCAPE '\\' OR answer LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?",
-                            (like, like, int(limit))).fetchall()
-        return [dict(r) for r in rows]
+        rows = conn.execute("""
+            SELECT r.id, r.question, r.answer, r.filters, r.created_at, COUNT(a.id) - 1 AS follow_ups, MAX(a.id) AS last
+            FROM ask_history r JOIN ask_history a ON a.thread_id = r.id
+            WHERE r.thread_id = r.id AND r.id IN (SELECT thread_id FROM ask_history
+                WHERE question LIKE ? ESCAPE '\\' OR answer LIKE ? ESCAPE '\\')
+            GROUP BY r.id ORDER BY last DESC LIMIT ?""", (like, like, int(limit))).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d.pop("last")
+            d["filters"] = json.loads(d["filters"] or "{}")
+            out.append(d)
+        return out
 
 def get_ask(ask_id: int, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
     init_db(db_path)
@@ -1266,9 +1289,19 @@ def get_ask(ask_id: int, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
         r = conn.execute("SELECT * FROM ask_history WHERE id = ?", (int(ask_id),)).fetchone()
         return _ask_row(r) if r else None
 
-def delete_ask(ask_id: int, db_path: str = DB_PATH) -> bool:
+def get_thread(ask_id: int, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Every question and answer of the conversation that ask_id belongs to, oldest first."""
     init_db(db_path)
     with get_connection(db_path) as conn:
-        n = conn.execute("DELETE FROM ask_history WHERE id = ?", (int(ask_id),)).rowcount
+        rows = conn.execute("SELECT * FROM ask_history WHERE thread_id = (SELECT thread_id FROM ask_history WHERE id = ?) "
+                            "ORDER BY id", (int(ask_id),)).fetchall()
+        return [_ask_row(r) for r in rows]
+
+def delete_ask(ask_id: int, db_path: str = DB_PATH) -> int:
+    """Deletes the whole conversation ask_id belongs to; returns how many answers went."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        n = conn.execute("DELETE FROM ask_history WHERE thread_id = (SELECT thread_id FROM ask_history WHERE id = ?)",
+                         (int(ask_id),)).rowcount
         conn.commit()
-        return bool(n)
+        return n

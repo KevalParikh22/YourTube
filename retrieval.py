@@ -71,10 +71,11 @@ def rrf(lists: List[List[int]], weights: List[float], k: int = RRF_K) -> Dict[in
 
 
 def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None,
-             embed_query: Optional[Callable[[str], List[float]]] = None, model: Optional[str] = None) -> Dict[str, Any]:
+             embed_query: Optional[Callable[[str], List[float]]] = None, model: Optional[str] = None,
+             per_video: int = PER_VIDEO) -> Dict[str, Any]:
     """
     The k best pieces for a question: {'mode': 'hybrid'|'keyword', 'pieces': [{'id', 'video_id', 'title', 'kind',
-    't', 'text', 'score'}]}. filters: video_ids, categories, playlists, include_done (default True).
+    't', 'text', 'score'}]}. filters: video_ids, categories, playlists, include_done (default True), kinds.
     """
     import numpy as np
     import embedder
@@ -84,6 +85,7 @@ def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None
     filters = filters or {}
     videos = _videos()
     ok = {vid for vid, v in videos.items() if _allowed(v, filters)}
+    kinds = set(filters.get("kinds") or []) or None
 
     # Keywords
     keyword: List[int] = []
@@ -91,10 +93,10 @@ def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None
     if q:
         with storage.get_connection() as conn:
             try:
-                for (doc_id, vid) in conn.execute(
-                        "SELECT d.id, d.video_id FROM search_index JOIN search_docs d ON d.id = search_index.rowid "
+                for (doc_id, vid, kind) in conn.execute(
+                        "SELECT d.id, d.video_id, d.kind FROM search_index JOIN search_docs d ON d.id = search_index.rowid "
                         "WHERE search_index MATCH ? ORDER BY bm25(search_index) LIMIT ?", (q, POOL * 4)):
-                    if vid in ok:
+                    if vid in ok and (not kinds or kind in kinds):
                         keyword.append(doc_id)
             except Exception:
                 keyword = []
@@ -114,7 +116,7 @@ def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None
             qv /= np.linalg.norm(qv) + 1e-12
             sims = mat @ qv
             for i in np.argsort(-sims):
-                if rows[i]["video_id"] in ok:
+                if rows[i]["video_id"] in ok and (not kinds or rows[i]["kind"] in kinds):
                     meaning.append(rows[i]["id"])
                     if len(meaning) >= POOL:
                         break
@@ -125,14 +127,14 @@ def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None
 
     ranked = sorted(scores, key=lambda d: -scores[d])
     docs = _docs_by_id(ranked[:POOL * 2])
-    per_video: Dict[str, int] = {}
-    cap = k if filters.get("video_ids") and len(filters["video_ids"]) == 1 else PER_VIDEO
+    counts: Dict[str, int] = {}
+    cap = k if filters.get("video_ids") and len(filters["video_ids"]) == 1 else per_video
     pieces = []
     for doc_id in ranked:
         d = docs.get(doc_id)
-        if not d or (per_video.get(d["video_id"], 0) >= cap and len(pieces) >= KEEP_TOP):
+        if not d or (counts.get(d["video_id"], 0) >= cap and len(pieces) >= KEEP_TOP):
             continue
-        per_video[d["video_id"]] = per_video.get(d["video_id"], 0) + 1
+        counts[d["video_id"]] = counts.get(d["video_id"], 0) + 1
         pieces.append({**d, "title": videos.get(d["video_id"], {}).get("title", ""), "score": round(scores[doc_id], 5)})
         if len(pieces) >= k:
             break
@@ -148,3 +150,26 @@ def _docs_by_id(ids: Iterable[int]) -> Dict[int, Dict[str, Any]]:
     with storage.get_connection() as conn:
         return {r["id"]: dict(r) for r in conn.execute(
             "SELECT id, video_id, kind, t, text FROM search_docs WHERE id IN (SELECT value FROM json_each(?))", (json.dumps(ids),))}
+
+
+def search_by_meaning(q: str, kinds: Optional[Iterable[str]] = None, limit: int = 50, **kw: Any) -> Dict[str, Any]:
+    """
+    The Search page's "By meaning" option: hybrid retrieval grouped by video, in storage.search's shape
+    ({'results': [{'video_id', 'score', 'matches', 'hits': [{'kind', 't', 'snippet'}]}], 'short', 'mode'}).
+    Snippets mark the question's words with \\x02 ... \\x03 where they appear.
+    """
+    import storage
+    q = (q or "").strip()
+    if len(q) < 3:
+        return {"results": [], "short": bool(q), "mode": "keyword"}
+    found = retrieve(q, k=120, filters={"kinds": list(kinds or [])}, per_video=4, **kw)
+    terms = [t.strip('"').replace('""', '"') for t in (keyword_query(q) or "").split(" OR ") if t]
+    mark = re.compile("(" + "|".join(re.escape(t) for t in terms) + ")", re.I) if terms else None
+    by_video: Dict[str, Dict[str, Any]] = {}
+    for rank, p in enumerate(found["pieces"]):
+        v = by_video.setdefault(p["video_id"], {"video_id": p["video_id"], "score": p["score"], "hits": [], "matches": 0})
+        v["matches"] += 1
+        text = mark.sub("\x02\\1\x03", p["text"]) if mark else p["text"]
+        v["hits"].append({"kind": p["kind"], "t": p["t"], "snippet": storage._crop(text)})
+    results = list(by_video.values())[:limit]
+    return {"results": results, "short": False, "mode": found["mode"]}

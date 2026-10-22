@@ -190,8 +190,9 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 | Rate videos (Watch / Skim / Skip) | Triage → Rate | — |
 | Read slides, whiteboards and on-screen code | Mark videos (panel, category **Slides** switch, or suggestions), then Playlists → Read slides | — |
 | Transcribe videos without usable captions on this computer | Playlists → Transcribe N videos locally, or a video's panel | — |
-| Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment | — |
-| Ask a question across your videos | **Ask** → type the question → click a number in the answer to play that moment. Past questions stay in the list on the right; **Export note** saves one as Markdown | — |
+| Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment. Tick **By meaning** to also find the same idea in other words or another language | — |
+| Ask a question across your videos | **Ask** → type the question → click a number in the answer to play that moment. Ask follow-ups below the answer ("and where does he show the code?"); **+ New question** starts over. Past conversations stay in the list on the right; **Export note** saves one as Markdown | — |
+| Ask about one video | Open the video → **Ask about this video** | — |
 | Category suggestions after sync | AI → About you → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
 | Export notes for Obsidian / note apps (Markdown) | Library → Export → Notes (.zip), the selection bar's **Export notes**, or **Export note** in a video's panel | — |

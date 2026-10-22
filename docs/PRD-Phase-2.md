@@ -84,7 +84,11 @@ Library: 360 search pieces from the 3 real videos. 18 hand-written questions, wo
    - Retrieval change: the 4-per-video cap now applies after the top 6 pieces, so one clearly relevant video isn't cut short.
    - Ask page: question box, filters (category, playlist, include watched/skipped), the answer with numbered citations that play that moment, cited-video chips, the sources sent (uncited ones dimmed), history with a filter, Copy, Export note (Markdown with timestamp links) and Delete.
    - API: `POST /api/ask {question, filters}`, `GET /api/ask/history?q=`, `GET /api/ask/item?id=`, `GET /api/export/ask?id=`, `POST /api/ask/delete {id}`.
-4. Follow-ups, Ask about this video (A2) and semantic search (A3).
+4. Follow-ups, Ask about this video (A2) and semantic search (A3). **Done 2026-10-22.**
+   - Follow-ups: answers form conversations (`ask_history.thread_id`, the first question's id). A follow-up is rewritten into a standalone question by the *ask* model (`REWRITE_SYSTEM`, last 3 turns, citation marks stripped; the original question if the rewrite fails), which drives retrieval and the answer prompt; it is stored as `standalone` and shown as "Searched for". Follow-ups keep the conversation's filters. History lists conversations (follow-up count; a filter matches any turn); Delete and Export note cover the whole conversation.
+   - Real library: "and what context length did he recommend for it?" after a question about local tools became "What context length did the assistant recommend for LM Studio?" and found 20,000 tokens at 12:56 (22 s, two model calls).
+   - Ask about this video: a button in the video panel opens Ask limited to that video (`video_ids`; the per-video cap is lifted for a single video).
+   - Semantic search: Search page → **By meaning** (`GET /api/search?meaning=1`, `retrieval.search_by_meaning`): hybrid retrieval with a kind filter, grouped by video in rank order, the question's words highlighted. "making models smaller to fit one GPU" finds nothing by keywords and the Fine-Tuning video first by meaning. Meaning search always returns a closest piece per video, so results are ranked, not filtered.
 5. Setup and status (A4), docs and setup script.
 
 Each step ships with tests and keeps the dashboard working.

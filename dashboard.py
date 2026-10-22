@@ -224,9 +224,9 @@ class Handler(BaseHTTPRequestHandler):
             if item is None:
                 return self._error("Unknown question", 404)
             if url.path == "/api/ask/item":
-                return self._json(asker.from_history(item))
+                return self._json({"thread": [asker.from_history(x) for x in storage.get_thread(item["id"])]})
             name = safe_filename("Q " + item["question"]) + ".md"
-            return self._send(200, ask_markdown(item), "text/markdown; charset=utf-8",
+            return self._send(200, ask_markdown(storage.get_thread(item["id"])), "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/embed/status":
             import embedder
@@ -257,7 +257,10 @@ class Handler(BaseHTTPRequestHandler):
                 "audio_s": audio, "minutes": round(local_asr.estimate_minutes(audio, dev) + len(cands) * 10 / 60, 1)})
         if url.path == "/api/search":
             q = (qs.get("q") or [""])[0][:200]
-            kinds = [k for k in (qs.get("kinds") or [""])[0].split(",") if k] or None
+            kinds = [k for k in (qs.get("kinds") or [""])[0].split(",") if k in storage.SEARCH_KINDS] or None
+            if (qs.get("meaning") or ["0"])[0] == "1":
+                import retrieval
+                return self._json(retrieval.search_by_meaning(q, kinds))
             return self._json(storage.search(q, kinds))
         if url.path == "/api/local/status":
             import local_setup
@@ -435,15 +438,18 @@ class Handler(BaseHTTPRequestHandler):
                 lists = lambda k: [x for x in f.get(k) or [] if isinstance(x, str)][:200] if isinstance(f.get(k), list) else []
                 filters = {"categories": lists("categories"), "playlists": lists("playlists"), "video_ids": lists("video_ids"),
                            "include_done": f.get("include_done", True) is not False}
+                follow = body.get("follow_up_of")
+                if follow is not None and (not isinstance(follow, int) or isinstance(follow, bool)):
+                    return self._error("follow_up_of must be a number")
                 if not llm.is_configured(llm.load_settings(), "ask"):
                     return self._error("Choose an AI for questions and answers on the AI page first")
-                return self._json(asker.ask(question.strip()[:1000], filters=filters))
+                return self._json(asker.ask(question.strip()[:1000], filters=filters, follow_up_of=follow))
 
             if path == "/api/ask/delete":
                 ask_id = body.get("id")
                 if not isinstance(ask_id, int) or isinstance(ask_id, bool):
                     return self._error("id must be a number")
-                return self._json({"ok": storage.delete_ask(ask_id)})
+                return self._json({"ok": True, "deleted": storage.delete_ask(ask_id)})
 
             if path == "/api/embed":
                 import embedder
