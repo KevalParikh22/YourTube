@@ -31,6 +31,8 @@ DOWNLOADS = {
     "setup.ps1": (os.path.join(ROOT_DIR, "scripts", "setup.ps1"), "text/plain; charset=utf-8"),
     "SETUP.md": (os.path.join(ROOT_DIR, "docs", "SETUP.md"), "text/markdown; charset=utf-8"),
 }
+FRAMES_DIR = os.path.join(ROOT_DIR, "frames")
+_FRAME_PATH = re.compile(r"^/frames/([\w-]{1,32})/(\d{1,6})\.jpg$")   # only frames/<video id>/<second>.jpg
 ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
 
@@ -99,6 +101,11 @@ def _transcript_categories(settings):
     names = set(load_taxonomy()) | {v["category"] for v in storage.get_all_videos(include_removed=True)}
     return {n: transcripts_wanted(n, settings) for n in sorted(names)}
 
+def _visual_categories(settings):
+    names = set(load_taxonomy()) | {v["category"] for v in storage.get_all_videos(include_removed=True)}
+    on = settings.get("visuals") or {}
+    return {n: bool(on.get(n)) for n in sorted(names)}
+
 def build_state():
     settings = llm.load_settings()
     return {
@@ -109,6 +116,7 @@ def build_state():
         "job": JOB.snapshot(),
         "ai": llm.public_settings(settings),
         "transcripts": _transcript_categories(settings),
+        "visual_categories": _visual_categories(settings),
         "details_after_sync": bool(settings.get("details_after_sync")),
         "platform": sys.platform,
     }
@@ -157,6 +165,13 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/", "/index.html"):
             with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
+        m = _FRAME_PATH.match(url.path)
+        if m:
+            path = os.path.join(FRAMES_DIR, m.group(1), m.group(2) + ".jpg")
+            if not os.path.isfile(path):
+                return self._error("Not found", 404)
+            with open(path, "rb") as f:
+                return self._send(200, f.read(), "image/jpeg", extra_headers={"Cache-Control": "max-age=86400"})
         if url.path.startswith("/download/") or url.path == "/docs/setup":
             name = "SETUP.md" if url.path == "/docs/setup" else url.path[len("/download/"):]
             if name not in DOWNLOADS:
@@ -178,6 +193,17 @@ class Handler(BaseHTTPRequestHandler):
             name = safe_filename(v["title"]) + ".md"
             return self._send(200, video_markdown(v, storage.get_details(vid)), "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
+        if url.path == "/api/visuals/plan":
+            import local_visual
+            settings = llm.load_settings()
+            cands = storage.videos_needing_visuals(None, local_visual.visual_categories(settings))
+            secs = sum(v.get("duration_seconds") or 0 for v in cands)
+            model = local_visual.vision_model(settings)
+            base = settings["providers"]["ollama"].get("base_url")
+            return self._json({"available": local_visual.available(), "model": model,
+                               "model_ok": bool(model) and local_visual.model_sees_images(base, model),
+                               "videos": len(cands), "seconds": secs,
+                               "minutes": round(local_visual.estimate_minutes(secs) + len(cands) * 15 / 60, 1)})
         if url.path == "/api/asr/plan":
             import local_asr
             cands = storage.videos_needing_asr()
@@ -261,7 +287,7 @@ class Handler(BaseHTTPRequestHandler):
                 n = storage.rename_category(old, new)
                 settings = llm.load_settings()
                 settings["presets"] = [new if p == old else p for p in settings["presets"]]
-                for key in ("category_notes", "transcripts"):
+                for key in ("category_notes", "transcripts", "visuals"):
                     if old in settings.get(key, {}):
                         settings[key][new] = settings[key].pop(old)
                 llm.save_settings(settings)
@@ -277,6 +303,7 @@ class Handler(BaseHTTPRequestHandler):
                 settings["presets"] = [p for p in settings["presets"] if p != name]
                 settings["category_notes"].pop(name, None)
                 settings.get("transcripts", {}).pop(name, None)
+                settings.get("visuals", {}).pop(name, None)
                 llm.save_settings(settings)
                 return self._json({"ok": True, "moved": n})
 
@@ -359,6 +386,33 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("Another task is already running", 409)
                 return self._json({"ok": True})
 
+            if path == "/api/visuals":
+                import local_visual
+                ids = body.get("ids")
+                if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
+                    return self._error("ids must be a list of video IDs")
+                if not JOB.start("visual", "Read slides", lambda: local_visual.run_visual(ids, should_stop=JOB.stop_requested)):
+                    return self._error("Another task is already running", 409)
+                return self._json({"ok": True})
+
+            if path == "/api/videos/visuals":
+                ids = body.get("ids")
+                if not isinstance(ids, list) or not all(isinstance(i, str) for i in ids):
+                    return self._error("ids must be a list of video IDs")
+                value = body.get("value")
+                if value not in (True, False, None):
+                    return self._error("value must be true, false or null")
+                return self._json({"ok": True, "updated": storage.set_has_visuals(ids, value)})
+
+            if path == "/api/visuals/settings":
+                settings = llm.load_settings()
+                name = _clean(body.get("category"))
+                if not name:
+                    return self._error("Category name is required")
+                settings.setdefault("visuals", {})[name] = bool(body.get("on"))
+                llm.save_settings(settings)
+                return self._json({"ok": True, "visual_categories": _visual_categories(settings)})
+
             if path == "/api/transcript/source":
                 storage.set_transcript_source(_clean(body.get("id")) or "", _clean(body.get("source")) or "")
                 return self._json({"ok": True})
@@ -435,6 +489,10 @@ class Handler(BaseHTTPRequestHandler):
                 settings["local_only"] = bool(body["local_only"])
             if body.get("asr_model") in ("auto", "large-v3-turbo", "small", "medium", "distil-large-v3"):
                 settings["asr_model"] = body["asr_model"]
+            if isinstance(body.get("vision_model"), str) and re.fullmatch(r"[\w.\-/:]*", body["vision_model"]):
+                settings["vision_model"] = body["vision_model"]
+            if body.get("visual_height") in (480, 720):
+                settings["visual_height"] = body["visual_height"]
             if isinstance(body.get("interests"), str):
                 settings["interests"] = body["interests"].strip()[:2000]
             if isinstance(body.get("language"), str) and body["language"].strip():

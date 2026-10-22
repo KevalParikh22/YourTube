@@ -140,6 +140,14 @@ def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
         out += ["## Chapters", ""]
         out += [f"- [{_clock(c.get('start'))}]({_at(vid, c.get('start'))}) {_md_text(c.get('title'))}" for c in details["chapters"]]
         out.append("")
+    if details.get("visuals"):
+        out += ["## On screen", ""]
+        for x in details["visuals"]:
+            text = " ".join((x.get("text") or "").split())
+            text = text if len(text) <= 200 else text[:200].rsplit(" ", 1)[0] + "…"
+            line = " · ".join(_md_text(y) for y in (text, x.get("visual")) if y)
+            out.append(f"- [{_clock(x['t'])}]({_at(vid, x['t'])}) {line}")
+        out.append("")
     out += ["## My notes", "", (v.get("notes") or "").strip() or "_No notes yet._", ""]
     return "\n".join(out)
 

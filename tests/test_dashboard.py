@@ -179,3 +179,18 @@ class DashboardTest(unittest.TestCase):
         code, r = self.call("/api/ai/settings", {"asr_model": "small"})
         self.assertEqual(r["ai"]["asr_model"], "small")
         self.call("/api/ai/settings", {"asr_model": "auto"})
+
+    def test_visual_endpoints(self):
+        for bad in ("/frames/../yt_kb.db", "/frames/a/../../llm.py", "/frames/a/x.jpg", "/frames/a/00001.png"):
+            self.assertEqual(self.raw(bad)[0], 404, bad)
+        self.assertEqual(self.raw("/frames/a/00001.jpg")[0], 404)       # valid shape, missing file
+        self.assertEqual(self.call("/api/videos/visuals", {"ids": ["a"], "value": "yes"})[0], 400)
+        code, r = self.call("/api/videos/visuals", {"ids": ["a"], "value": True})
+        self.assertEqual((code, r["updated"]), (200, 1))
+        code, r = self.call("/api/visuals/settings", {"category": "Cooking", "on": True})
+        self.assertTrue(r["visual_categories"]["Cooking"])
+        self.call("/api/visuals/settings", {"category": "Cooking", "on": False})
+        code, plan = self.call("/api/visuals/plan")
+        self.assertEqual(code, 200)
+        self.assertGreaterEqual(plan["videos"], 1)
+        self.call("/api/videos/visuals", {"ids": ["a"], "value": None})

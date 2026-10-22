@@ -72,7 +72,16 @@ def ollama(base_url: str) -> Dict[str, Any]:
     except (urllib.error.URLError, OSError, ValueError):
         return {"ok": False, "installed": installed, "running": False, "models": [],
                 "detail": "Installed but not running. Start it with: ollama serve" if installed else "Not installed."}
+    def capabilities(name):
+        try:
+            req = urllib.request.Request(base + "/api/show", method="POST", data=json.dumps({"model": name}).encode(),
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json.loads(r.read()).get("capabilities") or []
+        except (urllib.error.URLError, OSError, ValueError):
+            return []
     models = [{"name": m.get("name"), "size_gb": round((m.get("size") or 0) / 1e9, 1),
+               "vision": "vision" in capabilities(m.get("name")),
                "params": (m.get("details") or {}).get("parameter_size"),
                "quant": (m.get("details") or {}).get("quantization_level")} for m in tags]
     return {"ok": True, "installed": True, "running": True, "version": version, "models": models,

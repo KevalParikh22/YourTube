@@ -306,6 +306,11 @@
   @media (max-width: 760px) { .dl-grid { grid-template-columns: minmax(0, 1fr); } }
 
   .asr-box { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .strip { display: flex; gap: 8px; overflow-x: auto; padding: 6px 0 4px; scroll-snap-type: x proximity; }
+  .strip button { all: unset; cursor: pointer; flex: 0 0 auto; width: 132px; scroll-snap-align: start; }
+  .strip img { width: 132px; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 5px; border: 1px solid var(--line); display: block; background: var(--sunken); }
+  .strip time { display: block; font-size: 11.5px; color: var(--accent); font-variant-numeric: tabular-nums; margin-top: 3px; }
+  .slide-text { white-space: pre-wrap; font: 12px/1.5 ui-monospace, Consolas, monospace; color: var(--ink-2); margin: 4px 0 0; }
   .asr-box h3 { font-size: 15px; margin: 0 0 6px; }
 
   /* ---------- export ---------- */
@@ -438,6 +443,7 @@ const JOB_TEXT = {
   rate: ['Rating videos…', 'Videos rated', 'Rating stopped early. See the log.'],
   pull: ['Downloading the model into Ollama…', 'Model downloaded', 'Download stopped. See the log.'],
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
+  visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
 };
 const DETAIL_LABEL = { done: 'Transcript', no_captions: 'No captions', music: 'Music, no transcript', unavailable: 'Unavailable', failed: 'Failed, will retry' };
 
@@ -456,7 +462,8 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   triage: { verdict: 'all', cat: '', undo: [] },
-  drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null,
+  drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   search: { q: '', kind: 'all', res: null, seq: 0 },
 };
 
@@ -1000,7 +1007,35 @@ function viewDetailsCard() {
     <label class="check" style="margin-top:14px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
       <span>After each sync, fetch details for new videos (up to 50)</span></label>
     ${viewAsr()}
+    ${viewVisuals()}
   </section>`;
+}
+function viewVisuals() {
+  const P = S.visPlan, running = !!S.data.job.running;
+  if (!P || P === 'loading') { loadVisPlan(); return '<div class="asr-box"><h3>Slides and whiteboards</h3><p class="note">Checking…</p></div>'; }
+  if (P.error) return '';
+  const suggested = videos().filter(v => v.visual?.hint && v.has_visuals == null && !isDone(v));
+  return `<div class="asr-box">
+    <h3>Slides and whiteboards</h3>
+    <p class="note">Reads what videos <b>show</b>: slides, code, terminals, diagrams and whiteboards, with the local vision model.
+      Only the video picture is downloaded (no audio), anonymously; it is deleted after reading, and small thumbnails are kept for a slide strip.
+      Mark videos in their panel, switch on <b>Slides</b> for a category, or accept the suggestions below.</p>
+    ${!P.available ? `<div class="banner"><span>Needs Pillow and ffmpeg: <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
+      : !P.model_ok ? `<div class="banner"><span>The vision model (${esc(P.model || 'none')}) isn't ready in Ollama or can't read images. <a href="#/ai">Choose one on the AI page</a>.</span></div>` : ''}
+    <div class="actions">
+      ${P.videos ? `<button class="btn btn-dark btn-sm" data-act="vis-run" data-job-btn ${running || !P.available || !P.model_ok ? 'disabled' : ''}>Read slides for ${plural(P.videos, 'video')}</button>
+        <span class="faint" style="font-size:12.5px">${fmt(P.seconds)} of video · about ${Math.max(1, Math.round(P.minutes))} min with ${esc(P.model)}</span>`
+        : '<span class="faint" style="font-size:12.5px">No videos marked yet.</span>'}
+    </div>
+    ${suggested.length ? `<div class="actions" style="margin-top:10px"><button class="btn btn-sm" data-act="vis-mark-suggested" data-ids="${esc(suggested.map(v => v.video_id).join(','))}">Mark ${plural(suggested.length, 'suggested video')}</button>
+      <span class="faint" style="font-size:12.5px">${suggested.slice(0, 3).map(v => `${esc(v.title.slice(0, 40))} (${esc(v.visual.hint)})`).join(' · ')}${suggested.length > 3 ? ' …' : ''}</span></div>` : ''}
+  </div>`;
+}
+async function loadVisPlan() {
+  if (S.visPlan === 'loading') return;
+  S.visPlan = 'loading';
+  try { S.visPlan = await api('/api/visuals/plan'); } catch (e) { S.visPlan = { error: e.message }; }
+  if (route() === 'sources') refresh();
 }
 function viewAsr() {
   const P = S.asrPlan, running = !!S.data.job.running;
@@ -1042,10 +1077,10 @@ function updateJob() {
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
     : route() === 'ai' ? job.kind === 'pull'
-    : ['sync', 'details', 'asr'].includes(job.kind) || !job.kind;
+    : ['sync', 'details', 'asr', 'visual'].includes(job.kind) || !job.kind;
   if (!mine || (!job.log && !job.running)) { box.innerHTML = ''; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate', 'pull', 'asr'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
+  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate', 'pull', 'asr', 'visual'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
     : `<span class="status-line">${job.ok ? 'Finished' : '<span class="warn-text">Failed</span>'} · ${esc(fmtLocal(job.finished_at))}</span>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div><pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
@@ -1066,7 +1101,8 @@ async function pollJob() {
   } catch (e) { toast(e.message, true); } finally { S.polling = false; }
   if (job) {
     const t = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-    if (['details', 'sync', 'asr'].includes(job.kind)) { S.detailCache = {}; S.asrPlan = null; }  // transcripts may have changed
+    if (['details', 'sync', 'asr', 'visual'].includes(job.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
+    S.busy = {};
     if (job.kind === 'pull') S.local = null;                                // new model downloaded
     toast(job.ok ? t[1] : t[2], !job.ok); await load();
   }
@@ -1127,7 +1163,8 @@ function viewCategories() {
       <div><input type="text" value="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
         <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div>
         <label class="keep" title="The AI keeps this category exactly as it is"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Keep</label>
-        <label class="keep" title="Fetch captions for videos in this category" style="margin-left:12px"><input type="checkbox" data-change="transcripts" data-name="${esc(n)}" ${S.data.transcripts[n] !== false ? 'checked' : ''}> Transcripts</label></div>
+        <label class="keep" title="Fetch captions for videos in this category" style="margin-left:12px"><input type="checkbox" data-change="transcripts" data-name="${esc(n)}" ${S.data.transcripts[n] !== false ? 'checked' : ''}> Transcripts</label>
+        <label class="keep" title="Read slides, whiteboards and on-screen code for videos in this category" style="margin-left:12px"><input type="checkbox" data-change="visual-cat" data-name="${esc(n)}" ${S.data.visual_categories[n] ? 'checked' : ''}> Slides</label></div>
       <div><textarea class="kw" data-name="${esc(n)}" rows="2" aria-label="Keywords for ${esc(n)}" placeholder="keywords, separated, by commas">${esc(tax[n].join(', '))}</textarea>
         ${notes[n] ? `<div class="desc">${esc(notes[n])}</div>` : ''}</div>
       <div><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
@@ -1178,9 +1215,9 @@ function collectProposal() {
 }
 
 /* ---------------- search ---------------- */
-const SEARCH_KINDS = [['all', 'Everything'], ['transcript', 'Transcripts'], ['chapter', 'Chapters'], ['title', 'Titles'],
+const SEARCH_KINDS = [['all', 'Everything'], ['transcript', 'Transcripts'], ['slide', 'Slides'], ['chapter', 'Chapters'], ['title', 'Titles'],
   ['summary', 'AI summaries'], ['notes', 'My notes'], ['description', 'Descriptions']];
-const KIND_LABEL = { title: 'Title', chapter: 'Chapter', transcript: 'Transcript', summary: 'AI summary', notes: 'Your notes', description: 'Description' };
+const KIND_LABEL = { title: 'Title', chapter: 'Chapter', transcript: 'Transcript', slide: 'On screen', summary: 'AI summary', notes: 'Your notes', description: 'Description' };
 // Snippets arrive with \x02…\x03 around matches: escape first, then highlight
 const hl = s => esc(s).replace(/\x02/g, '<mark>').replace(/\x03/g, '</mark>');
 function viewSearch() {
@@ -1402,6 +1439,11 @@ function viewLocal() {
     <div class="route" style="margin-top:14px"><span class="field-label" style="margin:0">Speech-to-text model</span>
       <select data-change="asr-model" style="width:100%">${[['auto', 'Auto: large-v3-turbo on a GPU, small on the CPU'], ['large-v3-turbo', 'large-v3-turbo (best; ~1.6 GB)'],
         ['small', 'small (faster on CPU; ~0.5 GB)'], ['medium', 'medium (~1.5 GB)']].map(([k, l]) => `<option value="${k}" ${ai.asr_model === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    ${L.ollama.running ? `<div class="route"><span class="field-label" style="margin:0">Vision model (slides)</span>
+      <select data-change="vision-model" style="width:100%"><option value="" ${!ai.vision_model ? 'selected' : ''}>Same as the text model${ai.providers.ollama.model ? ` (${esc(ai.providers.ollama.model)})` : ''}</option>
+        ${(L.ollama.models || []).map(m => `<option value="${esc(m.name)}" ${ai.vision_model === m.name ? 'selected' : ''} ${m.vision ? '' : 'disabled'}>${esc(m.name)}${m.vision ? '' : ' (no image support)'}</option>`).join('')}</select></div>
+    <div class="route"><span class="field-label" style="margin:0">Slide frame quality</span>
+      <select data-change="visual-height" style="width:100%">${[[480, '480p (default, smaller downloads)'], [720, '720p (small text, ~2× download)']].map(([k, l]) => `<option value="${k}" ${ai.visual_height === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
     <label class="check" style="margin-top:16px"><input type="checkbox" data-change="local-only" ${ai.local_only ? 'checked' : ''}>
       <span><b style="font-weight:500">Local only</b>: never send anything to a cloud AI (Claude, Gemini, hosted open-weight models)</span></label>
     <div class="actions"><button class="btn-text" data-act="local-check">Check again</button></div>
@@ -1499,6 +1541,7 @@ function renderDrawer() {
         <textarea id="d-notes" rows="6" placeholder="Takeaways, timestamps, follow-ups…">${esc(v.notes || '')}</textarea>
         <div class="kv-line">Notes save when you click away.</div></div>
       <div id="d-details">${drawerDetails(v)}</div>
+      <div id="d-slides">${drawerSlides(v)}</div>
       <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
     </div>
   </aside>`;
@@ -1519,6 +1562,29 @@ function drawerRating(v) {
       · <button class="btn-text" style="padding:0;height:auto;font-size:12.5px" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>Rate again</button></div>
   </div>`;
 }
+function drawerSlides(v) {
+  const vis = v.visual || {}, cached = S.detailCache[v.video_id], full = cached && cached !== 'loading' ? cached : null;
+  const busy = S.data.job.running && S.data.job.kind === 'visual'
+    && ((S.busy.visual || []).includes(v.video_id) || (vis.job && ['queued', 'downloading', 'reading'].includes(vis.job.status)));
+  const mark = v.has_visuals == null ? '' : v.has_visuals ? 'checked' : '';
+  const head = `<label class="check"><input type="checkbox" data-change="has-visuals" data-id="${esc(v.video_id)}" ${mark}>
+    <span>Has slides / whiteboard / on-screen code${v.has_visuals == null && vis.hint ? ` <span class="faint">(suggested: ${esc(vis.hint)})</span>` : ''}</span></label>`;
+  const readBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="vis-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>${label}</button>`;
+  let body = '';
+  if (busy) body = `<div class="kv-line"><span class="spin" style="display:inline-block;vertical-align:-1px"></span> Reading slides${vis.job && vis.job.status !== 'done' && vis.job.status !== 'failed' ? `: ${esc(vis.job.status)}${vis.job.progress ? ` ${Math.round(vis.job.progress * 100)}%` : ''}` : ''}… The job log is on the Playlists page.</div>`;
+  else if (vis.slides && full?.visuals) {
+    body = `<div class="strip">${full.visuals.filter(x => x.thumb).map(x => `<button data-act="seek" data-t="${Math.floor(x.t)}" title="${esc((x.text || x.visual || '').slice(0, 140))}">
+        <img src="/frames/${encodeURIComponent(v.video_id)}/${esc(x.thumb.replace('.jpg', ''))}.jpg" alt="" loading="lazy"><time>${clock(x.t)}</time></button>`).join('')}</div>
+      <details style="margin-top:6px"><summary>On-screen text · ${plural(full.visuals.length, 'slide')}</summary>
+        ${full.visuals.map(x => `<button class="tline" data-act="seek" data-t="${Math.floor(x.t)}"><time>${clock(x.t)}</time><span>${x.visual ? `<i>${esc(x.visual)}</i><br>` : ''}<span class="slide-text">${esc(x.text)}</span></span></button>`).join('')}
+      </details>
+      <div class="kv-line">${readBtn('Read again')}</div>`;
+  } else if (vis.slides) { if (cached !== 'loading') loadDetails(v.video_id); body = '<div class="kv-line">Loading slides…</div>'; }
+  else if (vis.job?.status === 'failed') body = `<div class="kv-line">Last try failed: ${esc((vis.job.error || '').slice(0, 120))}. ${readBtn('Try again')}</div>`;
+  else if (vis.job?.status === 'done') body = `<div class="kv-line">Read: no frames with slides or code were found. ${readBtn('Read again')}</div>`;
+  else if (v.has_visuals) body = `<div class="kv-line">${readBtn('Read slides now')} <span class="faint">(about ${Math.max(1, Math.round((v.duration_seconds || 0) / 60 * 1.4 * 7 / 60))} min)</span></div>`;
+  return `<span class="field-label">Slides and whiteboard</span>${head}${body}`;
+}
 function drawerDetails(v) {
   const det = v.details, cached = S.detailCache[v.video_id], full = cached === 'loading' ? null : cached;
   const fetchBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="details-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>${label}</button>`;
@@ -1536,8 +1602,8 @@ function drawerDetails(v) {
     ? `<div style="margin-top:10px"><span class="field-label">Transcript used for search, ratings and summaries</span>
         <div class="seg" style="max-width:360px">${[['captions', 'YouTube captions'], ['local-asr', `Local (Whisper${det.asr_language ? ', ' + esc(det.asr_language) : ''})`]].map(([k, l]) =>
           `<button data-act="transcript-source" data-id="${esc(v.video_id)}" data-source="${k}" class="${full.transcript === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>`
-    : job && ['queued', 'downloading', 'transcribing'].includes(job.status) && S.data.job.running && S.data.job.kind === 'asr'
-      ? `<div class="kv-line">Transcribing locally: ${esc(job.status)}${job.progress ? ` ${Math.round(job.progress * 100)}%` : ''}…</div>`
+    : S.data.job.running && S.data.job.kind === 'asr' && ((S.busy.asr || []).includes(v.video_id) || (job && ['queued', 'downloading', 'transcribing'].includes(job.status)))
+      ? `<div class="kv-line"><span class="spin" style="display:inline-block;vertical-align:-1px"></span> Transcribing locally${job && !['done', 'failed'].includes(job.status) ? `: ${esc(job.status)}${job.progress ? ` ${Math.round(job.progress * 100)}%` : ''}` : ''}…</div>`
     : det.asr_reason
       ? `<div class="kv-line">${det.asr_reason === 'wrong_script' ? 'These captions look like the wrong script for the spoken language.' : 'No captions.'}
           ${job?.status === 'failed' ? `Last try failed: ${esc((job.error || '').slice(0, 120))}. ` : ''}${asrBtn('Transcribe locally')}</div>` : '';
@@ -1554,7 +1620,7 @@ async function loadDetails(id) {
   try {
     S.detailCache[id] = (await api(`/api/video?id=${encodeURIComponent(id)}`)).details;
   } catch (e) { delete S.detailCache[id]; return; }
-  if (S.drawer === id && $('#d-details')) $('#d-details').innerHTML = drawerDetails(byId(id));
+  if (S.drawer === id && $('#d-details')) { $('#d-details').innerHTML = drawerDetails(byId(id)); $('#d-slides').innerHTML = drawerSlides(byId(id)); }
 }
 function seek(t) {
   const f = $('.drawer .embed iframe'), v = S.drawer && byId(S.drawer);
@@ -1572,6 +1638,7 @@ function syncDrawer() {
   $('#d-cat-note').innerHTML = catNote(v);
   $('#d-sug').innerHTML = drawerSug(v);
   $('#d-rating').innerHTML = drawerRating(v);
+  if ($('#d-slides')) $('#d-slides').innerHTML = drawerSlides(v);
 }
 function saveNotes() {
   const ta = $('#d-notes'), v = S.drawer && byId(S.drawer);
@@ -1630,10 +1697,27 @@ document.addEventListener('click', async e => {
     }
     case 'more': S.limit += 150; renderList(); break;
     case 'seek': seek(+el.dataset.t); break;
+    case 'vis-run': case 'vis-one': {
+      try {
+        await api('/api/visuals', act === 'vis-one' ? { ids: [id] } : {});
+        S.data.job = { running: true, log: '', kind: 'visual' };
+        S.busy = { visual: act === 'vis-one' ? [id] : videos().filter(v => v.has_visuals === 1 || S.data.visual_categories[v.category]).map(v => v.video_id) };
+        if (route() === 'sources') updateJob(); else { toast('Reading slides…'); renderDrawer(); }
+        pollJob();
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'vis-mark-suggested': {
+      const ids = el.dataset.ids.split(',').filter(Boolean);
+      try { await api('/api/videos/visuals', { ids, value: true }); S.visPlan = null; await load(); toast(`${plural(ids.length, 'video')} marked as having slides`); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'asr-run': case 'asr-one': {
       try {
         await api('/api/asr', act === 'asr-one' ? { ids: [id] } : {});
         S.data.job = { running: true, log: '', kind: 'asr' };
+        S.busy = { asr: act === 'asr-one' ? [id] : videos().filter(v => v.details?.asr_reason).map(v => v.video_id) };
         if (route() === 'sources') updateJob(); else { toast('Transcribing locally…'); renderDrawer(); }
         pollJob();
       } catch (err) { toast(err.message, true); }
@@ -1806,6 +1890,20 @@ document.addEventListener('change', async e => {
     case 's-order': S.session.order = el.value; refresh(); break;
     case 't-cat': S.triage.cat = el.value; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
+    case 'has-visuals': {
+      const v = byId(el.dataset.id);
+      try { await api('/api/videos/visuals', { ids: [el.dataset.id], value: el.checked }); if (v) v.has_visuals = el.checked ? 1 : 0; S.visPlan = null; renderDrawer(); }
+      catch (err) { el.checked = !el.checked; toast(err.message, true); }
+      break;
+    }
+    case 'visual-cat':
+      try { S.data.visual_categories = (await api('/api/visuals/settings', { category: el.dataset.name, on: el.checked })).visual_categories; S.visPlan = null; }
+      catch (err) { el.checked = !el.checked; toast(err.message, true); }
+      break;
+    case 'vision-model': case 'visual-height':
+      try { await saveAi(ch === 'vision-model' ? { vision_model: el.value } : { visual_height: +el.value }); S.visPlan = null; toast('Saved'); }
+      catch (err) { toast(err.message, true); }
+      break;
     case 'asr-model':
       try { await saveAi({ asr_model: el.value }); S.asrPlan = null; toast('Speech-to-text model saved'); } catch (err) { toast(err.message, true); }
       break;

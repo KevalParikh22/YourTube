@@ -88,6 +88,15 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 - `transcript_segments.source` is `captions` or `local-asr`. A video can have both; `video_details.transcript_source` picks one (NULL = captions, or the local transcript when there are no captions). **Every transcript reader must go through `_active_source`.** `save_details` replaces only `captions` rows.
 - `requirements-local.txt` holds faster-whisper and the NVIDIA cuBLAS/cuDNN wheels; `preload_cuda_libs()` loads them without LD_LIBRARY_PATH.
 
+**Slides and whiteboards (Phase 2.5 L2, `local_visual.py`)**:
+- Videos are read when `videos.has_visuals = 1` (set by the user), or when their category's switch is on (`settings["visuals"]`) and they aren't marked 0. `storage.visual_hints()` only *suggests* marks, from title words or transcript phrases like "this slide" or "as you can see".
+- `run_visual` (job kind `visual`) per video:
+  1. Download the video only, ≤480p (`visual_height`), whole file, anonymously.
+  2. `extract_frames`: ffmpeg scene change + every 30 s, then `select_frames` (10 s gap, dHash Hamming ≤ 6, ≤ 150 frames).
+  3. `read_frame`: Ollama vision model (`vision_model` or the Ollama text model; checked with `/api/show` capabilities). It returns `content`, `text` and `visual`; frames where `content` is false are dropped.
+  4. `save_thumb` writes `frames/<id>/<sec>.jpg` (320 px, git-ignored), then the video is deleted.
+- `visual_segments` holds the results. Search kind `slide`; ratings get on-screen text (at most ¼ of the budget); notes get an "On screen" section. `GET /frames/<id>/<sec>.jpg` serves only that exact shape.
+
 **Search (`#/search?q=`)**:
 - `search_docs` holds one row per searchable piece (`kind`: title, chapter, summary, notes, description, transcript; `t` = second). The FTS5 table `search_index` (trigram tokenizer, external content) follows it through insert and delete triggers.
 - `storage._reindex(cursor, ids, kinds)` must run whenever indexed text changes. It is already called from `save_playlist` (title), `update_videos` (notes), `save_details` (description, chapter, transcript) and `save_rating` (summary). `init_db` fills the index for existing databases.
@@ -101,7 +110,6 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 
 ## Not built yet
 
-- **Phase 2.5 L2** (`docs/PRD-Phase-2.5.md`): reading slides and whiteboards from frames with the vision model, key-frame thumbnails and a slide strip. The spike scripts in `spikes/` show the measured approach.
 - **Phase 2**: questions across the whole library, with answers citing videos and timestamps. No plan document yet.
 - Writing `[YT-KB]` playlists back via the Data API: 50 units per insert against a 10k/day quota, so it needs a paced multi-day queue, and the source playlist must be hard-blocked from every write. The user hasn't decided whether they want it.
 - Public release: the checklist in section 9 of the research doc (deferred).

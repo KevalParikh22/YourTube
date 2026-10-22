@@ -44,6 +44,7 @@ VIDEOS_DDL = f"""
         notes TEXT DEFAULT '',
         status_updated_at TIMESTAMP,
         category_source TEXT NOT NULL DEFAULT 'keywords',
+        has_visuals INTEGER,
         FOREIGN KEY(playlist_id) REFERENCES playlists(id)
     )
 """
@@ -138,11 +139,22 @@ def init_db(db_path: str = DB_PATH) -> None:
             # 'captions' (YouTube) or 'local-asr' (Whisper on this computer); a video can have both
             cursor.execute("ALTER TABLE transcript_segments ADD COLUMN source TEXT NOT NULL DEFAULT 'captions'")
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS visual_segments (
+                video_id TEXT NOT NULL,
+                t_s REAL NOT NULL,
+                text TEXT NOT NULL DEFAULT '',      -- on-screen text in reading order
+                visual TEXT NOT NULL DEFAULT '',    -- one-sentence description of a diagram or whiteboard
+                thumb TEXT,                         -- file name under frames/<video_id>/
+                FOREIGN KEY(video_id) REFERENCES videos(video_id)
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_visual_video ON visual_segments(video_id, t_s)")
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS media_jobs (
                 id INTEGER PRIMARY KEY,
                 video_id TEXT NOT NULL,
-                kind TEXT NOT NULL,                  -- 'asr' now; 'visual' later (Phase 2.5 L2)
-                status TEXT NOT NULL,                -- queued, downloading, transcribing, done, failed
+                kind TEXT NOT NULL,                  -- 'asr' (L1) or 'visual' (L2)
+                status TEXT NOT NULL,                -- queued, downloading, transcribing / reading, done, failed
                 tries INTEGER NOT NULL DEFAULT 0,
                 error TEXT,
                 progress REAL,
@@ -177,6 +189,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             ("notes", "TEXT DEFAULT ''"),
             ("status_updated_at", "TIMESTAMP"),
             ("category_source", "TEXT NOT NULL DEFAULT 'keywords'"),
+            ("has_visuals", "INTEGER"),          # slides/whiteboard: NULL = not set, 0/1 = set by the user
         ):
             if col not in existing:
                 cursor.execute(f"ALTER TABLE videos ADD COLUMN {col} {ddl}")
@@ -341,19 +354,23 @@ def get_library(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
         for vid, d in details.items():
             d['sources'] = _sources(conn, vid)
             d['transcript'] = _active_source(conn, vid)
-        jobs = {row['video_id']: {'status': row['status'], 'error': row['error'], 'tries': row['tries'],
-                                  'progress': row['progress']}
-                for row in cursor.execute("SELECT video_id, status, error, tries, progress FROM media_jobs WHERE kind = 'asr'")}
+        jobs = {(row['video_id'], row['kind']): {'status': row['status'], 'error': row['error'], 'tries': row['tries'],
+                                                 'progress': row['progress']}
+                for row in cursor.execute("SELECT video_id, kind, status, error, tries, progress FROM media_jobs")}
+        slides = dict(cursor.execute("SELECT video_id, COUNT(*) FROM visual_segments GROUP BY video_id").fetchall())
         ratings = {}
         for row in cursor.execute("SELECT * FROM video_ratings"):
             r = dict(row)
             r['points'], r['skim'] = json.loads(r['points'] or '[]'), json.loads(r['skim'] or '[]')
             ratings[r.pop('video_id')] = r
     reasons = {c['video_id']: c['reason'] for c in videos_needing_asr(db_path=db_path)}
+    hints = visual_hints(db_path=db_path)
     for v in videos.values():
         if v['video_id'] in details:
-            details[v['video_id']]['asr'] = jobs.get(v['video_id'])
+            details[v['video_id']]['asr'] = jobs.get((v['video_id'], 'asr'))
             details[v['video_id']]['asr_reason'] = reasons.get(v['video_id'])
+        v['visual'] = {'slides': slides.get(v['video_id'], 0), 'job': jobs.get((v['video_id'], 'visual')),
+                       'hint': hints.get(v['video_id'])}
         v['rating'] = ratings.get(v['video_id'])
         v['suggestion'] = suggestions.get(v['video_id'])
         v['details'] = details.get(v['video_id'])
@@ -674,12 +691,16 @@ def get_details(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
     with get_connection(db_path) as conn:
         row = conn.execute("SELECT * FROM video_details WHERE video_id = ?", (video_id,)).fetchone()
         if row is None:
-            return None
+            visuals = get_visuals(video_id, db_path=db_path, conn=conn)
+            # Slides can be read before details are fetched
+            return {"status": None, "description": "", "chapters": [], "tags": [], "segments": [], "sources": [],
+                    "transcript": "captions", "visuals": visuals} if visuals else None
         d = dict(row)
         for key in ('tags', 'chapters', 'yt_categories'):
             d[key] = json.loads(d[key] or '[]')
         d['sources'] = _sources(conn, video_id)
         d['transcript'] = _active_source(conn, video_id)
+        d['visuals'] = get_visuals(video_id, db_path=db_path, conn=conn)
         d['segments'] = [dict(r) for r in conn.execute(
             "SELECT start_s AS start, dur_s AS dur, text FROM transcript_segments WHERE video_id = ? AND source = ? "
             "ORDER BY start_s", (video_id, d['transcript']))]
@@ -744,8 +765,8 @@ def save_rating(video_id: str, rating: Dict[str, Any], model: str = "", db_path:
 # kept in step by triggers. The trigram tokenizer matches parts of words in any script (Hindi too)
 # but needs at least 3 characters per term.
 
-SEARCH_KINDS = ("title", "chapter", "summary", "notes", "description", "transcript")
-_KIND_WEIGHT = {"title": 3.0, "chapter": 2.0, "notes": 2.0, "summary": 1.5, "description": 1.0, "transcript": 1.0}
+SEARCH_KINDS = ("title", "chapter", "summary", "notes", "slide", "description", "transcript")
+_KIND_WEIGHT = {"title": 3.0, "chapter": 2.0, "notes": 2.0, "summary": 1.5, "slide": 1.5, "description": 1.0, "transcript": 1.0}
 _BLOCK_SECONDS = 30
 _HIT_START, _HIT_END = "\x02", "\x03"   # snippet markers; the client escapes text, then highlights
 
@@ -791,6 +812,11 @@ def _docs_for(cursor: sqlite3.Cursor, video_id: str, kind: str) -> List[tuple]:
             else:
                 blocks.append([start, text])
         return [tuple(b) for b in blocks]
+    if kind == "slide":
+        return [(t, " · ".join(x for x in (text, visual) if (x or "").strip()))
+                for t, text, visual in cursor.execute(
+                    "SELECT t_s, text, visual FROM visual_segments WHERE video_id = ? ORDER BY t_s", (video_id,)).fetchall()
+                if (text or "").strip() or (visual or "").strip()]
     if kind == "summary":
         r = cursor.execute("SELECT reason, tldr, points FROM video_ratings WHERE video_id = ?", (video_id,)).fetchone()
         if not r:
@@ -1015,3 +1041,97 @@ def set_job(video_id: str, kind: str, db_path: str = DB_PATH, **fields: Any) -> 
         if sets:
             conn.execute(f"UPDATE media_jobs SET {', '.join(sets)} WHERE video_id = ? AND kind = ?", (*params, video_id, kind))
         conn.commit()
+
+# --- Slides, whiteboards and on-screen code (Phase 2.5 L2) ------------------------------
+# A video is read when the user marks it (videos.has_visuals = 1) or its category's "Slides" switch
+# is on (settings["visuals"]). The app only *suggests* marks (visual_hints).
+
+import re as _re
+_VISUAL_TITLE = _re.compile(r"\b(lecture|slides?|presentation|whiteboard|walk-?through|diagram|architecture|"
+                            r"system design|course|crash course|explained|deep dive|tutorial|live coding|step by step)\b", _re.I)
+_VISUAL_PHRASES = ("this slide", "next slide", "as you can see", "on the screen", "on my screen", "on the whiteboard",
+                   "this diagram", "let me draw", "if you look at")
+
+def visual_hints(db_path: str = DB_PATH) -> Dict[str, str]:
+    """Why a video probably has slides/whiteboard/code worth reading: {video_id: reason}. Only a suggestion."""
+    init_db(db_path)
+    out: Dict[str, str] = {}
+    with get_connection(db_path) as conn:
+        like = " OR ".join("lower(text) LIKE ?" for _ in _VISUAL_PHRASES)
+        phrases = dict(conn.execute(
+            f"SELECT video_id, COUNT(*) FROM transcript_segments WHERE {like} GROUP BY video_id",
+            [f"%{p}%" for p in _VISUAL_PHRASES]).fetchall())
+        for vid, title, has, status in conn.execute(
+                "SELECT v.video_id, v.title, v.has_visuals, d.status FROM videos v "
+                "LEFT JOIN video_details d ON d.video_id = v.video_id"):
+            if has is not None or status == "unavailable":
+                continue   # the user already decided, or YouTube won't serve it
+            if phrases.get(vid, 0) >= 2:
+                out[vid] = f"the speaker refers to the screen {phrases[vid]} times"
+            elif _VISUAL_TITLE.search(title or ""):
+                out[vid] = f"title says “{_VISUAL_TITLE.search(title).group(0)}”"
+    return out
+
+def set_has_visuals(video_ids: Iterable[str], value: Optional[bool], db_path: str = DB_PATH) -> int:
+    """Marks videos as having (True) or not having (False) slides worth reading; None clears the mark."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cur = conn.execute("UPDATE videos SET has_visuals = ? WHERE video_id IN (SELECT value FROM json_each(?))",
+                           (None if value is None else int(bool(value)), json.dumps(list(video_ids))))
+        conn.commit()
+        return cur.rowcount
+
+def videos_needing_visuals(video_ids: Optional[Iterable[str]] = None, visual_categories: Iterable[str] = (),
+                           max_tries: int = 3, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Videos to read slides from: marked by the user, or in a category whose "Slides" switch is on
+    (unless the video is marked 0), not yet read, and not failed max_tries times. With video_ids:
+    exactly those (an explicit request). Not-done videos first.
+    """
+    init_db(db_path)
+    cats = set(visual_categories)
+    with get_connection(db_path) as conn:
+        rows = conn.execute("""
+            SELECT v.video_id, v.title, v.category, v.status, v.duration_seconds, v.has_visuals,
+                   d.status AS details_status,
+                   EXISTS(SELECT 1 FROM visual_segments s WHERE s.video_id = v.video_id) AS has_slides,
+                   j.status AS job_status, j.tries AS job_tries
+            FROM videos v LEFT JOIN video_details d ON d.video_id = v.video_id
+            LEFT JOIN media_jobs j ON j.video_id = v.video_id AND j.kind = 'visual'
+            ORDER BY CASE WHEN v.status IN ('completed', 'skipped') THEN 1 ELSE 0 END, v.added_at, v.rowid
+        """).fetchall()
+    wanted = set(video_ids) if video_ids is not None else None
+    out = []
+    for r in rows:
+        v = dict(r)
+        if v["details_status"] == "unavailable":
+            continue
+        if wanted is not None:
+            if v["video_id"] in wanted:
+                out.append(v)
+            continue
+        marked = v["has_visuals"] == 1 or (v["has_visuals"] is None and v["category"] in cats)
+        done = v["has_slides"] or v["job_status"] == "done"
+        gave_up = v["job_status"] == "failed" and (v["job_tries"] or 0) >= max_tries
+        if marked and not done and not gave_up:
+            out.append(v)
+    return out
+
+def save_visuals(video_id: str, frames: List[Dict[str, Any]], db_path: str = DB_PATH) -> None:
+    """Replaces a video's slide segments: [{'t', 'text', 'visual', 'thumb'}] (frames without content excluded)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM visual_segments WHERE video_id = ?", (video_id,))
+        cursor.executemany("INSERT INTO visual_segments (video_id, t_s, text, visual, thumb) VALUES (?, ?, ?, ?, ?)",
+                           [(video_id, f["t"], f.get("text") or "", f.get("visual") or "", f.get("thumb")) for f in frames])
+        _reindex(cursor, [video_id], kinds=("slide",))
+        conn.commit()
+
+def get_visuals(video_id: str, db_path: str = DB_PATH, conn=None) -> List[Dict[str, Any]]:
+    if conn is None:
+        init_db(db_path)
+        with get_connection(db_path) as c:
+            return get_visuals(video_id, db_path, c)
+    return [dict(r) for r in conn.execute(
+        "SELECT t_s AS t, text, visual, thumb FROM visual_segments WHERE video_id = ? ORDER BY t_s", (video_id,))]

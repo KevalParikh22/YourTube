@@ -84,6 +84,9 @@ def default_settings() -> Dict[str, Any]:
         "language": "English",    # language for summaries and rating reasons
         "local_only": False,      # block every cloud provider
         "asr_model": "auto",      # local speech-to-text: auto = large-v3-turbo on a GPU, small on the CPU
+        "visuals": {},            # category -> read slides/whiteboards for its videos
+        "vision_model": "",       # Ollama model that reads frames; empty = the Ollama text model
+        "visual_height": 480,     # frame resolution for slide reading (720 for small text)
     }
 
 def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
@@ -141,6 +144,8 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         "interests": settings["interests"], "language": settings["language"],
         "local_only": bool(settings.get("local_only")),
         "asr_model": settings.get("asr_model") or "auto",
+        "vision_model": settings.get("vision_model") or "",
+        "visual_height": int(settings.get("visual_height") or 480),
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},
         "uses": {t: describe(settings, t) for t in TASKS},

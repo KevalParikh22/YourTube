@@ -109,7 +109,11 @@ Measured on the library's 3 real videos: an 18 min talk with demo, a 2 h live-co
    - `media_jobs` table; candidates by `no_captions` or `wrong_script`; captions and the local transcript kept side by side, with a per-video switch.
    - Dashboard: a Playlists section with an estimate, a panel button and switch, and a model choice on the AI page. `requirements-local.txt` is installed by `setup.sh --local-ai`.
    - Real run: the wrong-script video (LLM Fine-Tuning) was transcribed in English, 112 lines at 25× real time, with its captions kept. After switching it to the local transcript, search found English phrases that its Devanagari captions never matched.
-4. Visual content (L2): frames, dedupe, OCR and vision, then visual segments in search and summaries.
+4. Visual content (L2): frames, dedupe, OCR and vision, then visual segments in search and summaries. **Done 2026-10-22. Phase 2.5 complete.**
+   - `local_visual.py`: whole-file 480p video-only download; scene change + every 30 s + dHash dedupe; the vision model reads each frame and drops talking-head frames; 320 px thumbnails in `frames/`; video deleted.
+   - Marks per video and per category, plus suggestions; `visual_segments`; the `slide` search kind; on-screen text in ratings and notes.
+   - Dashboard: slide strip and switch in the video panel, a Playlists section with an estimate, the Categories **Slides** switch, the AI page vision model and frame quality.
+   - Real run (LLM Fine-Tuning, 10 min): 15 frames picked, **3 with content** (an ad slide, "RFT with Verifiable Rewards / 3 flavors", "When you're doing fine tuning: QLoRA → Domain Adaptation"); 22–42 s of reading; thumbnails 2–3 KB each; searching "domain adaptation" with the Slides filter finds the 8:11 slide.
 
 Each step ships with tests and keeps the dashboard working.
 

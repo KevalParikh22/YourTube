@@ -71,6 +71,13 @@ def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings
     desc = (video.get('description') or "").strip()[:1500]
     chapters = "\n".join(f"[{_clock(c.get('start'))}] {c.get('title')}" for c in video.get('chapters') or [])
 
+    slides = video.get("slides") or []
+    slide_text = ""
+    if slides:
+        blocks = [{"start": x["t"], "text": " · ".join(y for y in (" ".join((x.get("text") or "").split()), x.get("visual") or "") if y)}
+                  for x in slides]
+        slide_text, _ = fit_transcript(blocks, budget // 4)   # slides get at most a quarter of the room
+        budget -= len(slide_text)
     if segments:
         text, sampled = fit_transcript(transcript_blocks(segments), budget)
         basis = "transcript"
@@ -95,7 +102,7 @@ Chapters:
 {chapters or '(none)'}
 
 {source}
-
+{f"{chr(10)}On-screen text (slides, code, whiteboard), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}
 Rate how worth watching this video is for this learner, from 0 to 10, weighing:
 1. Depth and quality: real substance and accuracy, versus hype, clickbait or padding.
 2. Fit with their interests and categories.
@@ -187,7 +194,7 @@ def estimate(video_ids: Optional[List[str]] = None) -> Dict[str, Any]:
 
     settings = _context(llm.load_settings())
     budget = llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE)
-    videos = storage.videos_for_rating(video_ids)
+    videos = [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
     chars = with_transcript = 0
     for v in videos:
         segments = storage.get_segments(v['video_id'])
@@ -205,7 +212,7 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     import storage
 
     settings = _context(llm.load_settings())
-    videos = storage.videos_for_rating(video_ids)
+    videos = [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
     print(f"⭐ Rating {len(videos)} videos with {llm.describe(settings, 'rate')} (in {settings.get('language') or 'English'}).")
     if not videos:
         print("   Nothing to rate.")

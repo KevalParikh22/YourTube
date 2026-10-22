@@ -148,6 +148,17 @@ For videos with **no captions**, or captions in the **wrong script** (for exampl
 - **Both kept:** when a video already has captions, both transcripts are stored. The video panel's *Transcript used for search, ratings and summaries* switch picks which one counts. After switching, use **Rate again** to refresh that video's rating.
 - **Needs:** `faster-whisper` (installed by `scripts/setup.sh --local-ai`, or `pip install -r requirements-local.txt`) and ffmpeg.
 
+### Slides, whiteboards and on-screen code
+
+Many tutorials put the real content on screen. YT KB can read it with the local vision model (the Ollama model, for example `qwen3.5:4b`, which reads images).
+
+- **Choose videos:** tick **Has slides / whiteboard / on-screen code** in a video's panel, switch on **Slides** for a category (Categories page), or click **Mark N suggested videos** (Playlists page). Suggestions come from titles ("lecture", "explained", "system design"…) and from transcripts where the speaker refers to the screen.
+- **Run it:** Playlists → *Slides and whiteboards* → **Read slides for N videos**, or **Read slides now** in a video's panel.
+- **What happens:** only the video picture is downloaded (no audio), anonymously, at 480p (720p for small text: AI page → *Slide frame quality*). Frames are picked at scene changes and at least every 30 seconds, near-duplicates are dropped, and the vision model reads each frame, skipping frames of a person talking. The video is deleted; small thumbnails (a few KB each) are kept in `frames/`.
+- **What you get:** a clickable slide strip and the on-screen text in the video panel; a **Slides** filter in search; slide text in ratings and in exported notes.
+- **Speed (RTX 3050):** about 1.5–2 min per 10 min of video, plus the download.
+- **Vision model:** AI page → *Vision model (slides)*. Only models that can read images can be picked.
+
 ### Cloud AI
 
 On the **AI** page, click **Set up** next to a provider, paste the key, then **Save and test**. You can also set the key as an environment variable instead of saving it.
@@ -177,6 +188,7 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 | Sync a playlist | Playlists → Sync | `.venv/bin/python main.py <ID> --browser auto` |
 | Fetch descriptions, chapters and captions | Playlists → Video details → Fetch | `.venv/bin/python main.py --details 200` |
 | Rate videos (Watch / Skim / Skip) | Triage → Rate | — |
+| Read slides, whiteboards and on-screen code | Mark videos (panel, category **Slides** switch, or suggestions), then Playlists → Read slides | — |
 | Transcribe videos without usable captions on this computer | Playlists → Transcribe N videos locally, or a video's panel | — |
 | Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment | — |
 | Category suggestions after sync | AI → About you → checkbox | `main.py <ID> --browser auto --ai` |
@@ -196,6 +208,8 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 | `settings.json` | AI settings and API keys, interests, language, transcript switches | Yes (you lose AI settings and keys) |
 | `taxonomy.json` | Your categories and their keywords | Yes (built-in categories come back) |
 | `reports/` | Static HTML and Markdown snapshots written by `main.py` | Yes |
+| `frames/` | Slide thumbnails for the slide strip | Yes (the strip disappears; read slides again to restore it) |
+| `media_cache/` | Temporary audio and video while processing; emptied after each job | Yes |
 | `.venv/` | The Python environment | Yes (run the setup again) |
 
 ### `settings.json` keys
@@ -211,6 +225,9 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `providers.ollama.num_ctx` | `8192` | Ollama context size in tokens |
 | `tasks.categorize`, `tasks.rate` | unset | Provider for that job; unset means the default |
 | `local_only` | `false` | Block every cloud AI |
+| `visuals.<category>` | off | Read slides for videos in this category |
+| `vision_model` | `""` | Ollama model that reads frames; empty means the Ollama text model |
+| `visual_height` | `480` | Frame quality for slide reading: `480` or `720` |
 | `asr_model` | `"auto"` | Local speech-to-text model: `auto` (large-v3-turbo on a GPU, small on the CPU), `large-v3-turbo`, `small` or `medium` |
 | `interests` | `""` | What you want to learn (used by ratings) |
 | `language` | `"English"` | Language for summaries and reasons |
