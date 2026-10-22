@@ -77,6 +77,17 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 - `settings["local_only"]` blocks cloud providers in `is_configured` and in `make_completer`.
 - `local_setup.py` handles the machine check, the model recommendation (`RECOMMENDED`, by VRAM), `pull_model` (job kind `pull`) and `use_model`. It also has a CLI that `scripts/setup.sh` (Linux/macOS) and `scripts/setup.ps1` (Windows, untested) use.
 
+**Local transcription (Phase 2.5 L1, `local_asr.py`)**:
+- `run_asr` (job kind `asr`) works through `storage.videos_needing_asr()`. Its reasons are `no_captions`, and `wrong_script` from `captions_look_wrong()`: auto-captions in a non-Latin script for a Latin-script title.
+- Per video:
+  1. Download the **original** audio track (`AUDIO_FORMAT`; dubbed videos carry many), anonymously.
+  2. Decode with ffmpeg; don't use faster-whisper's PyAV decoder, which breaks.
+  3. Unload Ollama, then transcribe (`large-v3-turbo` int8 on CUDA, `small` int8 on CPU; `settings["asr_model"]`).
+  4. Delete the audio, then pause if the GPU runs hot.
+- `media_jobs` tracks each job's status, tries, progress and timings. Downloaded media lives only in git-ignored `media_cache/`.
+- `transcript_segments.source` is `captions` or `local-asr`. A video can have both; `video_details.transcript_source` picks one (NULL = captions, or the local transcript when there are no captions). **Every transcript reader must go through `_active_source`.** `save_details` replaces only `captions` rows.
+- `requirements-local.txt` holds faster-whisper and the NVIDIA cuBLAS/cuDNN wheels; `preload_cuda_libs()` loads them without LD_LIBRARY_PATH.
+
 **Search (`#/search?q=`)**:
 - `search_docs` holds one row per searchable piece (`kind`: title, chapter, summary, notes, description, transcript; `t` = second). The FTS5 table `search_index` (trigram tokenizer, external content) follows it through insert and delete triggers.
 - `storage._reindex(cursor, ids, kinds)` must run whenever indexed text changes. It is already called from `save_playlist` (title), `update_videos` (notes), `save_details` (description, chapter, transcript) and `save_rating` (summary). `init_db` fills the index for existing databases.
@@ -90,7 +101,7 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 
 ## Not built yet
 
-- **Phase 2.5** (`docs/PRD-Phase-2.5.md`): local transcription of videos without captions (L1), and reading slides and whiteboards from frames (L2). Step 1, a measuring spike, comes first; its scripts live in `spikes/`.
+- **Phase 2.5 L2** (`docs/PRD-Phase-2.5.md`): reading slides and whiteboards from frames with the vision model, key-frame thumbnails and a slide strip. The spike scripts in `spikes/` show the measured approach.
 - **Phase 2**: questions across the whole library, with answers citing videos and timestamps. No plan document yet.
 - Writing `[YT-KB]` playlists back via the Data API: 50 units per insert against a 10k/day quota, so it needs a paced multi-day queue, and the source playlist must be hard-blocked from every write. The user hasn't decided whether they want it.
 - Public release: the checklist in section 9 of the research doc (deferred).

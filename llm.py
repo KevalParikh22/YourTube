@@ -83,6 +83,7 @@ def default_settings() -> Dict[str, Any]:
         "interests": "",          # free text: what the user wants to learn, used by ratings
         "language": "English",    # language for summaries and rating reasons
         "local_only": False,      # block every cloud provider
+        "asr_model": "auto",      # local speech-to-text: auto = large-v3-turbo on a GPU, small on the CPU
     }
 
 def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
@@ -139,6 +140,7 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS,
         "interests": settings["interests"], "language": settings["language"],
         "local_only": bool(settings.get("local_only")),
+        "asr_model": settings.get("asr_model") or "auto",
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},
         "uses": {t: describe(settings, t) for t in TASKS},

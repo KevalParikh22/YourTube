@@ -49,6 +49,7 @@ Then start the dashboard and open http://127.0.0.1:8765:
 | 2. Environment | Creates `.venv` and installs `requirements.txt` (yt-dlp, anthropic, and secretstorage on Linux) | No (only inside the project folder) |
 | 3. ffmpeg | Checks that it is installed and tells you how to install it if not | — |
 | 4. Ollama *(local AI only)* | Installs Ollama with its official installer (Linux) or `winget` (Windows), then starts it | **Yes**. The installer may ask for your password |
+| 4b. Local transcription *(local AI only)* | Installs faster-whisper from `requirements-local.txt` (plus NVIDIA libraries on Linux/Windows; about 1.2 GB). The speech model downloads on first use (~1.6 GB) | **Yes** |
 | 5. Model *(local AI only)* | Downloads the model that fits your GPU and makes it YT KB's default AI | **Yes** |
 | Done | Prints the local AI check | — |
 
@@ -137,6 +138,16 @@ Any Ollama model can be downloaded by name on the AI page (for example `gemma4:e
 - **Context size** (AI page → Ollama → Edit): how much transcript the model reads at once. The default is 8192 tokens. Larger values use more memory.
 - **Local only** (AI page): blocks every cloud AI, so nothing is sent off your computer.
 
+### Local transcription (videos without usable captions)
+
+For videos with **no captions**, or captions in the **wrong script** (for example English speech that YouTube auto-captioned in Devanagari), YT KB can transcribe the audio on your computer with Whisper.
+
+- **Run it:** Playlists → *Video details and transcripts* → **Transcribe N videos locally** (shows the audio length and an estimate), or **Transcribe locally** in a video's panel.
+- **What happens:** only the original-language audio is downloaded, anonymously; the AI model is unloaded from the GPU; Whisper transcribes; and the audio is deleted.
+- **Speed (RTX 3050, 4 GB):** about 2.5 min per hour of audio on the GPU (`large-v3-turbo`), and about 10 min per hour on the CPU (`small`). Choose the model on the AI page (*Speech-to-text model*; Auto picks by device).
+- **Both kept:** when a video already has captions, both transcripts are stored. The video panel's *Transcript used for search, ratings and summaries* switch picks which one counts. After switching, use **Rate again** to refresh that video's rating.
+- **Needs:** `faster-whisper` (installed by `scripts/setup.sh --local-ai`, or `pip install -r requirements-local.txt`) and ffmpeg.
+
 ### Cloud AI
 
 On the **AI** page, click **Set up** next to a provider, paste the key, then **Save and test**. You can also set the key as an environment variable instead of saving it.
@@ -166,6 +177,7 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 | Sync a playlist | Playlists → Sync | `.venv/bin/python main.py <ID> --browser auto` |
 | Fetch descriptions, chapters and captions | Playlists → Video details → Fetch | `.venv/bin/python main.py --details 200` |
 | Rate videos (Watch / Skim / Skip) | Triage → Rate | — |
+| Transcribe videos without usable captions on this computer | Playlists → Transcribe N videos locally, or a video's panel | — |
 | Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment | — |
 | Category suggestions after sync | AI → About you → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
@@ -199,6 +211,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `providers.ollama.num_ctx` | `8192` | Ollama context size in tokens |
 | `tasks.categorize`, `tasks.rate` | unset | Provider for that job; unset means the default |
 | `local_only` | `false` | Block every cloud AI |
+| `asr_model` | `"auto"` | Local speech-to-text model: `auto` (large-v3-turbo on a GPU, small on the CPU), `large-v3-turbo`, `small` or `medium` |
 | `interests` | `""` | What you want to learn (used by ratings) |
 | `language` | `"English"` | Language for summaries and reasons |
 | `auto_after_sync` | `false` | Suggest categories after each sync |
@@ -249,6 +262,8 @@ Your database is upgraded automatically when the dashboard starts. Back up `yt_k
 | Ollama "not running" | Run `ollama serve` (or `systemctl start ollama`). |
 | Local model very slow | The model doesn't fit in GPU memory. Pick a smaller one, or lower the context size. |
 | AI returns errors | AI page → **Save and test** shows the exact error. |
+| Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai`, or `.venv/bin/python -m pip install -r requirements-local.txt` |
+| Local transcription very slow | It runs on the CPU: check the AI page's GPU line; with an NVIDIA GPU, reinstall `requirements-local.txt` for the CUDA libraries. |
 | Dashboard won't start: port in use | `.venv/bin/python dashboard.py --port 8770` |
 | Windows script blocked | Run it with `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1` |
 

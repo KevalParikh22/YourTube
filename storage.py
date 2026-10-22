@@ -129,8 +129,30 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_segments_video ON transcript_segments(video_id, start_s)")
-        if "upload_date" not in _columns(cursor, "video_details"):
-            cursor.execute("ALTER TABLE video_details ADD COLUMN upload_date TEXT")
+        for col, ddl in (("upload_date", "TEXT"),
+                         ("transcript_source", "TEXT"),      # chosen transcript; NULL = captions, else the local one
+                         ("asr_language", "TEXT"), ("asr_model", "TEXT"), ("asr_at", "TIMESTAMP")):
+            if col not in _columns(cursor, "video_details"):
+                cursor.execute(f"ALTER TABLE video_details ADD COLUMN {col} {ddl}")
+        if "source" not in _columns(cursor, "transcript_segments"):
+            # 'captions' (YouTube) or 'local-asr' (Whisper on this computer); a video can have both
+            cursor.execute("ALTER TABLE transcript_segments ADD COLUMN source TEXT NOT NULL DEFAULT 'captions'")
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS media_jobs (
+                id INTEGER PRIMARY KEY,
+                video_id TEXT NOT NULL,
+                kind TEXT NOT NULL,                  -- 'asr' now; 'visual' later (Phase 2.5 L2)
+                status TEXT NOT NULL,                -- queued, downloading, transcribing, done, failed
+                tries INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                progress REAL,
+                timings TEXT,                        -- JSON: download_s, transcribe_s, audio_s, ...
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                started_at TIMESTAMP,
+                finished_at TIMESTAMP,
+                UNIQUE(video_id, kind)
+            )
+        """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS video_ratings (
                 video_id TEXT PRIMARY KEY,
@@ -313,15 +335,25 @@ def get_library(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
                        for row in cursor.execute("SELECT video_id, category, confidence FROM category_suggestions")}
         details = {row['video_id']: {'status': row['status'], 'caption_kind': row['caption_kind'],
                                      'caption_lang': row['caption_lang'], 'chapters': row['n_chapters'],
-                                     'tries': row['tries']}
-                   for row in cursor.execute("SELECT video_id, status, caption_kind, caption_lang, tries, "
+                                     'tries': row['tries'], 'asr_language': row['asr_language']}
+                   for row in cursor.execute("SELECT video_id, status, caption_kind, caption_lang, tries, asr_language, "
                                              "json_array_length(chapters) AS n_chapters FROM video_details")}
+        for vid, d in details.items():
+            d['sources'] = _sources(conn, vid)
+            d['transcript'] = _active_source(conn, vid)
+        jobs = {row['video_id']: {'status': row['status'], 'error': row['error'], 'tries': row['tries'],
+                                  'progress': row['progress']}
+                for row in cursor.execute("SELECT video_id, status, error, tries, progress FROM media_jobs WHERE kind = 'asr'")}
         ratings = {}
         for row in cursor.execute("SELECT * FROM video_ratings"):
             r = dict(row)
             r['points'], r['skim'] = json.loads(r['points'] or '[]'), json.loads(r['skim'] or '[]')
             ratings[r.pop('video_id')] = r
+    reasons = {c['video_id']: c['reason'] for c in videos_needing_asr(db_path=db_path)}
     for v in videos.values():
+        if v['video_id'] in details:
+            details[v['video_id']]['asr'] = jobs.get(v['video_id'])
+            details[v['video_id']]['asr_reason'] = reasons.get(v['video_id'])
         v['rating'] = ratings.get(v['video_id'])
         v['suggestion'] = suggestions.get(v['video_id'])
         v['details'] = details.get(v['video_id'])
@@ -560,7 +592,8 @@ def ai_context(video_ids: Iterable[str], excerpt_chars: int = 1000, db_path: str
             out[r['video_id']]["summary"] = r['tldr'] or ""
         for vid in ids:
             parts, size = [], 0
-            for (text,) in conn.execute("SELECT text FROM transcript_segments WHERE video_id = ? ORDER BY start_s", (vid,)):
+            for (text,) in conn.execute("SELECT text FROM transcript_segments WHERE video_id = ? AND source = ? "
+                                        "ORDER BY start_s", (vid, _active_source(conn, vid))):
                 parts.append(text)
                 size += len(text) + 1
                 if size > excerpt_chars:
@@ -627,9 +660,10 @@ def save_details(video_id: str, result: Dict[str, Any], db_path: str = DB_PATH) 
             result.get('upload_date'),
         ))
         if result['status'] != 'failed':
-            cursor.execute("DELETE FROM transcript_segments WHERE video_id = ?", (video_id,))
+            # Only YouTube captions are replaced; a local transcript stays
+            cursor.execute("DELETE FROM transcript_segments WHERE video_id = ? AND source = 'captions'", (video_id,))
             cursor.executemany(
-                "INSERT INTO transcript_segments (video_id, start_s, dur_s, text) VALUES (?, ?, ?, ?)",
+                "INSERT INTO transcript_segments (video_id, start_s, dur_s, text, source) VALUES (?, ?, ?, ?, 'captions')",
                 [(video_id, seg['start'], seg.get('dur'), seg['text']) for seg in result.get('segments') or []])
             _reindex(cursor, [video_id], kinds=("description", "chapter", "transcript"))
         conn.commit()
@@ -644,9 +678,11 @@ def get_details(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
         d = dict(row)
         for key in ('tags', 'chapters', 'yt_categories'):
             d[key] = json.loads(d[key] or '[]')
+        d['sources'] = _sources(conn, video_id)
+        d['transcript'] = _active_source(conn, video_id)
         d['segments'] = [dict(r) for r in conn.execute(
-            "SELECT start_s AS start, dur_s AS dur, text FROM transcript_segments WHERE video_id = ? ORDER BY start_s",
-            (video_id,))]
+            "SELECT start_s AS start, dur_s AS dur, text FROM transcript_segments WHERE video_id = ? AND source = ? "
+            "ORDER BY start_s", (video_id, d['transcript']))]
         return d
 
 # --- AI watch ratings (Phase 1) -----------------------------------------------------
@@ -682,7 +718,8 @@ def videos_for_rating(video_ids: Optional[Iterable[str]] = None, db_path: str = 
 def get_segments(video_id: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     with get_connection(db_path) as conn:
         return [dict(r) for r in conn.execute(
-            "SELECT start_s AS start, text FROM transcript_segments WHERE video_id = ? ORDER BY start_s", (video_id,))]
+            "SELECT start_s AS start, text FROM transcript_segments WHERE video_id = ? AND source = ? ORDER BY start_s",
+            (video_id, _active_source(conn, video_id)))]
 
 def save_rating(video_id: str, rating: Dict[str, Any], model: str = "", db_path: str = DB_PATH) -> None:
     init_db(db_path)
@@ -745,8 +782,10 @@ def _docs_for(cursor: sqlite3.Cursor, video_id: str, kind: str) -> List[tuple]:
         return [(c.get("start"), c.get("title")) for c in json.loads(r[1] or "[]") if c.get("title")]
     if kind == "transcript":
         blocks: List[list] = []
+        source = _active_source(cursor, video_id)
         for start, text in cursor.execute(
-                "SELECT start_s, text FROM transcript_segments WHERE video_id = ? ORDER BY start_s", (video_id,)):
+                "SELECT start_s, text FROM transcript_segments WHERE video_id = ? AND source = ? ORDER BY start_s",
+                (video_id, source)).fetchall():
             if blocks and start - blocks[-1][0] < _BLOCK_SECONDS:
                 blocks[-1][1] += " " + text
             else:
@@ -841,3 +880,138 @@ def search(q: str, kinds: Optional[Iterable[str]] = None, limit: int = 50, db_pa
     for v in results:
         v["hits"].sort(key=lambda h: (SEARCH_KINDS.index(h["kind"]), h["t"] if h["t"] is not None else -1))
     return {"results": results, "short": False}
+
+# --- Transcript sources and local transcription (Phase 2.5 L1) ------------------------
+# A video can have YouTube captions and a local Whisper transcript side by side. The user picks
+# which one is active per video (video_details.transcript_source); NULL means captions when they
+# exist, else the local one. Everything that reads a transcript goes through _active_source.
+
+TRANSCRIPT_SOURCES = ("captions", "local-asr")
+
+def _sources(conn, video_id: str) -> List[str]:
+    return [r[0] for r in conn.execute(
+        "SELECT DISTINCT source FROM transcript_segments WHERE video_id = ? ORDER BY source", (video_id,))]
+
+def _active_source(conn, video_id: str) -> str:
+    have = _sources(conn, video_id)
+    row = conn.execute("SELECT transcript_source FROM video_details WHERE video_id = ?", (video_id,)).fetchone()
+    chosen = row[0] if row else None
+    if chosen in have:
+        return chosen
+    return "captions" if "captions" in have or not have else have[0]
+
+def set_transcript_source(video_id: str, source: str, db_path: str = DB_PATH) -> None:
+    """Makes captions or the local transcript the one search, ratings and summaries use."""
+    if source not in TRANSCRIPT_SOURCES:
+        raise ValueError(f"Invalid transcript source: {source}")
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        if source not in _sources(conn, video_id):
+            raise ValueError(f"This video has no {source} transcript")
+        conn.execute("UPDATE video_details SET transcript_source = ? WHERE video_id = ?", (source, video_id))
+        _reindex(conn.cursor(), [video_id], kinds=("transcript",))
+        conn.commit()
+
+def save_local_transcript(video_id: str, segments: List[Dict[str, Any]], language: str = "", model: str = "",
+                          db_path: str = DB_PATH) -> None:
+    """
+    Stores a Whisper transcript next to any captions. With no captions it becomes the active
+    transcript; with captions the user's choice stands (decision 2026-10-21: keep both, user picks).
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT OR IGNORE INTO video_details (video_id, status) VALUES (?, 'no_captions')", (video_id,))
+        cursor.execute("DELETE FROM transcript_segments WHERE video_id = ? AND source = 'local-asr'", (video_id,))
+        cursor.executemany(
+            "INSERT INTO transcript_segments (video_id, start_s, dur_s, text, source) VALUES (?, ?, ?, ?, 'local-asr')",
+            [(video_id, seg['start'], seg.get('dur'), seg['text']) for seg in segments])
+        cursor.execute("UPDATE video_details SET asr_language = ?, asr_model = ?, asr_at = CURRENT_TIMESTAMP "
+                       "WHERE video_id = ?", (language, model, video_id))
+        _reindex(cursor, [video_id], kinds=("transcript",))
+        conn.commit()
+
+
+def _script_share(text: str) -> float:
+    """Share of letters that are Latin (0..1); 1.0 when there are no letters."""
+    import unicodedata
+    letters = [c for c in text if c.isalpha()]
+    if not letters:
+        return 1.0
+    latin = sum(1 for c in letters if "LATIN" in unicodedata.name(c, ""))
+    return latin / len(letters)
+
+def captions_look_wrong(caption_text: str, title: str, description: str = "", caption_kind: str = "") -> bool:
+    """
+    Auto-captions in a non-Latin script for a video whose title and description are in Latin script:
+    the spike found English speech auto-captioned in Devanagari this way. It's only a hint; the local
+    transcript is kept next to the captions and the user chooses.
+    """
+    if caption_kind != "auto" or not caption_text:
+        return False
+    return _script_share(caption_text[:2000]) < 0.3 and _script_share(f"{title} {description[:500]}") > 0.8
+
+def videos_needing_asr(video_ids: Optional[Iterable[str]] = None, max_tries: int = 3,
+                       db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Candidates for local transcription with the reason: 'no_captions' or 'wrong_script'.
+    Without video_ids: videos whose details were fetched, that have no local transcript yet, and
+    whose last job hasn't failed max_tries times. With video_ids: those videos (an explicit request),
+    as long as they aren't unavailable or music. Not-done videos come first.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute("""
+            SELECT v.video_id, v.title, v.category, v.status, v.duration_seconds,
+                   d.status AS details_status, d.caption_kind, d.description,
+                   EXISTS(SELECT 1 FROM transcript_segments s WHERE s.video_id = v.video_id AND s.source = 'local-asr') AS has_local,
+                   j.status AS job_status, j.tries AS job_tries
+            FROM videos v JOIN video_details d ON d.video_id = v.video_id
+            LEFT JOIN media_jobs j ON j.video_id = v.video_id AND j.kind = 'asr'
+            WHERE d.status IN ('done', 'no_captions')
+            ORDER BY CASE WHEN v.status IN ('completed', 'skipped') THEN 1 ELSE 0 END, v.added_at, v.rowid
+        """).fetchall()
+        wanted = set(video_ids) if video_ids is not None else None
+        out = []
+        for r in rows:
+            v = dict(r)
+            if wanted is not None:
+                if v["video_id"] not in wanted:
+                    continue
+            elif v["has_local"] or (v["job_status"] == "failed" and (v["job_tries"] or 0) >= max_tries):
+                continue
+            if v["details_status"] == "no_captions":
+                v["reason"] = "no_captions"
+            else:
+                sample = " ".join(t for (t,) in conn.execute(
+                    "SELECT text FROM transcript_segments WHERE video_id = ? AND source = 'captions' ORDER BY start_s LIMIT 40",
+                    (v["video_id"],)))
+                v["reason"] = "wrong_script" if captions_look_wrong(sample, v["title"], v["description"] or "", v["caption_kind"] or "") else None
+            if v["reason"] or wanted is not None:
+                out.append(v)
+        return out
+
+
+def set_job(video_id: str, kind: str, db_path: str = DB_PATH, **fields: Any) -> None:
+    """Creates or updates a media job (status, error, progress, timings, started/finished)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("INSERT OR IGNORE INTO media_jobs (video_id, kind, status) VALUES (?, ?, 'queued')", (video_id, kind))
+        if fields.get("status") == "failed":
+            conn.execute("UPDATE media_jobs SET tries = tries + 1 WHERE video_id = ? AND kind = ?", (video_id, kind))
+        if fields.get("status") in ("downloading",):
+            fields.setdefault("started_at", "now")
+        if fields.get("status") in ("done", "failed"):
+            fields.setdefault("finished_at", "now")
+        sets, params = [], []
+        for k, v in fields.items():
+            if k not in ("status", "error", "progress", "timings", "started_at", "finished_at"):
+                raise ValueError(k)
+            if k in ("started_at", "finished_at") and v == "now":
+                sets.append(f"{k} = CURRENT_TIMESTAMP")
+                continue
+            sets.append(f"{k} = ?")
+            params.append(json.dumps(v) if k == "timings" else v)
+        if sets:
+            conn.execute(f"UPDATE media_jobs SET {', '.join(sets)} WHERE video_id = ? AND kind = ?", (*params, video_id, kind))
+        conn.commit()

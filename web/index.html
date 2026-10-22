@@ -305,6 +305,9 @@
   .codeblock .copy { position: absolute; top: 6px; right: 6px; }
   @media (max-width: 760px) { .dl-grid { grid-template-columns: minmax(0, 1fr); } }
 
+  .asr-box { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .asr-box h3 { font-size: 15px; margin: 0 0 6px; }
+
   /* ---------- export ---------- */
   .export { position: relative; }
   .export summary { list-style: none; }
@@ -434,6 +437,7 @@ const JOB_TEXT = {
   details: ['Fetching video details, one video every few seconds…', 'Video details fetched', 'Details run stopped early. See the log.'],
   rate: ['Rating videos…', 'Videos rated', 'Rating stopped early. See the log.'],
   pull: ['Downloading the model into Ollama…', 'Model downloaded', 'Download stopped. See the log.'],
+  asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
 };
 const DETAIL_LABEL = { done: 'Transcript', no_captions: 'No captions', music: 'Music, no transcript', unavailable: 'Unavailable', failed: 'Failed, will retry' };
 
@@ -452,7 +456,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   triage: { verdict: 'all', cat: '', undo: [] },
-  drawer: null, polling: false, detailCache: {}, local: null, guide: null,
+  drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null,
   search: { q: '', kind: 'all', res: null, seq: 0 },
 };
 
@@ -995,7 +999,32 @@ function viewDetailsCard() {
     </div>
     <label class="check" style="margin-top:14px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
       <span>After each sync, fetch details for new videos (up to 50)</span></label>
+    ${viewAsr()}
   </section>`;
+}
+function viewAsr() {
+  const P = S.asrPlan, running = !!S.data.job.running;
+  if (!P || P === 'loading') { loadAsrPlan(); return '<div class="asr-box"><h3>Local transcription</h3><p class="note">Checking…</p></div>'; }
+  if (P.error) return '';
+  const where = P.device === 'cuda' ? 'on your GPU' : 'on the CPU';
+  return `<div class="asr-box">
+    <h3>Local transcription</h3>
+    <p class="note">For videos with <b>no captions</b>, or captions in the <b>wrong script</b> (for example English speech written in Devanagari).
+      Whisper runs on this computer; only the original-language audio is downloaded, anonymously, and it is deleted right after.
+      Where captions exist, both are kept and you choose per video.</p>
+    ${!P.available ? `<div class="banner"><span>Needs faster-whisper. Install it with <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
+      : P.videos ? `<div class="actions">
+          <button class="btn btn-dark btn-sm" data-act="asr-run" data-job-btn ${running ? 'disabled' : ''}>Transcribe ${plural(P.videos, 'video')} locally</button>
+          <span class="faint" style="font-size:12.5px">${P.no_captions} without captions · ${P.wrong_script} wrong script · ${fmt(P.audio_s)} of audio ·
+            about ${Math.max(1, Math.round(P.minutes))} min ${where} (${esc(P.model)})</span></div>`
+      : '<p class="hint">Nothing to transcribe: every fetched video has usable captions. Fetch details for more videos first.</p>'}
+  </div>`;
+}
+async function loadAsrPlan() {
+  if (S.asrPlan === 'loading') return;
+  S.asrPlan = 'loading';
+  try { S.asrPlan = await api('/api/asr/plan'); } catch (e) { S.asrPlan = { error: e.message }; }
+  if (route() === 'sources') refresh();
 }
 function fmtDate(s) {
   if (!s) return '';
@@ -1013,10 +1042,10 @@ function updateJob() {
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
     : route() === 'ai' ? job.kind === 'pull'
-    : ['sync', 'details'].includes(job.kind) || !job.kind;
+    : ['sync', 'details', 'asr'].includes(job.kind) || !job.kind;
   if (!mine || (!job.log && !job.running)) { box.innerHTML = ''; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate', 'pull'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
+  const head = job.running ? `<span class="status-line"><span class="spin"></span>${text[0]}${['details', 'sync', 'rate', 'pull', 'asr'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
     : `<span class="status-line">${job.ok ? 'Finished' : '<span class="warn-text">Failed</span>'} · ${esc(fmtLocal(job.finished_at))}</span>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div><pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
@@ -1037,7 +1066,7 @@ async function pollJob() {
   } catch (e) { toast(e.message, true); } finally { S.polling = false; }
   if (job) {
     const t = JOB_TEXT[job.kind] || JOB_TEXT.sync;
-    if (job.kind === 'details' || job.kind === 'sync') S.detailCache = {};  // details may have changed
+    if (['details', 'sync', 'asr'].includes(job.kind)) { S.detailCache = {}; S.asrPlan = null; }  // transcripts may have changed
     if (job.kind === 'pull') S.local = null;                                // new model downloaded
     toast(job.ok ? t[1] : t[2], !job.ok); await load();
   }
@@ -1370,6 +1399,9 @@ function viewLocal() {
         <button class="btn btn-sm ${r.best ? 'btn-dark' : ''}" data-act="local-pull" data-model="${esc(r.model)}" data-job-btn ${running ? 'disabled' : ''}>Download</button></div>`).join('')}
       <div class="actions"><input type="text" id="local-model" placeholder="Any Ollama model, e.g. gemma4:e2b" style="width:260px">
         <button class="btn btn-sm" data-act="local-pull" data-job-btn ${running ? 'disabled' : ''}>Download</button></div>` : ''}
+    <div class="route" style="margin-top:14px"><span class="field-label" style="margin:0">Speech-to-text model</span>
+      <select data-change="asr-model" style="width:100%">${[['auto', 'Auto: large-v3-turbo on a GPU, small on the CPU'], ['large-v3-turbo', 'large-v3-turbo (best; ~1.6 GB)'],
+        ['small', 'small (faster on CPU; ~0.5 GB)'], ['medium', 'medium (~1.5 GB)']].map(([k, l]) => `<option value="${k}" ${ai.asr_model === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <label class="check" style="margin-top:16px"><input type="checkbox" data-change="local-only" ${ai.local_only ? 'checked' : ''}>
       <span><b style="font-weight:500">Local only</b>: never send anything to a cloud AI (Claude, Gemini, hosted open-weight models)</span></label>
     <div class="actions"><button class="btn-text" data-act="local-check">Check again</button></div>
@@ -1498,7 +1530,19 @@ function drawerDetails(v) {
     if (det.status !== 'unavailable') loadDetails(v.video_id);
     return `<span class="field-label">Details</span><div class="kv-line">${head}${det.status === 'unavailable' || det.status === 'failed' ? ` · ${fetchBtn('Try again')}` : ''}</div>`;
   }
-  return `<span class="field-label">Details</span><div class="kv-line">${head} · ${fetchBtn('Refresh')}</div>
+  const asrBtn = label => `<button class="btn-text" style="padding:0;height:auto" data-act="asr-one" data-id="${esc(v.video_id)}" data-job-btn ${S.data.job.running ? 'disabled' : ''}>${label}</button>`;
+  const job = det.asr;
+  const asrLine = det.sources.length > 1
+    ? `<div style="margin-top:10px"><span class="field-label">Transcript used for search, ratings and summaries</span>
+        <div class="seg" style="max-width:360px">${[['captions', 'YouTube captions'], ['local-asr', `Local (Whisper${det.asr_language ? ', ' + esc(det.asr_language) : ''})`]].map(([k, l]) =>
+          `<button data-act="transcript-source" data-id="${esc(v.video_id)}" data-source="${k}" class="${full.transcript === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>`
+    : job && ['queued', 'downloading', 'transcribing'].includes(job.status) && S.data.job.running && S.data.job.kind === 'asr'
+      ? `<div class="kv-line">Transcribing locally: ${esc(job.status)}${job.progress ? ` ${Math.round(job.progress * 100)}%` : ''}…</div>`
+    : det.asr_reason
+      ? `<div class="kv-line">${det.asr_reason === 'wrong_script' ? 'These captions look like the wrong script for the spoken language.' : 'No captions.'}
+          ${job?.status === 'failed' ? `Last try failed: ${esc((job.error || '').slice(0, 120))}. ` : ''}${asrBtn('Transcribe locally')}</div>` : '';
+  return `<span class="field-label">Details</span><div class="kv-line">${head}${det.sources.includes('local-asr') && det.sources.length === 1 ? ' · local transcript' : ''} · ${fetchBtn('Refresh')}</div>
+    ${asrLine}
     ${full.chapters.length ? `<div style="margin-top:10px">${full.chapters.map(c => `<button class="chap" data-act="seek" data-t="${Math.floor(c.start)}"><time>${clock(c.start)}</time><span>${esc(c.title)}</span></button>`).join('')}</div>` : ''}
     ${full.description ? `<details style="margin-top:12px"><summary>Description</summary><p class="desc-text">${esc(full.description)}</p></details>` : ''}
     ${full.segments.length ? `<details style="margin-top:10px"><summary>Transcript · ${plural(full.segments.length, 'line')}</summary>
@@ -1586,6 +1630,21 @@ document.addEventListener('click', async e => {
     }
     case 'more': S.limit += 150; renderList(); break;
     case 'seek': seek(+el.dataset.t); break;
+    case 'asr-run': case 'asr-one': {
+      try {
+        await api('/api/asr', act === 'asr-one' ? { ids: [id] } : {});
+        S.data.job = { running: true, log: '', kind: 'asr' };
+        if (route() === 'sources') updateJob(); else { toast('Transcribing locally…'); renderDrawer(); }
+        pollJob();
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'transcript-source':
+      try {
+        await api('/api/transcript/source', { id, source: el.dataset.source });
+        delete S.detailCache[id]; await load(); toast(el.dataset.source === 'local-asr' ? 'Using the local transcript' : 'Using YouTube captions');
+      } catch (err) { toast(err.message, true); }
+      break;
     case 'export-notes': el.closest('details')?.removeAttribute('open'); exportNotes(el.dataset.scope === 'sel' ? [...S.sel] : S.visible.map(v => v.video_id)); break;
     case 'tri-verdict': S.triage.verdict = el.dataset.v; refresh(); break;
     case 's-kind': S.search.kind = el.dataset.v; S.search.res = null; refresh(); runSearch(); break;
@@ -1747,6 +1806,9 @@ document.addEventListener('change', async e => {
     case 's-order': S.session.order = el.value; refresh(); break;
     case 't-cat': S.triage.cat = el.value; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
+    case 'asr-model':
+      try { await saveAi({ asr_model: el.value }); S.asrPlan = null; toast('Speech-to-text model saved'); } catch (err) { toast(err.message, true); }
+      break;
     case 'local-only':
       try { await saveAi({ local_only: el.checked }); refresh(); toast(el.checked ? 'Local only: cloud AIs are blocked' : 'Cloud AIs allowed again'); }
       catch (err) { el.checked = !el.checked; toast(err.message, true); }

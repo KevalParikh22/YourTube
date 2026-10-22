@@ -178,6 +178,17 @@ class Handler(BaseHTTPRequestHandler):
             name = safe_filename(v["title"]) + ".md"
             return self._send(200, video_markdown(v, storage.get_details(vid)), "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
+        if url.path == "/api/asr/plan":
+            import local_asr
+            cands = storage.videos_needing_asr()
+            dev = local_asr.device() if local_asr.available() else "cpu"
+            audio = sum(v.get("duration_seconds") or 0 for v in cands)
+            return self._json({
+                "available": local_asr.available(), "device": dev,
+                "model": local_asr.choose_model(llm.load_settings(), dev)[0],
+                "videos": len(cands), "no_captions": sum(v["reason"] == "no_captions" for v in cands),
+                "wrong_script": sum(v["reason"] == "wrong_script" for v in cands),
+                "audio_s": audio, "minutes": round(local_asr.estimate_minutes(audio, dev) + len(cands) * 10 / 60, 1)})
         if url.path == "/api/search":
             q = (qs.get("q") or [""])[0][:200]
             kinds = [k for k in (qs.get("kinds") or [""])[0].split(",") if k] or None
@@ -337,6 +348,21 @@ class Handler(BaseHTTPRequestHandler):
                 local_setup.use_model(model, tasks)
                 return self._json({"ok": True, "ai": llm.public_settings(llm.load_settings())})
 
+            if path == "/api/asr":
+                import local_asr
+                ids = body.get("ids")
+                if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
+                    return self._error("ids must be a list of video IDs")
+                if not local_asr.available():
+                    return self._error("Local transcription needs faster-whisper and ffmpeg: run bash scripts/setup.sh --local-ai")
+                if not JOB.start("asr", "Transcribe locally", lambda: local_asr.run_asr(ids, should_stop=JOB.stop_requested)):
+                    return self._error("Another task is already running", 409)
+                return self._json({"ok": True})
+
+            if path == "/api/transcript/source":
+                storage.set_transcript_source(_clean(body.get("id")) or "", _clean(body.get("source")) or "")
+                return self._json({"ok": True})
+
             if path in ("/api/rate", "/api/rate/estimate"):
                 import rater
                 ids = body.get("ids")
@@ -407,6 +433,8 @@ class Handler(BaseHTTPRequestHandler):
                 settings["auto_after_sync"] = bool(body["auto_after_sync"])
             if "local_only" in body:
                 settings["local_only"] = bool(body["local_only"])
+            if body.get("asr_model") in ("auto", "large-v3-turbo", "small", "medium", "distil-large-v3"):
+                settings["asr_model"] = body["asr_model"]
             if isinstance(body.get("interests"), str):
                 settings["interests"] = body["interests"].strip()[:2000]
             if isinstance(body.get("language"), str) and body["language"].strip():

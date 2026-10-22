@@ -40,7 +40,7 @@ class DashboardTest(unittest.TestCase):
     def test_state(self):
         code, state = self.call("/api/state")
         self.assertEqual(code, 200)
-        self.assertEqual(len(state["videos"]), 2)
+        self.assertTrue({"a", "b"} <= {v["video_id"] for v in state["videos"]})   # other tests share this DB
         self.assertIn("ai", state)
         self.assertFalse(state["ai"]["ready"])
 
@@ -169,3 +169,13 @@ class DashboardTest(unittest.TestCase):
         with urllib.request.urlopen(req) as r:
             self.assertEqual(r.headers["Content-Type"], "application/zip")
             self.assertEqual(r.read()[:2], b"PK")
+
+    def test_asr_endpoints(self):
+        code, plan = self.call("/api/asr/plan")
+        self.assertEqual(code, 200)
+        self.assertIn("videos", plan)
+        self.assertEqual(self.call("/api/transcript/source", {"id": "a", "source": "local-asr"})[0], 400)
+        self.assertEqual(self.call("/api/asr", {"ids": "a"})[0], 400)
+        code, r = self.call("/api/ai/settings", {"asr_model": "small"})
+        self.assertEqual(r["ai"]["asr_model"], "small")
+        self.call("/api/ai/settings", {"asr_model": "auto"})

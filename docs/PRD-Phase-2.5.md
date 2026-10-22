@@ -104,7 +104,11 @@ Measured on the library's 3 real videos: an 18 min talk with demo, a 2 h live-co
      - The first call takes about 66 s (model load). After that, about 30 s per rating with a transcript.
      - Found and fixed: the small model wrote timestamps in minutes when asked for seconds, and copied the numbers from the prompt's example. Ratings now ask for clock strings ("1:02:30", parsed in code) and the example uses placeholders.
      - Open: local scores bunch high (8–9 on three on-topic videos). Check this on a larger mixed playlist with interests filled in before trusting Skip verdicts from the local model.
-3. Local transcription (L1) on the shared job queue.
+3. Local transcription (L1) on the shared job queue. **Done 2026-10-22.**
+   - `local_asr.py`: original audio track; ffmpeg decode; Ollama unloaded; large-v3-turbo on the GPU or small on the CPU; audio deleted; cool-down pauses.
+   - `media_jobs` table; candidates by `no_captions` or `wrong_script`; captions and the local transcript kept side by side, with a per-video switch.
+   - Dashboard: a Playlists section with an estimate, a panel button and switch, and a model choice on the AI page. `requirements-local.txt` is installed by `setup.sh --local-ai`.
+   - Real run: the wrong-script video (LLM Fine-Tuning) was transcribed in English, 112 lines at 25× real time, with its captions kept. After switching it to the local transcript, search found English phrases that its Devanagari captions never matched.
 4. Visual content (L2): frames, dedupe, OCR and vision, then visual segments in search and summaries.
 
 Each step ships with tests and keeps the dashboard working.

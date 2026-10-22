@@ -36,6 +36,12 @@ if ($LocalAI) {
   try { Invoke-RestMethod http://localhost:11434/api/version -TimeoutSec 3 | Out-Null }
   catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 5 }
 
+  Write-Host "`n4b. Local transcription (faster-whisper)" -ForegroundColor White
+  & .venv\Scripts\python.exe -c "import faster_whisper" 2>$null
+  if ($LASTEXITCODE -and (Ask "Install local transcription (faster-whisper, about 1.2 GB with NVIDIA libraries)?")) {
+    & .venv\Scripts\python.exe -m pip install -q -r requirements-local.txt
+  }
+
   Write-Host "`n5. Model sized for this computer" -ForegroundColor White
   $model = if ($env:YTKB_MODEL) { $env:YTKB_MODEL } else { & .venv\Scripts\python.exe local_setup.py --recommended }
   Write-Host "  Recommended: $model"
