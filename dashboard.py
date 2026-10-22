@@ -508,7 +508,7 @@ class Handler(BaseHTTPRequestHandler):
                 if follow is not None and (not isinstance(follow, int) or isinstance(follow, bool)):
                     return self._error("follow_up_of must be a number")
                 if not llm.is_configured(llm.load_settings(), "ask"):
-                    return self._error("Choose an AI for questions and answers on the AI page first")
+                    return self._error("Choose an AI for questions and answers in Settings → AI first")
                 return self._json(asker.ask(question.strip()[:1000], filters=filters, follow_up_of=follow))
 
             if path == "/api/ask/delete":
@@ -566,7 +566,7 @@ class Handler(BaseHTTPRequestHandler):
                 if path == "/api/rate/estimate":
                     return self._json(rater.estimate(ids))
                 if not llm.is_configured(llm.load_settings(), "rate"):
-                    return self._error("Choose an AI for ratings on the AI page first")
+                    return self._error("Choose an AI for ratings in Settings → AI first")
                 return self._queued(JOB.start("rate", _label("Rate", ids), lambda: rater.run_rate(ids, should_stop=JOB.stop_requested), key=ids))
 
             if path == "/api/details/settings":
@@ -668,7 +668,7 @@ class Handler(BaseHTTPRequestHandler):
 
         if path in ("/api/ai/discover", "/api/ai/suggest"):
             if not llm.is_configured(llm.load_settings(), "categorize"):
-                return self._error("Set up an AI provider on the AI page first")
+                return self._error("Set up an AI provider in Settings → AI first")
             if path == "/api/ai/discover":
                 started = JOB.start("discover", "Propose categories", run_discover)
             else:

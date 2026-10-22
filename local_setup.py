@@ -162,7 +162,7 @@ def pull_model(model: str, should_stop: Callable[[], bool] = lambda: False) -> b
     except (urllib.error.URLError, OSError) as e:
         print(f"Error: Could not reach Ollama at {base}: {e}")
         return False
-    print(f"{model} is ready. Choose it on the AI page.")
+    print(f"{model} is ready. Choose it in Settings → AI.")
     return True
 
 
@@ -204,7 +204,7 @@ def main() -> None:
         raise SystemExit(0 if pull_model(args.pull) else 1)
     if args.use:
         use_model(args.use)
-        print(f"YourTube now uses Ollama · {args.use} by default (change it on the AI page).")
+        print(f"YourTube now uses Ollama · {args.use} by default (change it in Settings → AI).")
         return
     mark = lambda ok: "" if ok else "Warning: "
     print("YourTube local AI check")

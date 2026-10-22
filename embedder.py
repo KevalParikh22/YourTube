@@ -67,7 +67,7 @@ def run_embed(
         if not available(settings):
             if not quiet:
                 print(f"Meaning-based search is off: the embedding model {model} isn't in Ollama "
-                      f"(download it on the AI page or: ollama pull {model}). Keyword search still works.")
+                      f"(download it in Settings → AI or: ollama pull {model}). Keyword search still works.")
             return False
         base = settings["providers"]["ollama"].get("base_url")
         embed_fn = lambda texts: embed(texts, model, base)

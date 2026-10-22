@@ -126,7 +126,7 @@ AI is optional. Without it, categories come from keywords. With it you get propo
 
 ### Local AI (free, private, offline)
 
-Set it up with `bash scripts/setup.sh --local-ai`, or on the **AI** page → *Local AI on this computer* → **Download** → **Use**.
+Set it up with `bash scripts/setup.sh --local-ai`, or on **Settings → AI** → *Local AI on this computer* → **Download** → **Use**.
 
 | Your GPU memory | Recommended model | Download | Notes |
 |---|---|---|---|
@@ -134,16 +134,16 @@ Set it up with `bash scripts/setup.sh --local-ai`, or on the **AI** page → *Lo
 | 4 GB | `qwen3.5:4b` | 3.3 GB | Default recommendation; reads text and images |
 | Less than 4 GB, or CPU only | `qwen3.5:2b` | 2.7 GB | Faster, less accurate |
 
-Any Ollama model can be downloaded by name on the AI page (for example `gemma4:e2b`).
+Any Ollama model can be downloaded by name in Settings → AI (for example `gemma4:e2b`).
 
-- **Context size** (AI page → Ollama → Edit): how much transcript the model reads at once. The default is 8192 tokens. Larger values use more memory.
-- **Local only** (AI page): blocks every cloud AI, so nothing is sent off your computer.
+- **Context size** (Settings → AI → Ollama → Edit): how much transcript the model reads at once. The default is 8192 tokens. Larger values use more memory.
+- **Local only** (Settings → AI): blocks every cloud AI, so nothing is sent off your computer.
 
 ### Questions and search by meaning
 
 **Ask** and **Search → By meaning** match pieces by what they mean, in any language, using a small local embedding model. Without it they still work with keywords only.
 
-AI page → *Local AI on this computer* → **Meaning-based search**:
+Settings → AI → *Local AI on this computer* → **Meaning-based search**:
 - **Download** the embedding model (`qwen3-embedding:0.6b`, 0.64 GB, recommended; `qwen3-embedding:4b`, 2.5 GB, matches better but indexes about 5× slower). The index is built right after the download.
 - The status line shows how many pieces are indexed. The index updates by itself after syncs, details, transcription, slide reading and ratings; **Update index** does it now.
 - **Rebuild** embeds everything again (for example after an Ollama or model update). **Use** switches to another downloaded model and re-indexes the library with it; vectors from the old model are dropped.
@@ -156,7 +156,7 @@ For videos with **no captions**, or captions in the **wrong script** (for exampl
 
 - **Run it:** Playlists → *Video details and transcripts* → **Transcribe N videos locally** (shows the audio length and an estimate), or **Transcribe locally** in a video's panel.
 - **What happens:** only the original-language audio is downloaded, anonymously; the AI model is unloaded from the GPU; Whisper transcribes; and the audio is deleted.
-- **Speed (RTX 3050, 4 GB):** about 2.5 min per hour of audio on the GPU (`large-v3-turbo`), and about 10 min per hour on the CPU (`small`). Choose the model on the AI page (*Speech-to-text model*; Auto picks by device).
+- **Speed (RTX 3050, 4 GB):** about 2.5 min per hour of audio on the GPU (`large-v3-turbo`), and about 10 min per hour on the CPU (`small`). Choose the model in Settings → AI (*Speech-to-text model*; Auto picks by device).
 - **Both kept:** when a video already has captions, both transcripts are stored. The video panel's *Transcript used for search, ratings and summaries* switch picks which one counts. After switching, use **Rate again** to refresh that video's rating.
 - **Needs:** `faster-whisper` (installed by `scripts/setup.sh --local-ai`, or `pip install -r requirements-local.txt`) and ffmpeg.
 
@@ -166,14 +166,14 @@ Many tutorials put the real content on screen. YourTube can read it with the loc
 
 - **Choose videos:** tick **Has slides / whiteboard / on-screen code** in a video's panel, switch on **Slides** for a category (Categories page), or click **Mark N suggested videos** (Playlists page). Suggestions come from titles ("lecture", "explained", "system design"…) and from transcripts where the speaker refers to the screen.
 - **Run it:** Playlists → *Slides and whiteboards* → **Read slides for N videos**, or **Read slides now** in a video's panel.
-- **What happens:** only the video picture is downloaded (no audio), anonymously, at 480p (720p for small text: AI page → *Slide frame quality*). Frames are picked at scene changes and at least every 30 seconds, near-duplicates are dropped, and the vision model reads each frame, skipping frames of a person talking. The video is deleted; small thumbnails (a few KB each) are kept in `frames/`.
+- **What happens:** only the video picture is downloaded (no audio), anonymously, at 480p (720p for small text: Settings → AI → *Slide frame quality*). Frames are picked at scene changes and at least every 30 seconds, near-duplicates are dropped, and the vision model reads each frame, skipping frames of a person talking. The video is deleted; small thumbnails (a few KB each) are kept in `frames/`.
 - **What you get:** a clickable slide strip and the on-screen text in the video panel; a **Slides** filter in search; slide text in ratings and in exported notes.
 - **Speed (RTX 3050):** about 1.5–2 min per 10 min of video, plus the download.
-- **Vision model:** AI page → *Vision model (slides)*. Only models that can read images can be picked.
+- **Vision model:** Settings → AI → *Vision model (slides)*. Only models that can read images can be picked.
 
 ### Cloud AI
 
-On the **AI** page, click **Set up** next to a provider, paste the key, then **Save and test**. You can also set the key as an environment variable instead of saving it.
+On **Settings → AI**, click **Set up** next to a provider, paste the key, then **Save and test**. You can also set the key as an environment variable instead of saving it.
 
 | Provider | Key from | Environment variable | Example models |
 |---|---|---|---|
@@ -184,11 +184,13 @@ On the **AI** page, click **Set up** next to a provider, paste the key, then **S
 
 ### Which AI does what
 
-On the AI page under **Which AI does what**, pick a **Default** AI, then optionally a different one for **Categories**, **Ratings and summaries** and **Questions and answers**. Example: a free local model for categories and Claude for ratings. A rating run shows the estimated tokens and cost before it starts. **Questions and answers** uses the same AI as ratings unless you pick one.
+In Settings → AI under **Which AI does what**, pick a **Default** AI, then optionally a different one for **Categories**, **Ratings and summaries** and **Questions and answers**. Example: a free local model for categories and Claude for ratings. A rating run shows the estimated tokens and cost before it starts. **Questions and answers** uses the same AI as ratings unless you pick one.
 
-### About you
+### About you and display
 
-- **Interests** (AI page): what you want to learn. Ratings favour videos that match.
+Settings → **General**:
+- **Default playback speed** and **Theme** (kept in this browser).
+- **Interests:** what you want to learn. Ratings favour videos that match.
 - **Language:** summaries and rating reasons are written in this language (default English).
 
 ---
@@ -205,7 +207,7 @@ On the AI page under **Which AI does what**, pick a **Default** AI, then optiona
 | Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment. Tick **By meaning** to also find the same idea in other words or another language | — |
 | Ask a question across your videos | **Ask** → type the question → click a number in the answer to play that moment. Ask follow-ups below the answer ("and where does he show the code?"); **+ New question** starts over. Past conversations stay in the list on the right; **Export note** saves one as Markdown | — |
 | Ask about one video | Open the video → **Ask about this video** | — |
-| Category suggestions after sync | AI → About you → checkbox | `main.py <ID> --browser auto --ai` |
+| Category suggestions after sync | Settings → General → About you → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
 | Export notes for Obsidian / note apps (Markdown) | Library → Export → Notes (.zip), the selection bar's **Export notes**, or **Export note** in a video's panel | — |
 | Export your library | Library → Export → CSV or JSON | `curl -o library.csv "http://127.0.0.1:8765/api/export?format=csv"` (dashboard running) |
@@ -258,7 +260,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `YTKB_DB` | Use another database file (handy for testing) |
 | `YTKB_TAXONOMY` | Use another categories file |
 | `YTKB_SETTINGS` | Use another settings file |
-| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | API keys, used when no key is saved on the AI page |
+| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | API keys, used when no key is saved in Settings → AI |
 | `YTKB_MODEL` | Model the setup script downloads instead of the recommendation |
 
 ### Command-line reference
@@ -294,9 +296,9 @@ Your database is upgraded automatically when the dashboard starts. Back up `yt_k
 | "Confirm you're not a bot" during Fetch details | YouTube is rate-limiting. Wait an hour or two; progress is kept. |
 | Ollama "not running" | Run `ollama serve` (or `systemctl start ollama`). |
 | Local model very slow | The model doesn't fit in GPU memory. Pick a smaller one, or lower the context size. |
-| AI returns errors | AI page → **Save and test** shows the exact error. |
+| AI returns errors | Settings → AI → **Save and test** shows the exact error. |
 | Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai`, or `.venv/bin/python -m pip install -r requirements-local.txt` |
-| Local transcription very slow | It runs on the CPU: check the AI page's GPU line; with an NVIDIA GPU, reinstall `requirements-local.txt` for the CUDA libraries. |
+| Local transcription very slow | It runs on the CPU: check Settings → AI's GPU line; with an NVIDIA GPU, reinstall `requirements-local.txt` for the CUDA libraries. |
 | Answers say "keywords only" | The meaning index is off: download the embedding model (`ollama pull qwen3-embedding:0.6b`), then run `.venv/bin/python main.py --embed`. |
 | An answer misses something you know is in a video | Fetch details (or transcribe) for that video first. Try other words: the small local model links meanings well but not always (it misses "offline" for "running locally"). |
 | Dashboard won't start: port in use | `.venv/bin/python dashboard.py --port 8770` |

@@ -15,7 +15,7 @@ These need your eyes, your YouTube account or your hardware. Start the dashboard
 
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
-| 2.1 | Interests | AI → About you → write what you want to learn and what you don't → Save | Saved | |
+| 2.1 | Interests | Settings → General → About you → write what you want to learn and what you don't → Save | Saved | |
 | 2.2 | Ratings spread | Triage → Rate (on a mixed playlist, after Fetch details) | A mix of Watch / Skim / Skip, not everything 8–9 | |
 | 2.3 | Skip verdicts | Read 5–10 Skip reasons, and open a couple of the videos | You agree they're skippable; note any you disagree with | |
 | 2.4 | Skim ranges | Click a Skim range on a few videos | It lands on the part the reason describes | |
@@ -35,7 +35,7 @@ These need your eyes, your YouTube account or your hardware. Start the dashboard
 
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
-| 4.1 | Setup guide | Read the Setup page as if you were a new user | Clear; note anything missing or confusing | |
+| 4.1 | Setup guide | Read the Settings → Setup and help as if you were a new user | Clear; note anything missing or confusing | |
 | 4.2 | Windows script | On a Windows PC (if available): `scripts\setup.ps1 -LocalAI` | It sets up the app; report any error | |
 | 4.3 | Test data | Decide: remove the "Test Engineering Playlist" (`v1`–`v5`)? | Your call (removing it needs a one-off cleanup that you approve) | |
 | 4.4 | Write-back | Decide: create real `[YourTube]` playlists on your YouTube account, or keep queue links? | Your call | |

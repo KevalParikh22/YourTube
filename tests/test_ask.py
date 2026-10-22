@@ -205,7 +205,7 @@ class AskEndpointTest(unittest.TestCase):
         self.assertEqual(self.call("/api/ask", {"question": "  "})[0], 400)
         with mock.patch("llm.is_configured", return_value=False):
             code, r = self.call("/api/ask", {"question": "lora?"})
-        self.assertEqual((code, "AI page" in r["error"]), (400, True))
+        self.assertEqual((code, "Settings" in r["error"]), (400, True))
         with mock.patch("llm.is_configured", return_value=True), \
                 mock.patch("asker.ask", side_effect=lambda q, filters, follow_up_of: {"question": q, "filters": filters,
                                                                                     "follow": follow_up_of}) as fake:

@@ -198,7 +198,7 @@ def run_visual(
             return False
         if not model or not model_sees_images(base, model):
             print(f"Error: The vision model ({model or 'none'}) isn't available in Ollama or can't read images. "
-                  "Choose one on the AI page (e.g. qwen3.5:4b).")
+                  "Choose one in Settings → AI (e.g. qwen3.5:4b).")
             return False
         read = lambda path: read_frame(path, model, base)
     height = int(settings.get("visual_height") or 480)

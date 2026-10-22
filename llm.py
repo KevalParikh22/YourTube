@@ -322,7 +322,7 @@ def make_completer(settings: Dict[str, Any], task: Optional[str] = None) -> Call
     """Returns complete(system, prompt) -> text for the provider this task uses."""
     provider = provider_for(settings, task)
     if provider not in PROVIDERS:
-        raise LLMError("Choose an AI provider first (AI page in the dashboard)")
+        raise LLMError("Choose an AI provider first (Settings → AI in the dashboard)")
     cfg = dict(settings["providers"].get(provider, {}))
     key = _api_key(provider, cfg)
     if not cfg.get("model"):

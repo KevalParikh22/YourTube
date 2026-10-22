@@ -470,8 +470,6 @@
       <input type="search" id="gsearch" placeholder="Search everything" aria-label="Search titles, transcripts, chapters and notes">
       <a class="btn icon-btn" id="gsearch-btn" href="#/search" aria-label="Search" title="Search">⌕</a>
       <span id="jobs"></span>
-      <select id="speed" aria-label="Playback speed"></select>
-      <button class="btn icon-btn" id="theme" aria-label="Theme"></button>
     </div>
   </div>
 </header>
@@ -486,7 +484,7 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['', 'Library'], ['ask', 'Ask'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['ai', 'AI'], ['setup', 'Setup']];
+const TABS = [['', 'Library'], ['ask', 'Ask'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['settings', 'Settings']];
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
 const JOB_TEXT = {
@@ -647,11 +645,8 @@ function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); }
 function refresh() { const y = scrollY; renderView(); scrollTo(0, y); }
 function renderBar() {
   const r = route();
-  $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${r === k ? 'on' : ''}">${l}</a>`).join('');
-  $('#speed').innerHTML = SPEEDS.map(s => `<option value="${s}" ${s === S.speed ? 'selected' : ''}>${sx(s)}</option>`).join('');
-  $('#speed').title = 'Playback speed used for all times';
-  $('#theme').textContent = { auto: '◐', light: '○', dark: '●' }[S.theme];
-  $('#theme').title = `Theme: ${S.theme}`;
+  const tab = SETTINGS_PAGES.some(([k]) => k === r) ? 'settings' : r;
+  $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('');
 }
 function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
 function renderView() {
@@ -660,8 +655,9 @@ function renderView() {
   else if (r === 'triage') { v.innerHTML = videos().length ? viewTriage() : emptyState(); updateJob(); }
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
-  else if (r === 'ai') { v.innerHTML = viewAI(); updateJob(); if (!S.local) loadLocal(); }
-  else if (r === 'setup') { v.innerHTML = viewSetup(); if (!S.guide) loadGuide(); }
+  else if (r === 'settings') v.innerHTML = settingsNav(r) + viewGeneral();
+  else if (r === 'ai') { v.innerHTML = settingsNav(r) + viewAI(); updateJob(); if (!S.local) loadLocal(); }
+  else if (r === 'setup') { v.innerHTML = settingsNav(r) + viewSetup(); if (!S.guide) loadGuide(); }
   else if (r === 'ask') {
     const id = +routeParam('id') || null;
     if (id && !S.ask.thread.some(t => t.id === id) && !S.ask.busy) openAsk(id);
@@ -1348,7 +1344,7 @@ function renderSearchResults() {
   if (sr.res.short) { box.innerHTML = '<div class="empty">Type at least 3 letters.</div>'; return; }
   const list = sr.res.results.filter(r => byId(r.video_id));
   if (!list.length) { box.innerHTML = `<div class="empty">No matches for “${esc(sr.q)}”.</div>`; return; }
-  const off = sr.meaning && sr.res.mode === 'keyword' ? ' · meaning index is off, so these are keyword matches (AI page → download the embedding model)' : '';
+  const off = sr.meaning && sr.res.mode === 'keyword' ? ' · meaning index is off, so these are keyword matches (Settings → AI → download the embedding model)' : '';
   const exact = list.filter(r => r.exact).length, words = sr.q.trim().split(/\s+/).length > 1;
   box.innerHTML = `<div class="list-sum"><span>${plural(list.length, 'video')}${list.length >= 50 ? ' (top 50)' : ''}${sr.meaning ? ' · by meaning' : ''}${words && exact ? ` · ${exact} with the exact phrase` : ''}${off}</span></div>` + list.map((r, i) => {
     const v = byId(r.video_id);
@@ -1413,7 +1409,7 @@ function viewAsk() {
       <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched and skipped videos</span></label>`}
     </div>
     <p class="hint">${ready ? `Answered by ${esc(ai.uses.ask)}${local ? ', on this computer: about 5–30 s' : ''}.`
-      : 'Choose an AI for questions first: <a href="#/ai">AI page</a> → Which AI does what.'}
+      : 'Choose an AI for questions first: <a href="#/ai">Settings → AI</a> → Which AI does what.'}
       Answers use only your videos' transcripts, slides, chapters, summaries and notes. Click a number to play that moment.</p>`}
   </section>
   <div class="ask">
@@ -1513,8 +1509,6 @@ function viewSetup() {
   const win = S.data.platform === 'win32';
   return `
   <section>
-    <div class="eyebrow">Setup</div>
-    <h1 class="display">Install and configure<em>scripts, commands and settings</em></h1>
     <p class="lede" style="max-width:700px">Download the setup script, put it in the YourTube folder (the one with <code>dashboard.py</code>) and run it.
       It installs the app, and with the local AI option also Ollama and a model that fits the computer. It asks before installing anything system-wide.</p>
     <div class="dl-grid">
@@ -1591,9 +1585,7 @@ function viewAI() {
     </select>`;
   return `
   <section>
-    <div class="eyebrow">AI</div>
-    <h1 class="display">${ready.length ? plural(ready.length, 'AI') + ' ready' : 'No AI set up'}<em>${ai.ready ? 'default: ' + esc(ai.providers[ai.provider].label) : ''}</em></h1>
-    <p class="lede" style="max-width:700px">Set up as many as you like, cloud or local, and choose which one does each job. The AI only suggests and rates:
+    <p class="lede" style="max-width:700px"><b style="font-weight:600">${ready.length ? plural(ready.length, 'AI') + ' ready' : 'No AI set up yet'}${ai.ready ? ' · default: ' + esc(ai.providers[ai.provider].label) : ''}.</b> Set up as many as you like, cloud or local, and choose which one does each job. The AI only suggests and rates:
       nothing changes until you accept. Only titles, descriptions and transcripts are sent, never your cookies. Local models keep everything on this computer.</p>
   </section>
 
@@ -1616,6 +1608,19 @@ function viewAI() {
     </div>
     <p class="hint">Tip: a cheap or local model works well for categories. Ratings read whole transcripts, so a model with a large context window gives better ratings.
       Questions follow the ratings choice unless you pick one.</p>
+    <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
+  </section>`;
+}
+function viewGeneral() {
+  const ai = S.data.ai;
+  return `
+  <section class="section card">
+    <h2 class="h">Display</h2>
+    <div class="route" style="margin-top:8px"><span class="field-label" style="margin:0">Default playback speed</span>
+      <select data-change="speed" style="width:100%">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}${x === 1 ? ' (normal)' : ''}</option>`).join('')}</select></div>
+    <div class="route"><span class="field-label" style="margin:0">Theme</span>
+      <select data-change="theme" style="width:100%">${[['auto', 'Match this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<option value="${k}" ${S.theme === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <p class="hint">All watch times use the default speed. The Plan page can change it too. These are kept in this browser.</p>
   </section>
 
   <section class="section card">
@@ -1630,6 +1635,14 @@ function viewAI() {
         <span>After each playlist sync, suggest categories for new unsorted videos</span></label>
     </div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
+  </section>`;
+}
+const SETTINGS_PAGES = [['settings', 'General'], ['ai', 'AI'], ['setup', 'Setup and help']];
+function settingsNav(cur) {
+  return `<section>
+    <div class="eyebrow">Settings</div>
+    <h1 class="display">Settings<em>${{ settings: 'speed, theme and about you', ai: 'AI providers, local AI and search', setup: 'install, scripts and the guide' }[cur]}</em></h1>
+    <div class="chips" style="margin-top:16px">${SETTINGS_PAGES.map(([k, l]) => `<a class="chip ${cur === k ? 'on' : ''}" href="#/${k}" style="text-decoration:none">${l}</a>`).join('')}</div>
   </section>`;
 }
 async function loadLocal() {
@@ -1747,10 +1760,12 @@ function aiEditorBody(k) {
   return body;
 }
 function aiPrefsBody() {
+  return { interests: $('#ai-interests').value, language: $('#ai-lang').value, auto_after_sync: $('#ai-auto').checked };
+}
+function aiRoutesBody() {
   const tasks = {};
   for (const sel of $$('[data-ai-route]')) if (sel.dataset.aiRoute !== 'provider') tasks[sel.dataset.aiRoute] = sel.value || null;
-  return { provider: $('[data-ai-route="provider"]').value, tasks, interests: $('#ai-interests').value,
-           language: $('#ai-lang').value, auto_after_sync: $('#ai-auto').checked };
+  return { provider: $('[data-ai-route="provider"]').value, tasks };
 }
 async function saveAi(body) {
   const r = await api('/api/ai/settings', body);
@@ -2103,6 +2118,7 @@ document.addEventListener('click', async e => {
     case 'ai-edit': S.ai.provider = S.ai.provider === el.dataset.p ? null : el.dataset.p; S.ai.key = ''; refresh(); break;
     case 'ai-save': try { await saveAi(aiEditorBody(el.dataset.p)); refresh(); renderBar(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
     case 'ai-save-prefs': try { await saveAi(aiPrefsBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
+    case 'ai-save-routes': try { await saveAi(aiRoutesBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
     case 'ai-clear-key': try { await saveAi({ edit: el.dataset.p, config: { api_key: '__clear__' } }); refresh(); toast('Key removed'); } catch (err) { toast(err.message, true); } break;
     case 'ai-test': {
       const k = el.dataset.p, st = () => $('#ai-status');
@@ -2147,7 +2163,8 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const el = e.target, ch = el.dataset.change;
-  if (el.id === 'speed' || ch === 'speed') {
+  if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
+  if (ch === 'speed') {
     S.speed = +el.value; store.set('ytkb.speed', S.speed);
     renderBar(); refresh(); if (S.drawer) renderDrawer();
     return;
@@ -2249,10 +2266,6 @@ document.addEventListener('keydown', e => {
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); } });
 $('#gsearch').addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.value.trim()) { goSearch(e.target.value.trim()); e.target.value = ''; e.target.blur(); }
-});
-$('#theme').addEventListener('click', () => {
-  S.theme = { auto: 'light', light: 'dark', dark: 'auto' }[S.theme];
-  store.set('ytkb.theme', S.theme); applyTheme(); renderBar();
 });
 addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); renderBar(); renderView(); scrollTo(0, 0); } });
 
