@@ -1005,8 +1005,8 @@ function viewSources() {
   <section class="section card">
     <h2 class="h">Add or sync a playlist</h2>
     <div class="form-grid">
-      <div><label class="field-label" for="i-url">Playlist link or ID</label>
-        <input id="i-url" type="text" data-input="i-url" value="${esc(g.url)}" placeholder="youtube.com/playlist?list=…   or WL for Watch Later" style="width:100%"></div>
+      <div><label class="field-label" for="i-url">Playlist or video link</label>
+        <input id="i-url" type="text" data-input="i-url" value="${esc(g.url)}" placeholder="youtube.com/playlist?list=…, WL for Watch Later, or a single video link" style="width:100%"></div>
       <div><label class="field-label" for="i-access">Sign-in</label>
         <select id="i-access" data-change="i-access" style="width:100%">
           ${[...BROWSERS, ['public', 'None (public or unlisted)'], ['cookies', 'cookies.txt file']]
@@ -1035,8 +1035,8 @@ function viewSources() {
         <td class="r">${p.active_videos || 0}</td>
         <td class="r">${fmt(p.duration_seconds)}</td>
         <td class="muted">${esc(fmtDate(p.updated_at))}</td>
-        <td class="r" style="white-space:nowrap"><button class="btn btn-sm" data-act="resync" data-url="${esc(p.original_url || p.id)}">Sync</button>
-          ${/^[\w-]+$/.test(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}</td>
+        <td class="r" style="white-space:nowrap">${p.id === '_single' ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>' : `<button class="btn btn-sm" data-act="resync" data-url="${esc(p.original_url || p.id)}">Sync</button>`}
+          ${/^[\w-]+$/.test(p.id) && p.id !== '_single' ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : '<p class="note">No playlists yet. Add one above.</p>'}
   </section>`;
 }
@@ -1057,12 +1057,15 @@ function viewDetailsCard() {
       <span><b>${need}</b>still to fetch</span>
     </div>
     <div class="actions">
-      <button class="btn btn-dark btn-sm" data-act="details-fetch" data-job-btn ${running || !need ? 'disabled' : ''}>${need ? `Fetch details for ${plural(Math.min(need, 200), 'video')}` : 'All fetched'}</button>
+      <button class="btn btn-dark btn-sm" data-act="details-fetch" data-job-btn ${!need ? 'disabled' : ''}>${need ? `Fetch details for ${plural(Math.min(need, 200), 'video')}` : 'All fetched'}</button>
       ${need > 200 ? `<span class="faint" style="font-size:12.5px">200 per run (about ${Math.round(200 * 5 / 60)} min). Run again for the rest.</span>`
         : need ? `<span class="faint" style="font-size:12.5px">About ${Math.max(1, Math.round(need * 5 / 60))} min</span>` : ''}
     </div>
     <label class="check" style="margin-top:14px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
-      <span>After each sync, fetch details for new videos (up to 50)</span></label>
+      <span>After each sync, also fetch details for up to 50 new videos: their descriptions, chapters and captions.
+        Transcripts, search inside videos and good ratings all need them; without this, use the button above.</span></label>
+    <label class="check" style="margin-top:10px"><input type="checkbox" data-change="use-descriptions" ${S.data.use_descriptions ? 'checked' : ''}>
+      <span>Use video descriptions in search and for the AI. They come with the captions at no extra cost; turn this off if yours are mostly links and sponsor text.</span></label>
     ${viewAsr()}
     ${viewVisuals()}
   </section>`;
@@ -1080,7 +1083,7 @@ function viewVisuals() {
     ${!P.available ? `<div class="banner"><span>Needs Pillow and ffmpeg: <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
       : !P.model_ok ? `<div class="banner"><span>The vision model (${esc(P.model || 'none')}) isn't ready in Ollama or can't read images. <a href="#/ai">Choose one on the AI page</a>.</span></div>` : ''}
     <div class="actions">
-      ${P.videos ? `<button class="btn btn-dark btn-sm" data-act="vis-run" data-job-btn ${running || !P.available || !P.model_ok ? 'disabled' : ''}>Read slides for ${plural(P.videos, 'video')}</button>
+      ${P.videos ? `<button class="btn btn-dark btn-sm" data-act="vis-run" data-job-btn ${!P.available || !P.model_ok ? 'disabled' : ''}>Read slides for ${plural(P.videos, 'video')}</button>
         <span class="faint" style="font-size:12.5px">${fmt(P.seconds)} of video · about ${Math.max(1, Math.round(P.minutes))} min with ${esc(P.model)}</span>`
         : '<span class="faint" style="font-size:12.5px">No videos marked yet.</span>'}
     </div>
@@ -1247,7 +1250,7 @@ function viewCategories() {
       <button class="btn btn-dark btn-sm" data-act="reclassify">Save and re-sort</button>
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
       ${ai.ready_for.categorize ? `<button class="btn btn-sm" data-act="ai-discover" data-job-btn>Propose categories with AI</button>
-        <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${running || !toSort ? 'disabled' : ''} title="${toSort ? '' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort || ''} unsorted with AI</button>`
+        <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort || ''} unsorted with AI</button>`
         : `<a class="btn-text" href="#/ai">Set up AI sorting →</a>`}
       ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>`
         : fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
@@ -1824,7 +1827,9 @@ function renderDrawer() {
 function drawerRating(v) {
   const r = v.rating;
   if (!r) return S.data.ai.ready_for.rate
-    ? `<div class="kv-line">Not rated yet. <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate this video</button></div>` : '';
+    ? `<div class="kv-line">No AI summary yet: the summary, key points and a Watch / Skim / Skip verdict come together when a video is rated.
+        <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate and summarise this video</button></div>`
+    : `<div class="kv-line">No AI summary yet. <a href="#/ai">Choose an AI for ratings</a> to get summaries.</div>`;
   return `<div class="rate-box">
     <div class="tri-head"><span class="score-big">${r.score.toFixed(1)}</span>${badge(v).replace(/<b>.*?<\/b>/, '')}
       <span class="muted" style="font-size:13px">${esc(r.reason)}</span></div>
@@ -2051,7 +2056,7 @@ document.addEventListener('click', async e => {
       break;
     case 'ingest': {
       const url = S.ingest.url.trim();
-      if (!url) { toast('Paste a playlist link first', true); $('#i-url')?.focus(); break; }
+      if (!url) { toast('Paste a playlist or video link first', true); $('#i-url')?.focus(); break; }
       runIngest(url);
       break;
     }
@@ -2221,10 +2226,11 @@ document.addEventListener('change', async e => {
       try { await saveAi({ local_only: el.checked }); refresh(); toast(el.checked ? 'Local only: cloud AIs are blocked' : 'Cloud AIs allowed again'); }
       catch (err) { el.checked = !el.checked; toast(err.message, true); }
       break;
-    case 'transcripts': case 'details-after-sync':
+    case 'transcripts': case 'details-after-sync': case 'use-descriptions':
       try {
-        const r = await api('/api/details/settings', ch === 'transcripts' ? { category: el.dataset.name, on: el.checked } : { after_sync: el.checked });
-        S.data.transcripts = r.transcripts; S.data.details_after_sync = r.details_after_sync;
+        const r = await api('/api/details/settings', ch === 'transcripts' ? { category: el.dataset.name, on: el.checked }
+          : ch === 'use-descriptions' ? { use_descriptions: el.checked } : { after_sync: el.checked });
+        S.data.transcripts = r.transcripts; S.data.details_after_sync = r.details_after_sync; S.data.use_descriptions = r.use_descriptions;
       } catch (err) { el.checked = !el.checked; toast(err.message, true); }
       break;
     case 'preset':

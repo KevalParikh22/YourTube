@@ -200,6 +200,8 @@ Settings → **General**:
 | Task | Dashboard | Command line |
 |---|---|---|
 | Sync a playlist | Playlists → Sync | `.venv/bin/python main.py <ID> --browser auto` |
+| Add one video | Playlists → paste the video link → Sync. It goes to the source *Added one by one*, which only grows; its details are fetched right away | — |
+| See or manage running tasks | The status button in the header: what runs, what waits (Remove), recent results. Starting a task while another runs puts it in the queue | — |
 | Fetch descriptions, chapters and captions | Playlists → Video details → Fetch | `.venv/bin/python main.py --details 200` |
 | Rate videos (Watch / Skim / Skip) | Triage → Rate | — |
 | Read slides, whiteboards and on-screen code | Mark videos (panel, category **Slides** switch, or suggestions), then Playlists → Read slides | — |
@@ -244,6 +246,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `visuals.<category>` | off | Read slides for videos in this category |
 | `vision_model` | `""` | Ollama model that reads frames; empty means the Ollama text model |
 | `visual_height` | `480` | Frame quality for slide reading: `480` or `720` |
+| `use_descriptions` | `true` | Search video descriptions and send them to the AI (they are fetched with the captions either way) |
 | `embed_model` | `"qwen3-embedding:0.6b"` | Ollama model for meaning-based search and questions (Phase 2) |
 | `asr_model` | `"auto"` | Local speech-to-text model: `auto` (large-v3-turbo on a GPU, small on the CPU), `large-v3-turbo`, `small` or `medium` |
 | `interests` | `""` | What you want to learn (used by ratings) |

@@ -86,6 +86,8 @@ def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None
     videos = _videos()
     ok = {vid for vid, v in videos.items() if _allowed(v, filters)}
     kinds = set(filters.get("kinds") or []) or None
+    if kinds is None and llm.load_settings().get("use_descriptions", True) is False:
+        kinds = set(storage.SEARCH_KINDS) - {"description"}
 
     # Keywords
     keyword: List[int] = []

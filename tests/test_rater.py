@@ -153,3 +153,12 @@ class SkimAndAgeTest(unittest.TestCase):
         self.assertEqual(rater._date("20261010", today), "2026-10-10 (this month)")
         self.assertEqual(rater._date("20230101", today), "2023-01-01 (about 3.8 years ago)")
         self.assertEqual(rater._date(None, today), "unknown")
+
+
+class DescriptionSettingTest(unittest.TestCase):
+    def test_description_left_out_when_off(self):
+        v = {"title": "T", "channel": "C", "duration_seconds": 60, "description": "Sponsor links everywhere"}
+        on, _ = rater.build_prompt(v, [], {"language": "English"})
+        off, _ = rater.build_prompt(v, [], {"language": "English", "use_descriptions": False})
+        self.assertIn("Sponsor links", on)
+        self.assertNotIn("Sponsor links", off)

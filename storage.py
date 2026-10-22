@@ -241,11 +241,15 @@ def init_db(db_path: str = DB_PATH) -> None:
             _reindex(cursor, [r[0] for r in cursor.execute("SELECT video_id FROM videos")])
         conn.commit()
 
-def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], db_path: str = DB_PATH) -> Dict[str, int]:
+SINGLE_SOURCE = {"id": "_single", "title": "Added one by one", "url": ""}   # source for videos added by their own link
+
+def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], db_path: str = DB_PATH,
+                  partial: bool = False) -> Dict[str, int]:
     """
     Saves or updates a playlist and its videos.
     Keeps existing watch status, notes and manually locked categories.
-    Videos no longer present in the source are flagged removed, never deleted.
+    Videos no longer present in the source are flagged removed, never deleted. With partial=True (videos added one
+    by one) the list only adds: nothing is flagged removed and the totals count every video in the source.
     Returns counts: {'added', 'updated', 'removed'}.
     """
     init_db(db_path)
@@ -304,8 +308,15 @@ def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], d
 
         current_ids = [v['video_id'] for v in videos]
         removed = 0
+        if partial:
+            cursor.execute("""
+                UPDATE playlists SET
+                    total_videos = (SELECT COUNT(*) FROM playlist_items WHERE playlist_id = ?),
+                    total_duration_seconds = (SELECT COALESCE(SUM(v.duration_seconds), 0) FROM playlist_items i
+                                              JOIN videos v ON v.video_id = i.video_id WHERE i.playlist_id = ?)
+                WHERE id = ?""", (playlist_id, playlist_id, playlist_id))
         # An empty extraction is far more likely a fetch failure than an emptied playlist
-        if current_ids:
+        elif current_ids:
             cursor.execute("""
                 UPDATE playlist_items SET removed = 1
                 WHERE playlist_id = ? AND removed = 0

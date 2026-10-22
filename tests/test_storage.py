@@ -258,3 +258,15 @@ class SearchTest(unittest.TestCase):
         conn.close()
         storage.init_db(self.db)
         self.assertEqual(self.find("pasta")["results"][0]["video_id"], "b")
+
+
+class SingleVideoTest(unittest.TestCase):
+    def test_videos_added_one_by_one_are_never_flagged_removed(self):
+        db = temp_db()
+        storage.save_playlist(storage.SINGLE_SOURCE, [video("s1", "First", duration=100)], db_path=db, partial=True)
+        counts = storage.save_playlist(storage.SINGLE_SOURCE, [video("s2", "Second", duration=50)], db_path=db, partial=True)
+        self.assertEqual(counts["removed"], 0)
+        lib = {v["video_id"]: v for v in storage.get_library(db_path=db)}
+        self.assertTrue(lib["s1"]["in_source"] and lib["s2"]["in_source"])
+        pl = next(p for p in storage.get_playlists(db_path=db) if p["id"] == "_single")
+        self.assertEqual((pl["active_videos"], pl["duration_seconds"], pl["removed_videos"]), (2, 150, 0))

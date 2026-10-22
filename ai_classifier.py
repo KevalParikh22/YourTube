@@ -232,6 +232,9 @@ def run_suggest(scope: str = "unsorted") -> bool:
         return True
     taxonomy = load_taxonomy()
     context = storage.ai_context([v['video_id'] for v in videos], EXCERPT_CHARS)
+    if settings.get("use_descriptions", True) is False:
+        for c in context.values():
+            c.pop("description", None)
     videos = [{**v, **context.get(v['video_id'], {})} for v in videos]
     known = sum(1 for v in videos if v.get("summary") or v.get("description") or v.get("excerpt"))
     try:

@@ -77,7 +77,7 @@ def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings
     interests = (settings.get("interests") or "").strip() or "(not stated; infer from their categories)"
     cats = ", ".join(f"{c} (key interest)" if c in presets else c for c in settings.get("_categories", [])) or "(none)"
     minutes = round((video.get('duration_seconds') or 0) / 60)
-    desc = (video.get('description') or "").strip()[:1500]
+    desc = (video.get('description') or "").strip()[:1500] if settings.get("use_descriptions", True) is not False else ""
     chapters = "\n".join(f"[{_clock(c.get('start'))}] {c.get('title')}" for c in video.get('chapters') or [])
 
     slides = video.get("slides") or []

@@ -145,6 +145,33 @@ def _sync(url, browser, cookies_file):
 
 AFTER_SYNC_DETAILS_LIMIT = 50
 
+def _add_video(video_id):
+    """Adds one video by its link to the 'Added one by one' source, sorts it by keywords and fetches its details."""
+    from classifier import classify_playlist_videos
+    from extractor import extract_video
+    print(f"Step 1: Reading the video {video_id} (without your sign-in)")
+    try:
+        video = extract_video(video_id)
+    except Exception as e:
+        print(f"Error: could not read the video: {e}")
+        return False
+    print(f"   {video['title']} · {video['channel']} · {round(video['duration_seconds'] / 60)} min")
+    print("\nStep 2: Sorting into a category")
+    classify_playlist_videos([video])
+    print(f"   {video['category']}")
+    print("\nStep 3: Saving")
+    counts = storage.save_playlist(storage.SINGLE_SOURCE, [video], partial=True)
+    print("   Added to the library (source: Added one by one)." if counts["added"] else "   Already in the library; refreshed.")
+    settings = llm.load_settings()
+    if settings.get("auto_after_sync") and llm.is_configured(settings, "categorize"):
+        from ai_classifier import run_suggest
+        print()
+        run_suggest("unsorted")
+    from enrich import run_enrich
+    print()
+    run_enrich(video_ids=[video_id], should_stop=JOB.stop_requested)   # its details now; a failure here doesn't fail the add
+    return True
+
 def _label(action, ids):
     """Task label: 'Rate: 3 videos', 'Rate: <title>' for one video, or the action alone for 'everything that needs it'."""
     if ids is None:
@@ -189,6 +216,7 @@ def build_state():
         "transcripts": _transcript_categories(settings),
         "visual_categories": _visual_categories(settings),
         "details_after_sync": bool(settings.get("details_after_sync")),
+        "use_descriptions": settings.get("use_descriptions", True) is not False,
         "platform": sys.platform,
     }
 
@@ -329,6 +357,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/search":
             q = (qs.get("q") or [""])[0][:200]
             kinds = [k for k in (qs.get("kinds") or [""])[0].split(",") if k in storage.SEARCH_KINDS] or None
+            if kinds is None and llm.load_settings().get("use_descriptions", True) is False:
+                kinds = [k for k in storage.SEARCH_KINDS if k != "description"]
             if (qs.get("meaning") or ["0"])[0] == "1":
                 import retrieval
                 return self._json(retrieval.search_by_meaning(q, kinds))
@@ -429,6 +459,10 @@ class Handler(BaseHTTPRequestHandler):
                 url = _clean(body.get("url"))
                 if not url:
                     return self._error("Playlist URL or ID is required")
+                from extractor import video_id_from_url
+                vid = video_id_from_url(url)
+                if vid:   # a link to one video: added on its own, read without the sign-in
+                    return self._queued(JOB.start("sync", f"Add video {vid}", lambda: _add_video(vid), key=vid))
                 access = body.get("access") or "public"
                 browser = cookies = None
                 if access == "browser":
@@ -573,12 +607,15 @@ class Handler(BaseHTTPRequestHandler):
                 settings = llm.load_settings()
                 if "after_sync" in body:
                     settings["details_after_sync"] = bool(body["after_sync"])
+                if "use_descriptions" in body:
+                    settings["use_descriptions"] = bool(body["use_descriptions"])
                 name = _clean(body.get("category"))
                 if name:
                     settings.setdefault("transcripts", {})[name] = bool(body.get("on"))
                 llm.save_settings(settings)
                 return self._json({"ok": True, "transcripts": _transcript_categories(settings),
-                                   "details_after_sync": bool(settings.get("details_after_sync"))})
+                                   "details_after_sync": bool(settings.get("details_after_sync")),
+                                   "use_descriptions": settings.get("use_descriptions", True) is not False})
         except ValueError as e:
             return self._error(str(e))
         except llm.LLMError as e:

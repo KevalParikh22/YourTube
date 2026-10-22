@@ -90,6 +90,7 @@ def default_settings() -> Dict[str, Any]:
         "vision_model": "",       # Ollama model that reads frames; empty = the Ollama text model
         "visual_height": 480,     # frame resolution for slide reading (720 for small text)
         "embed_model": "qwen3-embedding:0.6b",   # Ollama embedding model for meaning-based search (Phase 2)
+        "use_descriptions": True, # search video descriptions and send them to the AI (they are fetched either way)
     }
 
 def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
@@ -150,6 +151,7 @@ def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
         "vision_model": settings.get("vision_model") or "",
         "visual_height": int(settings.get("visual_height") or 480),
         "embed_model": settings.get("embed_model") or "qwen3-embedding:0.6b",
+        "use_descriptions": settings.get("use_descriptions", True) is not False,
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},
         "uses": {t: describe(settings, t) for t in TASKS},

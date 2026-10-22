@@ -3,6 +3,8 @@ Metadata extractor using yt-dlp.
 Extracts video metadata and exact durations non-destructively without downloading media.
 Supports public, unlisted, and private playlists (via browser cookies or cookies file).
 """
+import re
+
 import yt_dlp
 from typing import Dict, Any, List, Optional
 
@@ -29,6 +31,28 @@ def detect_browser() -> Optional[str]:
         if names & _LOGIN_COOKIES:
             return browser
     return None
+
+_VIDEO_URL = re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})(?![\w-])")
+
+def video_id_from_url(value: str) -> Optional[str]:
+    """The video ID when the text is a link to one video (not a playlist: a link with list= syncs the playlist)."""
+    value = (value or "").strip()
+    if "list=" in value:
+        return None
+    m = _VIDEO_URL.search(value)
+    return m.group(1) if m else None
+
+def extract_video(video_id: str) -> Dict[str, Any]:
+    """One video's title, channel and duration, read anonymously (per-video reads never use the sign-in)."""
+    opts = {"skip_download": True, "quiet": True, "no_warnings": True, "logger": _QuietLogger()}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+    if not info or not info.get("id"):
+        raise ValueError("YouTube did not return this video. It may be private, deleted or age-restricted.")
+    return {"video_id": info["id"], "title": info.get("title") or "Untitled Video",
+            "channel": info.get("uploader") or info.get("channel") or "Unknown Channel",
+            "duration_seconds": int(info.get("duration") or 0), "url": f"https://www.youtube.com/watch?v={info['id']}",
+            "position": 0, "category": "Uncategorized", "status": "unwatched"}
 
 def normalize_playlist_url(playlist_url: str) -> str:
     """Accepts a full URL, a bare playlist ID, or 'WL' / 'watch later'."""

@@ -210,3 +210,17 @@ class DashboardTest(unittest.TestCase):
         code, r = self.call("/api/ai/settings", {"embed_model": "qwen3-embedding:4b"})
         self.assertEqual(r["ai"]["embed_model"], "qwen3-embedding:4b")
         self.call("/api/ai/settings", {"embed_model": "qwen3-embedding:0.6b"})
+
+
+class AddVideoTest(unittest.TestCase):
+    def test_add_video_task(self):
+        from unittest import mock
+        fake = {"video_id": "abcdefghijk", "title": "Pasta recipe in 5 minutes", "channel": "Chef", "duration_seconds": 300,
+                "url": "https://www.youtube.com/watch?v=abcdefghijk", "position": 0, "category": "Uncategorized", "status": "unwatched"}
+        with mock.patch("extractor.extract_video", return_value=dict(fake)), mock.patch("enrich.run_enrich") as enrich:
+            self.assertTrue(dashboard._add_video("abcdefghijk"))
+        enrich.assert_called_once()
+        v = next(x for x in storage.get_library() if x["video_id"] == "abcdefghijk")
+        self.assertEqual([s["id"] for s in v["sources"]], ["_single"])
+        with mock.patch("extractor.extract_video", side_effect=ValueError("private")):
+            self.assertFalse(dashboard._add_video("zzzzzzzzzzz"))
