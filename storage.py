@@ -211,6 +211,18 @@ def init_db(db_path: str = DB_PATH) -> None:
             SELECT playlist_id, video_id, rowid FROM videos WHERE playlist_id IS NOT NULL
         """)
 
+        # Separate libraries: every playlist belongs to one; library 1 always exists
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS libraries (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        cursor.execute("INSERT OR IGNORE INTO libraries (id, name) VALUES (1, ?)", (DEFAULT_LIBRARY_NAME,))
+        if "library_id" not in _columns(cursor, "playlists"):
+            cursor.execute("ALTER TABLE playlists ADD COLUMN library_id INTEGER NOT NULL DEFAULT 1")
+
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_category ON videos(category)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_playlist ON videos(playlist_id)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_items_video ON playlist_items(video_id)")
@@ -242,9 +254,10 @@ def init_db(db_path: str = DB_PATH) -> None:
         conn.commit()
 
 SINGLE_SOURCE = {"id": "_single", "title": "Added one by one", "url": ""}   # source for videos added by their own link
+DEFAULT_LIBRARY_NAME = "My library"
 
 def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], db_path: str = DB_PATH,
-                  partial: bool = False) -> Dict[str, int]:
+                  partial: bool = False, library_id: Optional[int] = None) -> Dict[str, int]:
     """
     Saves or updates a playlist and its videos.
     Keeps existing watch status, notes and manually locked categories.
@@ -262,8 +275,8 @@ def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], d
         ).fetchall()}
 
         cursor.execute("""
-            INSERT INTO playlists (id, title, original_url, total_videos, total_duration_seconds, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO playlists (id, title, original_url, total_videos, total_duration_seconds, updated_at, library_id)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 original_url = COALESCE(NULLIF(excluded.original_url, ''), playlists.original_url),
@@ -275,7 +288,8 @@ def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], d
             playlist_info.get('title', 'Untitled Playlist'),
             playlist_info.get('url', ''),
             len(videos),
-            sum(v.get('duration_seconds', 0) for v in videos)
+            sum(v.get('duration_seconds', 0) for v in videos),
+            int(library_id or 1),   # only for a new playlist: a re-sync keeps the library it was moved to
         ))
 
         for idx, v in enumerate(videos):
@@ -382,10 +396,12 @@ def get_library(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
         cursor = conn.cursor()
         videos = {row['video_id']: {**dict(row), 'sources': []}
                   for row in cursor.execute("SELECT * FROM videos ORDER BY added_at, rowid")}
-        for row in cursor.execute("SELECT playlist_id, video_id, position, removed FROM playlist_items"):
+        for row in cursor.execute("SELECT i.playlist_id, i.video_id, i.position, i.removed, p.library_id FROM playlist_items i "
+                                  "LEFT JOIN playlists p ON p.id = i.playlist_id ORDER BY i.rowid"):
             v = videos.get(row['video_id'])
             if v is not None:
-                v['sources'].append({'id': row['playlist_id'], 'position': row['position'], 'removed': row['removed']})
+                v['sources'].append({'id': row['playlist_id'], 'position': row['position'], 'removed': row['removed'],
+                                     'library': row['library_id'] or 1})
         suggestions = {row['video_id']: {'category': row['category'], 'confidence': row['confidence']}
                        for row in cursor.execute("SELECT video_id, category, confidence FROM category_suggestions")}
         details = {row['video_id']: {'status': row['status'], 'caption_kind': row['caption_kind'],
@@ -417,7 +433,14 @@ def get_library(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
         v['suggestion'] = suggestions.get(v['video_id'])
         v['details'] = details.get(v['video_id'])
         v['in_source'] = any(not s['removed'] for s in v['sources'])
+        v['library'] = _video_library(v['sources'])
+        v['libraries'] = sorted({s['library'] for s in v['sources']}) or [1]
     return list(videos.values())
+
+def _video_library(sources: List[Dict[str, Any]]) -> int:
+    """A video's library: that of its first playlist still containing it, else its first playlist, else 1."""
+    live = [s for s in sources if not s['removed']]
+    return (live or sources or [{'library': 1}])[0]['library'] or 1
 
 def get_playlists(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     """Lists ingested playlists with live (non-removed) counts and durations."""
@@ -425,7 +448,7 @@ def get_playlists(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT p.id, p.title, p.original_url, p.created_at, p.updated_at,
+            SELECT p.id, p.title, p.original_url, p.created_at, p.updated_at, p.library_id,
                    SUM(CASE WHEN pi.removed = 0 THEN 1 ELSE 0 END) AS active_videos,
                    SUM(CASE WHEN pi.removed = 1 THEN 1 ELSE 0 END) AS removed_videos,
                    SUM(CASE WHEN pi.removed = 0 THEN v.duration_seconds ELSE 0 END) AS duration_seconds
@@ -527,26 +550,34 @@ def reclassify_videos(
         conn.commit()
         return changed
 
-def rename_category(old: str, new: str, db_path: str = DB_PATH) -> int:
-    """Renames a category on every video that carries it (lock state is preserved)."""
+def _only(video_ids: Optional[Iterable[str]]) -> tuple:
+    """SQL condition and parameter limiting a statement to some videos (None = all)."""
+    if video_ids is None:
+        return "", ()
+    return " AND video_id IN (SELECT value FROM json_each(?))", (json.dumps(list(video_ids)),)
+
+def rename_category(old: str, new: str, db_path: str = DB_PATH, video_ids: Optional[Iterable[str]] = None) -> int:
+    """Renames a category on every video (or the given ones, e.g. one library's) that carries it; locks are kept."""
+    cond, extra = _only(video_ids)
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
-        cursor.execute("UPDATE videos SET category = ? WHERE category = ?", (new, old))
+        cursor.execute("UPDATE videos SET category = ? WHERE category = ?" + cond, (new, old, *extra))
         n = cursor.rowcount
-        cursor.execute("UPDATE category_suggestions SET category = ? WHERE category = ?", (new, old))
+        cursor.execute("UPDATE category_suggestions SET category = ? WHERE category = ?" + cond, (new, old, *extra))
         conn.commit()
         return n
 
-def release_category(name: str, db_path: str = DB_PATH) -> int:
-    """Moves a deleted category's videos to the fallback category and unlocks them."""
+def release_category(name: str, db_path: str = DB_PATH, video_ids: Optional[Iterable[str]] = None) -> int:
+    """Moves a deleted category's videos (all, or the given ones) to the fallback category and unlocks them."""
+    cond, extra = _only(video_ids)
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE videos SET category = ?, category_locked = 0, category_source = 'keywords' WHERE category = ?",
-            (FALLBACK_CATEGORY, name)
+            "UPDATE videos SET category = ?, category_locked = 0, category_source = 'keywords' WHERE category = ?" + cond,
+            (FALLBACK_CATEGORY, name, *extra)
         )
         n = cursor.rowcount
-        cursor.execute("DELETE FROM category_suggestions WHERE category = ?", (name,))
+        cursor.execute("DELETE FROM category_suggestions WHERE category = ?" + cond, (name, *extra))
         conn.commit()
         return n
 
@@ -1335,3 +1366,72 @@ def delete_ask(ask_id: int, db_path: str = DB_PATH) -> int:
                          (int(ask_id),)).rowcount
         conn.commit()
         return n
+
+
+# --- Libraries ------------------------------------------------------------------------------
+
+def get_libraries(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """[{'id', 'name', 'playlists'}], library 1 first."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return [dict(r) for r in conn.execute("""
+            SELECT l.id, l.name, COUNT(p.id) AS playlists FROM libraries l LEFT JOIN playlists p ON p.library_id = l.id
+            GROUP BY l.id ORDER BY l.id""")]
+
+def _library_name(name: Any) -> str:
+    name = " ".join(str(name or "").split())[:40]
+    if not name:
+        raise ValueError("Give the library a name")
+    return name
+
+def create_library(name: str, db_path: str = DB_PATH) -> int:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        try:
+            cur = conn.execute("INSERT INTO libraries (name) VALUES (?)", (_library_name(name),))
+        except sqlite3.IntegrityError:
+            raise ValueError("A library with that name already exists") from None
+        conn.commit()
+        return cur.lastrowid
+
+def rename_library(library_id: int, name: str, db_path: str = DB_PATH) -> None:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        try:
+            n = conn.execute("UPDATE libraries SET name = ? WHERE id = ?", (_library_name(name), int(library_id))).rowcount
+        except sqlite3.IntegrityError:
+            raise ValueError("A library with that name already exists") from None
+        if not n:
+            raise ValueError("Unknown library")
+        conn.commit()
+
+def delete_library(library_id: int, db_path: str = DB_PATH) -> None:
+    """Deletes an empty library (move its playlists first). Library 1 always stays."""
+    init_db(db_path)
+    if int(library_id) == 1:
+        raise ValueError("The first library can't be deleted; rename it instead")
+    with get_connection(db_path) as conn:
+        if conn.execute("SELECT 1 FROM playlists WHERE library_id = ?", (int(library_id),)).fetchone():
+            raise ValueError("Move this library's playlists to another library first")
+        if not conn.execute("DELETE FROM libraries WHERE id = ?", (int(library_id),)).rowcount:
+            raise ValueError("Unknown library")
+        conn.commit()
+
+def set_playlist_library(playlist_id: str, library_id: int, db_path: str = DB_PATH) -> None:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        if not conn.execute("SELECT 1 FROM libraries WHERE id = ?", (int(library_id),)).fetchone():
+            raise ValueError("Unknown library")
+        if not conn.execute("UPDATE playlists SET library_id = ? WHERE id = ?", (int(library_id), playlist_id)).rowcount:
+            raise ValueError("Unknown playlist")
+        conn.commit()
+
+def playlist_library(playlist_id: str, db_path: str = DB_PATH) -> Optional[int]:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        r = conn.execute("SELECT library_id FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+        return r[0] if r else None
+
+def video_libraries(db_path: str = DB_PATH) -> Dict[str, int]:
+    """{video_id: library} for every video (see _video_library)."""
+    return {v['video_id']: v['library'] for v in get_library(db_path)}

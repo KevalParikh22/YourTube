@@ -109,6 +109,28 @@ def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
     ollama["base_url"] = ollama_base(ollama.get("base_url"))
     return s
 
+# Settings each library has its own copy of (separate libraries). Library 1 keeps them at the top of
+# settings.json, as before libraries existed; library N keeps them under settings["libraries"]["N"].
+LIBRARY_KEYS = {"presets": list, "category_notes": dict, "proposal": lambda: None, "interests": str}
+
+def library_settings(settings: Dict[str, Any], library: Optional[int] = None) -> Dict[str, Any]:
+    """{'presets', 'category_notes', 'proposal', 'interests'} for a library."""
+    if not library or int(library) == 1:
+        return {k: settings.get(k, make()) for k, make in LIBRARY_KEYS.items()}
+    own = (settings.get("libraries") or {}).get(str(int(library))) or {}
+    return {k: own.get(k, make()) for k, make in LIBRARY_KEYS.items()}
+
+def set_library_settings(settings: Dict[str, Any], library: Optional[int], **values: Any) -> None:
+    values = {k: v for k, v in values.items() if k in LIBRARY_KEYS}
+    if not library or int(library) == 1:
+        settings.update(values)
+    else:
+        settings.setdefault("libraries", {}).setdefault(str(int(library)), {}).update(values)
+
+def for_library(settings: Dict[str, Any], library: Optional[int]) -> Dict[str, Any]:
+    """A copy of the settings as seen from one library (its presets, notes, proposal and interests)."""
+    return {**settings, **library_settings(settings, library)}
+
 def ollama_base(url: Optional[str]) -> str:
     url = (url or "http://localhost:11434").rstrip("/")
     return url[:-3] if url.endswith("/v1") else url
@@ -125,8 +147,9 @@ def _api_key(provider: str, cfg: Dict[str, Any]) -> str:
     env = PROVIDERS[provider].get("env")
     return (cfg.get("api_key") or "").strip() or (os.environ.get(env, "") if env else "")
 
-def public_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
-    """Settings safe to send to the browser: keys are replaced by where they come from."""
+def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> Dict[str, Any]:
+    """Settings safe to send to the browser (keys are replaced by where they come from), as seen from one library."""
+    settings = for_library(settings, library)
     providers = {}
     for k, p in PROVIDERS.items():
         cfg = settings["providers"].get(k, {})

@@ -201,6 +201,7 @@ Settings → **General**:
 |---|---|---|
 | Sync a playlist | Playlists → Sync | `.venv/bin/python main.py <ID> --browser auto` |
 | Add one video | Playlists → paste the video link → Sync. It goes to the source *Added one by one*, which only grows; its details are fetched right away | — |
+| Separate libraries (e.g. Tech, Health, Personal) | Playlists → **Libraries** → Create; move playlists with the Library column; switch at the top of the page. Each library has its own categories, interests, time left, triage and answers | — |
 | See or manage running tasks | The status button in the header: what runs, what waits (Remove), recent results. Starting a task while another runs puts it in the queue | — |
 | Fetch descriptions, chapters and captions | Playlists → Video details → Fetch | `.venv/bin/python main.py --details 200` |
 | Rate videos (Watch / Skim / Skip) | Triage → Rate | — |

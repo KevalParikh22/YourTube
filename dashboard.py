@@ -132,10 +132,13 @@ class Job:
             self.done.insert(0, {k: self.state.get(k) for k in ("id", "kind", "label", "ok", "stopped", "started_at", "finished_at")})
             del self.done[self.HISTORY:]
 
-def _sync(url, browser, cookies_file):
+def _library_name(library):
+    return next((l["name"] for l in storage.get_libraries() if l["id"] == library), "all libraries")
+
+def _sync(url, browser, cookies_file, library=1):
     from main import run_pipeline  # deferred so the dashboard starts even if yt-dlp is missing
     settings = llm.load_settings()
-    ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False,
+    ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False, library=library,
                       ai_suggest=settings["auto_after_sync"] and llm.is_configured(settings, "categorize"))
     if ok and settings.get("details_after_sync"):
         from enrich import run_enrich
@@ -145,7 +148,7 @@ def _sync(url, browser, cookies_file):
 
 AFTER_SYNC_DETAILS_LIMIT = 50
 
-def _add_video(video_id):
+def _add_video(video_id, library=1):
     """Adds one video by its link to the 'Added one by one' source, sorts it by keywords and fetches its details."""
     from classifier import classify_playlist_videos
     from extractor import extract_video
@@ -157,10 +160,11 @@ def _add_video(video_id):
         return False
     print(f"   {video['title']} · {video['channel']} · {round(video['duration_seconds'] / 60)} min")
     print("\nStep 2: Sorting into a category")
-    classify_playlist_videos([video])
+    classify_playlist_videos([video], load_taxonomy(library=library))
     print(f"   {video['category']}")
     print("\nStep 3: Saving")
-    counts = storage.save_playlist(storage.SINGLE_SOURCE, [video], partial=True)
+    source = storage.SINGLE_SOURCE if library == 1 else {**storage.SINGLE_SOURCE, "id": f"_single-{library}"}
+    counts = storage.save_playlist(source, [video], partial=True, library_id=library)
     print("   Added to the library (source: Added one by one)." if counts["added"] else "   Already in the library; refreshed.")
     settings = llm.load_settings()
     if settings.get("auto_after_sync") and llm.is_configured(settings, "categorize"):
@@ -194,25 +198,65 @@ def _pull_then_index(model):
 AUTO_EMBED_KINDS = {"sync", "details", "asr", "visual", "rate"}
 JOB = Job()
 
+def _all_category_names():
+    """Category names across every library, plus any still on a video."""
+    names = {v["category"] for v in storage.get_all_videos(include_removed=True)}
+    for lib in storage.get_libraries():
+        names |= set(load_taxonomy(library=lib["id"]))
+    return names
+
+def _library(value):
+    """A library id from a request: an existing library's id, else 1. 0 or 'all' means every library (None)."""
+    if value in (0, "0", "all"):
+        return None
+    try:
+        lib = int(value)
+    except (TypeError, ValueError):
+        return 1
+    return lib if any(l["id"] == lib for l in storage.get_libraries()) else 1
+
+def _library_videos(library):
+    """IDs of the videos in a library."""
+    return [vid for vid, lib in storage.video_libraries().items() if lib == library]
+
+def _reclassify(library=None, ids=None, unlock=False):
+    """Keyword re-sorting with each video's own library's categories. Returns how many changed."""
+    libs = storage.video_libraries()
+    targets = list(ids) if ids is not None else [v for v, l in libs.items() if library is None or l == library]
+    by_lib = {}
+    for vid in targets:
+        by_lib.setdefault(libs.get(vid, 1), []).append(vid)
+    return sum(storage.reclassify_videos(_classifier(lib), vids, unlock=unlock) for lib, vids in by_lib.items())
+
 def _transcript_categories(settings):
     from enrich import transcripts_wanted
-    names = set(load_taxonomy()) | {v["category"] for v in storage.get_all_videos(include_removed=True)}
-    return {n: transcripts_wanted(n, settings) for n in sorted(names)}
+    return {n: transcripts_wanted(n, settings) for n in sorted(_all_category_names())}
 
 def _visual_categories(settings):
-    names = set(load_taxonomy()) | {v["category"] for v in storage.get_all_videos(include_removed=True)}
+    names = _all_category_names()
     on = settings.get("visuals") or {}
     return {n: bool(on.get(n)) for n in sorted(names)}
 
-def build_state():
+def build_state(library=1):
+    """Everything the dashboard shows. Categories, presets, notes, the proposal and interests are those of `library`
+    (None = all libraries: categories are the union, and the rest are library 1's)."""
     settings = llm.load_settings()
+    if library is None:
+        taxonomy = {}
+        for lib in storage.get_libraries():
+            for name, kws in load_taxonomy(library=lib["id"]).items():
+                taxonomy.setdefault(name, kws)
+    else:
+        taxonomy = load_taxonomy(library=library)
     return {
+        "library": library or 0,
+        "libraries": storage.get_libraries(),
         "playlists": storage.get_playlists(),
         "videos": storage.get_library(),
-        "taxonomy": load_taxonomy(),
+        "taxonomy": taxonomy,
         "fallback_category": FALLBACK_CATEGORY,
         "job": JOB.snapshot(),
-        "ai": llm.public_settings(settings),
+        "ai": llm.public_settings(settings, library or 1),
         "transcripts": _transcript_categories(settings),
         "visual_categories": _visual_categories(settings),
         "details_after_sync": bool(settings.get("details_after_sync")),
@@ -290,7 +334,7 @@ class Handler(BaseHTTPRequestHandler):
             headers = {"Content-Disposition": f'attachment; filename="{name}"'} if url.path.startswith("/download/") else None
             return self._send(200, data, ctype, extra_headers=headers)
         if url.path == "/api/state":
-            return self._json(build_state())
+            return self._json(build_state(_library((qs.get("library") or ["1"])[0])))
         if url.path == "/api/job":
             return self._json(JOB.snapshot())
         if url.path == "/api/export/markdown":
@@ -399,11 +443,42 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/videos/update":
                 ids = body.get("ids") or []
                 if body.get("reset_category"):
-                    changed = storage.reclassify_videos(_classifier(), ids, unlock=True)
+                    changed = _reclassify(ids=ids, unlock=True)
                     return self._json({"ok": True, "changed": changed})
                 n = storage.update_videos(ids, status=body.get("status"),
                                           category=_clean(body.get("category")), notes=body.get("notes"))
                 return self._json({"ok": True, "updated": n})
+
+            lib = _library(body.get("library"))
+            if path in ("/api/taxonomy", "/api/categories/rename", "/api/categories/delete", "/api/reclassify",
+                        "/api/presets", "/api/ai/discover", "/api/ai/proposal/apply", "/api/ai/proposal/dismiss") and lib is None:
+                return self._error("Choose a library first: categories belong to one library")
+
+            if path == "/api/libraries":
+                action = body.get("action")
+                if action == "create":
+                    return self._json({"ok": True, "id": storage.create_library(body.get("name")), "libraries": storage.get_libraries()})
+                lib_id = body.get("id")
+                if not isinstance(lib_id, int) or isinstance(lib_id, bool):
+                    return self._error("id must be a number")
+                if action == "rename":
+                    storage.rename_library(lib_id, body.get("name"))
+                elif action == "delete":
+                    storage.delete_library(lib_id)
+                else:
+                    return self._error("Unknown action")
+                return self._json({"ok": True, "libraries": storage.get_libraries()})
+
+            if path == "/api/playlists/library":
+                target = body.get("library")
+                if not isinstance(target, int) or isinstance(target, bool):
+                    return self._error("library must be a number")
+                pid = _clean(body.get("id")) or ""
+                storage.set_playlist_library(pid, target)
+                # Its videos now sort with the new library's categories (ones set by hand or accepted keep theirs)
+                moved = [v["video_id"] for v in storage.get_library() if v["library"] == target and any(x["id"] == pid for x in v["sources"])]
+                changed = _reclassify(ids=moved)
+                return self._json({"ok": True, "playlists": storage.get_playlists(), "changed": changed})
 
             if path == "/api/taxonomy":
                 tax = body.get("taxonomy")
@@ -415,23 +490,27 @@ class Handler(BaseHTTPRequestHandler):
                     if not name or name == FALLBACK_CATEGORY:
                         continue
                     cleaned[name] = sorted({str(k).strip().lower() for k in (kws or []) if str(k).strip()})
-                save_taxonomy(cleaned)
+                save_taxonomy(cleaned, library=lib)
                 return self._json({"ok": True, "taxonomy": cleaned})
 
             if path == "/api/categories/rename":
                 old, new = _clean(body.get("old")), _clean(body.get("new"))
                 if not old or not new:
                     return self._error("Both old and new names are required")
-                tax = load_taxonomy()
+                tax = load_taxonomy(library=lib)
                 if new in tax and new != old:
                     return self._error(f'Category "{new}" already exists')
                 if old in tax:
                     tax = {(new if k == old else k): v for k, v in tax.items()}
-                    save_taxonomy(tax)
-                n = storage.rename_category(old, new)
+                    save_taxonomy(tax, library=lib)
+                n = storage.rename_category(old, new, video_ids=_library_videos(lib))
                 settings = llm.load_settings()
-                settings["presets"] = [new if p == old else p for p in settings["presets"]]
-                for key in ("category_notes", "transcripts", "visuals"):
+                own = llm.library_settings(settings, lib)
+                notes = dict(own["category_notes"])
+                if old in notes:
+                    notes[new] = notes.pop(old)
+                llm.set_library_settings(settings, lib, presets=[new if p == old else p for p in own["presets"]], category_notes=notes)
+                for key in ("transcripts", "visuals"):
                     if old in settings.get(key, {}):
                         settings[key][new] = settings[key].pop(old)
                 llm.save_settings(settings)
@@ -439,20 +518,22 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/categories/delete":
                 name = _clean(body.get("name"))
-                tax = load_taxonomy()
+                tax = load_taxonomy(library=lib)
                 tax.pop(name, None)
-                save_taxonomy(tax)
-                n = storage.release_category(name)
+                save_taxonomy(tax, library=lib)
+                n = storage.release_category(name, video_ids=_library_videos(lib))
                 settings = llm.load_settings()
-                settings["presets"] = [p for p in settings["presets"] if p != name]
-                settings["category_notes"].pop(name, None)
-                settings.get("transcripts", {}).pop(name, None)
-                settings.get("visuals", {}).pop(name, None)
+                own = llm.library_settings(settings, lib)
+                llm.set_library_settings(settings, lib, presets=[p for p in own["presets"] if p != name],
+                                         category_notes={k: v for k, v in own["category_notes"].items() if k != name})
+                if name not in _all_category_names():   # per-category switches are shared by name across libraries
+                    settings.get("transcripts", {}).pop(name, None)
+                    settings.get("visuals", {}).pop(name, None)
                 llm.save_settings(settings)
                 return self._json({"ok": True, "moved": n})
 
             if path == "/api/reclassify":
-                changed = storage.reclassify_videos(_classifier())
+                changed = _reclassify(lib)
                 return self._json({"ok": True, "changed": changed})
 
             if path == "/api/ingest":
@@ -462,7 +543,7 @@ class Handler(BaseHTTPRequestHandler):
                 from extractor import video_id_from_url
                 vid = video_id_from_url(url)
                 if vid:   # a link to one video: added on its own, read without the sign-in
-                    return self._queued(JOB.start("sync", f"Add video {vid}", lambda: _add_video(vid), key=vid))
+                    return self._queued(JOB.start("sync", f"Add video {vid}", lambda: _add_video(vid, lib or 1), key=vid))
                 access = body.get("access") or "public"
                 browser = cookies = None
                 if access == "browser":
@@ -473,10 +554,10 @@ class Handler(BaseHTTPRequestHandler):
                     cookies = _clean(body.get("cookies_file"))
                     if not cookies or not os.path.isfile(cookies):
                         return self._error("cookies.txt file not found")
-                return self._queued(JOB.start("sync", f"Sync {url}", lambda: _sync(url, browser, cookies)))
+                return self._queued(JOB.start("sync", f"Sync {url}", lambda: _sync(url, browser, cookies, lib or 1)))
 
             if path.startswith("/api/ai/") or path == "/api/presets":
-                return self._ai(path, body)
+                return self._ai(path, body, lib)
 
             if path == "/api/export/markdown":
                 ids = body.get("ids")
@@ -623,7 +704,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._error("Not found", 404)
 
     # --- AI ------------------------------------------------------------------------
-    def _ai(self, path, body):
+    def _ai(self, path, body, lib=1):
         from ai_classifier import run_discover, run_suggest
 
         if path == "/api/ai/settings":
@@ -672,11 +753,11 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("visual_height") in (480, 720):
                 settings["visual_height"] = body["visual_height"]
             if isinstance(body.get("interests"), str):
-                settings["interests"] = body["interests"].strip()[:2000]
+                llm.set_library_settings(settings, lib or 1, interests=body["interests"].strip()[:2000])
             if isinstance(body.get("language"), str) and body["language"].strip():
                 settings["language"] = body["language"].strip()[:40]
             llm.save_settings(settings)
-            return self._json({"ok": True, "ai": llm.public_settings(settings)})
+            return self._json({"ok": True, "ai": llm.public_settings(settings, lib or 1)})
 
         if path == "/api/ai/test":
             settings = llm.load_settings()
@@ -696,10 +777,10 @@ class Handler(BaseHTTPRequestHandler):
             if not name:
                 return self._error("Category name is required")
             settings = llm.load_settings()
-            presets = [p for p in settings["presets"] if p != name]
+            presets = [p for p in llm.library_settings(settings, lib)["presets"] if p != name]
             if body.get("preset"):
                 presets.append(name)
-            settings["presets"] = presets
+            llm.set_library_settings(settings, lib, presets=presets)
             llm.save_settings(settings)
             return self._json({"ok": True, "presets": presets})
 
@@ -707,12 +788,13 @@ class Handler(BaseHTTPRequestHandler):
             if not llm.is_configured(llm.load_settings(), "categorize"):
                 return self._error("Set up an AI provider in Settings → AI first")
             if path == "/api/ai/discover":
-                started = JOB.start("discover", "Propose categories", run_discover)
+                started = JOB.start("discover", f"Propose categories: {_library_name(lib)}", lambda: run_discover(library=lib), key=lib)
             else:
                 scope = body.get("scope") or "unsorted"
                 if scope not in ("unsorted", "unlocked"):
                     return self._error("Invalid scope")
-                started = JOB.start("suggest", "Suggest categories", lambda: run_suggest(scope))
+                started = JOB.start("suggest", "Suggest categories" + (f": {_library_name(lib)}" if lib else ""),
+                                    lambda: run_suggest(scope, library=lib), key=[scope, lib])
             return self._queued(started)
 
         if path == "/api/ai/proposal/apply":
@@ -720,9 +802,10 @@ class Handler(BaseHTTPRequestHandler):
             if not isinstance(cats, list):
                 return self._error("categories must be a list")
             remove = {_clean(n) for n in body.get("remove") or []}
-            old = load_taxonomy()
+            old = load_taxonomy(library=lib)
             settings = llm.load_settings()
-            tax, notes = {}, dict(settings["category_notes"])
+            own = llm.library_settings(settings, lib)
+            tax, notes = {}, dict(own["category_notes"])
             for c in cats:
                 name = _clean((c or {}).get("name"))
                 if not name or name == FALLBACK_CATEGORY or name in tax:
@@ -733,18 +816,18 @@ class Handler(BaseHTTPRequestHandler):
             for name, kws in old.items():
                 if name not in tax and name not in remove:
                     tax[name] = kws
-            save_taxonomy(tax)
-            moved = sum(storage.release_category(n) for n in remove if n not in tax)
-            settings["category_notes"] = {k: v for k, v in notes.items() if k in tax}
-            settings["presets"] = [p for p in settings["presets"] if p in tax]
-            settings["proposal"] = None
+            save_taxonomy(tax, library=lib)
+            ids = _library_videos(lib)
+            moved = sum(storage.release_category(n, video_ids=ids) for n in remove if n not in tax)
+            llm.set_library_settings(settings, lib, category_notes={k: v for k, v in notes.items() if k in tax},
+                                     presets=[p for p in own["presets"] if p in tax], proposal=None)
             llm.save_settings(settings)
-            changed = storage.reclassify_videos(_classifier())
+            changed = _reclassify(lib)
             return self._json({"ok": True, "categories": len(tax), "moved": moved, "changed": changed})
 
         if path == "/api/ai/proposal/dismiss":
             settings = llm.load_settings()
-            settings["proposal"] = None
+            llm.set_library_settings(settings, lib, proposal=None)
             llm.save_settings(settings)
             return self._json({"ok": True})
 
@@ -767,8 +850,8 @@ def _attachment(name):
 def _clean(value):
     return value.strip() if isinstance(value, str) else value
 
-def _classifier():
-    taxonomy = load_taxonomy()
+def _classifier(library=None):
+    taxonomy = load_taxonomy(library=library)
     return lambda title, channel: classify_video(title, channel, taxonomy)
 
 def main():

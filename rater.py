@@ -202,23 +202,37 @@ def rate_video(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: 
     return {**rating, "basis": basis, "language": settings.get("language") or "English"}
 
 
-def _context(settings: Dict[str, Any]) -> Dict[str, Any]:
+def _context(settings: Dict[str, Any], library: Optional[int] = None) -> Dict[str, Any]:
+    """Settings as one library sees them (its interests and presets) plus its category names."""
+    import llm
     from classifier import load_taxonomy
-    return {**settings, "_categories": list(load_taxonomy())}
+    return {**llm.for_library(settings, library), "_categories": list(load_taxonomy(library=library))}
+
+def _contexts(settings: Dict[str, Any]):
+    """context(video) -> the rating context of the video's library, built once per library."""
+    import storage
+    libs, cache = storage.video_libraries(), {}
+    def context(video):
+        lib = libs.get(video["video_id"], 1)
+        if lib not in cache:
+            cache[lib] = _context(settings, lib)
+        return cache[lib]
+    return context
 
 def estimate(video_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """What a rating run would send: videos, approximate tokens and price for the chosen model."""
     import llm
     import storage
 
-    settings = _context(llm.load_settings())
+    settings = llm.load_settings()
+    context = _contexts(settings)
     budget = llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE)
     videos = [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
     chars = with_transcript = 0
     for v in videos:
         segments = storage.get_segments(v['video_id'])
         with_transcript += bool(segments)
-        chars += len(build_prompt(v, segments, settings, budget=budget)[0]) + len(SYSTEM)
+        chars += len(build_prompt(v, segments, context(v), budget=budget)[0]) + len(SYSTEM)
     tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos)
     return {"videos": len(videos), "with_transcript": with_transcript, "tokens_in": tokens_in, "tokens_out": tokens_out,
             "cost": llm.estimate_cost(settings, "rate", tokens_in, tokens_out),
@@ -230,7 +244,8 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     import llm
     import storage
 
-    settings = _context(llm.load_settings())
+    settings = llm.load_settings()
+    context = _contexts(settings)
     videos = [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
     print(f"Rating {len(videos)} videos with {llm.describe(settings, 'rate')} (in {settings.get('language') or 'English'}).")
     if not videos:
@@ -253,7 +268,7 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
             print("Stopped. Ratings so far are saved.")
             break
         try:
-            rating = rate_video(v, storage.get_segments(v['video_id']), settings, complete, budget=budget)
+            rating = rate_video(v, storage.get_segments(v['video_id']), context(v), complete, budget=budget)
         except LLMError as e:
             failed += 1
             print(f"   [{n}/{len(videos)}] Warning: {v['title'][:60]}: {e}")

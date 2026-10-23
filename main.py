@@ -8,7 +8,7 @@ import os
 import argparse
 import webbrowser
 from extractor import extract_playlist_metadata
-from classifier import classify_playlist_videos
+from classifier import classify_playlist_videos, load_taxonomy
 from storage import save_playlist, get_all_videos, init_db
 from reporter import generate_markdown_report, generate_html_dashboard
 from metrics import calculate_category_metrics
@@ -18,7 +18,8 @@ def run_pipeline(
     browser_cookies: str = None,
     cookies_file: str = None,
     open_browser: bool = True,
-    ai_suggest: bool = False
+    ai_suggest: bool = False,
+    library: int = None
 ):
     print("\n" + "="*60)
     print("  YourTube — playlist sync")
@@ -61,11 +62,14 @@ def run_pipeline(
         print("   If the playlist is private, check that the browser/cookies you chose are logged into YouTube.")
         return False
 
+    # A playlist synced before stays in its library; a new one goes where it was added from
+    from storage import playlist_library
+    library = playlist_library(data['id']) or library or 1
     print("\nStep 2: Classifying videos into semantic categories...")
-    classify_playlist_videos(videos)
+    classify_playlist_videos(videos, load_taxonomy(library=library))
 
     print("\nStep 3: Saving metadata & state to local database (yt_kb.db)...")
-    counts = save_playlist(data, videos)
+    counts = save_playlist(data, videos, library_id=library)
     print(f"   Saved: {counts['added']} new, {counts['updated']} refreshed, "
           f"{counts['removed']} no longer in source (kept locally, flagged as removed).")
     if ai_suggest:

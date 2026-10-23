@@ -83,7 +83,7 @@ class StorageTest(unittest.TestCase):
         a = self.lib()["a"]
         self.assertEqual((a["status"], a["notes"], a["category"], a["category_locked"], a["category_source"]),
                          ("completed", "my notes", "Mine", 1, "manual"))
-        self.assertEqual(a["sources"], [{"id": "PL1", "position": 3, "removed": 0}])
+        self.assertEqual(a["sources"], [{"id": "PL1", "position": 3, "removed": 0, "library": 1}])   # old playlists join library 1
         storage.update_videos(["a"], status="skipped", db_path=self.db)
         self.assertEqual(self.lib()["a"]["status"], "skipped")
         storage.init_db(self.db)  # second run is a no-op

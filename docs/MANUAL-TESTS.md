@@ -61,6 +61,18 @@ YTKB_LIVE=1 ANTHROPIC_API_KEY=... GEMINI_API_KEY=... .venv/bin/python -m unittes
 | 5.8 | Cloud categories | Categories → Propose with AI and Sort unsorted with the cloud AI | Sensible results; compare with local | |
 | 5.9 | Local only | AI → tick Local only | Cloud AIs show as blocked; rating or asking with a cloud AI gives a clear message; nothing is sent | |
 
+## 7. Libraries, queue and settings (feedback round, 2026-10-23)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| 7.1 | Create a library | Playlists → Libraries → type "Health" → Create; move one or two playlists to it with the Library column | The header switcher shows Health; Library, Plan, Triage, Search and Ask show only its videos | |
+| 7.2 | Its own categories | In Health: Categories → Propose categories with AI → Apply; set Health interests in Settings → General | Health categories don't appear in My library; ratings in Health judge against Health interests | |
+| 7.3 | Queue | Start a transcription, then click Rate | Rate says "queued"; the header shows the running task and "+1 waiting"; Rate runs after | |
+| 7.4 | Finished state | Let a sync finish | The header turns green "Finished: …" and the page shows a Finished banner; a failure shows red with the error | |
+| 7.5 | Single video | Playlists → paste one video link → Sync | It appears in *Added one by one*, with details fetched | |
+| 7.6 | Search two words | Search "saying no" (and a phrase of your own) | Videos with the exact phrase first, then "With the words apart" | |
+| 7.7 | Skim | Rate a few long videos; click ▶ Skim | It starts at a useful part, not the intro | |
+
 ## 6. Ask your library (Phase 2)
 
 | # | Test | Steps | Expect | Result |

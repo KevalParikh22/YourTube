@@ -357,6 +357,7 @@
   .hist a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
   .hist a small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
   #jobs { position: relative; }
+  .libsel { height: 30px; max-width: 170px; margin-left: 12px; font-weight: 500; }
   .done-banner { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; }
   .done-banner.ok { background: var(--watch-bg); color: var(--watch); }
   .done-banner.bad { background: var(--skip-bg); color: var(--skip); }
@@ -465,6 +466,7 @@
 <header class="bar">
   <div class="bar-in">
     <a class="logo" href="#/">YourTube</a>
+    <span id="libpick"></span>
     <nav class="tabs" id="tabs"></nav>
     <div class="bar-right">
       <input type="search" id="gsearch" placeholder="Search everything" aria-label="Search titles, transcripts, chapters and notes">
@@ -518,6 +520,7 @@ const S = {
   drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   search: { q: '', kind: 'all', res: null, seq: 0, meaning: store.get('ytkb.meaning') === '1' },
+  lib: Number.isInteger(+store.get('ytkb.lib')) && store.get('ytkb.lib') !== null ? +store.get('ytkb.lib') : 1,   // 0 = all libraries
   ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '' },
 };
 
@@ -549,6 +552,7 @@ function stats(list) {
   return { n: list.length, total, rem, done, prog, left: list.length - done, unknown };
 }
 async function api(path, body) {
+  if (body && typeof body === 'object' && !Array.isArray(body) && !('library' in body) && S.data) body = { ...body, library: S.lib };
   const opts = body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-YTKB': '1' }, body: JSON.stringify(body) };
   const r = await fetch(path, opts);
   const j = await r.json().catch(() => ({}));
@@ -563,8 +567,12 @@ function toast(msg, bad) {
   clearTimeout(toastT);
   toastT = setTimeout(() => { t.className = bad ? 'bad' : ''; }, 2600);
 }
-const videos = () => S.data.videos;
-const byId = id => videos().find(v => v.video_id === id);
+// The current library's videos (a video saved in playlists of two libraries is in both); S.lib 0 = all libraries
+const videos = () => S.lib ? S.data.videos.filter(v => v.libraries.includes(S.lib)) : S.data.videos;
+const byId = id => S.data.videos.find(v => v.video_id === id);
+const libPlaylists = () => S.lib ? S.data.playlists.filter(p => p.library_id === S.lib) : S.data.playlists;
+const libName = id => (S.data.libraries.find(l => l.id === id) || {}).name || '';
+const isSingle = id => /^_single(-\d+)?$/.test(id);
 const FALLBACK = () => S.data.fallback_category;
 const playlistName = id => (S.data.playlists.find(p => p.id === id) || {}).title || id;
 const srcEntry = (v, src) => v.sources.find(s => s.id === src);
@@ -630,7 +638,8 @@ const route = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || '');
 const routeParam = name => new URLSearchParams(location.hash.split('?')[1] || '').get(name);
 async function load() {
   try {
-    S.data = await api('/api/state');
+    S.data = await api(`/api/state?library=${S.lib}`);
+    if (S.data.library !== S.lib) { S.lib = S.data.library; store.set('ytkb.lib', S.lib); }   // e.g. a deleted library
   } catch (e) {
     $('#view').innerHTML = `<div class="empty"><h2>The local server isn't running</h2>Start it with <code>python dashboard.py</code>, then reload this page.<p class="faint">${esc(e.message)}</p></div>`;
     return;
@@ -646,6 +655,9 @@ function refresh() { const y = scrollY; renderView(); scrollTo(0, y); }
 function renderBar() {
   const r = route();
   const tab = SETTINGS_PAGES.some(([k]) => k === r) ? 'settings' : r;
+  $('#libpick').innerHTML = S.data.libraries.length > 1 || S.lib !== 1
+    ? `<select data-change="lib" aria-label="Library" class="libsel">${S.data.libraries.map(l => `<option value="${l.id}" ${S.lib === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
+        <option value="0" ${S.lib === 0 ? 'selected' : ''}>All libraries</option></select>` : '';
   $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('');
 }
 function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
@@ -694,7 +706,7 @@ function viewLibrary() {
   const inSrc = videos().filter(v => !src || srcEntry(v, src));
   const scope = inSrc.filter(v => !cat || v.category === cat);
   const st = stats(scope);
-  const scopeName = [src ? playlistName(src) : (S.data.playlists.length > 1 ? 'All playlists' : 'Library'), cat].filter(Boolean).join(' · ');
+  const scopeName = [S.data.libraries.length > 1 ? (S.lib ? libName(S.lib) : 'All libraries') : '', src ? playlistName(src) : (libPlaylists().length > 1 ? 'All playlists' : (S.data.libraries.length > 1 ? '' : 'Library')), cat].filter(Boolean).join(' · ');
   const catCounts = {};
   for (const v of inSrc) if (statusFilter(v, status, src)) catCounts[v.category] = (catCounts[v.category] || 0) + 1;
   const viewCounts = Object.fromEntries(VIEWS.map(([k]) => [k, scope.filter(v => statusFilter(v, k, src)).length]));
@@ -721,16 +733,16 @@ function viewLibrary() {
         <a href="#/" data-act="v-cat" data-v="" class="${!cat ? 'on' : ''}"><span class="lbl">All categories</span></a>
         ${cats.map(c => `<a href="#/" data-act="v-cat" data-v="${esc(c)}" class="${cat === c ? 'on' : ''}"><span class="lbl">${esc(c)}</span><span class="c">${catCounts[c] || 0}</span></a>`).join('')}
       </div>
-      ${S.data.playlists.length > 1 || src ? `<div class="rail-group collapsible">
+      ${libPlaylists().length > 1 || src ? `<div class="rail-group collapsible">
         <h4>Playlists</h4>
         <a href="#/" data-act="v-src" data-v="" class="${!src ? 'on' : ''}"><span class="lbl">All playlists</span></a>
-        ${S.data.playlists.map(p => `<a href="#/" data-act="v-src" data-v="${esc(p.id)}" class="${src === p.id ? 'on' : ''}"><span class="lbl">${esc(p.title)}</span><span class="c">${p.active_videos || 0}</span></a>`).join('')}
+        ${libPlaylists().map(p => `<a href="#/" data-act="v-src" data-v="${esc(p.id)}" class="${src === p.id ? 'on' : ''}"><span class="lbl">${esc(p.title)}</span><span class="c">${p.active_videos || 0}</span></a>`).join('')}
       </div>` : ''}
       <div class="rail-group rail-pick">
         <select data-change="v-cat" aria-label="Category"><option value="">All categories</option>
           ${categoryNames().map(c => `<option value="${esc(c)}" ${cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-        ${S.data.playlists.length > 1 ? `<select data-change="v-src" aria-label="Playlist"><option value="">All playlists</option>
-          ${S.data.playlists.map(p => `<option value="${esc(p.id)}" ${src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>` : ''}
+        ${libPlaylists().length > 1 ? `<select data-change="v-src" aria-label="Playlist"><option value="">All playlists</option>
+          ${libPlaylists().map(p => `<option value="${esc(p.id)}" ${src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>` : ''}
       </div>
     </aside>
     <div>
@@ -975,6 +987,8 @@ async function triageUndo() {
   toast('Undone');
 }
 async function startRate(ids) {
+  if (!ids && S.lib) ids = videos().filter(v => !isDone(v) && !v.rating).map(v => v.video_id);   // only this library
+  if (ids && !ids.length) { toast('Nothing to rate in this library'); return; }
   try {
     const est = await api('/api/rate/estimate', ids ? { ids } : {});
     if (!est.videos) { toast('Nothing to rate'); return; }
@@ -989,7 +1003,7 @@ function playAt(id, t) { openDrawer(id); if (t) seek(t); }
 
 /* ---------------- playlists ---------------- */
 function viewSources() {
-  const g = S.ingest, job = S.data.job, pls = S.data.playlists;
+  const g = S.ingest, job = S.data.job, pls = libPlaylists(), many = S.data.libraries.length > 1;
   const winChromium = S.data.platform === 'win32' && /^(chrome|chromium|edge|brave)$/.test(g.access);
   return `
   <section>
@@ -1014,6 +1028,8 @@ function viewSources() {
         </select></div>
       <div style="align-self:end"><button class="btn btn-dark" id="run" data-act="ingest">Sync</button></div>
     </div>
+    ${many ? `<div style="margin-top:12px;max-width:320px"><label class="field-label" for="i-lib">Add new playlists and videos to</label>
+      <select id="i-lib" data-change="i-lib" style="width:100%">${S.data.libraries.map(l => `<option value="${l.id}" ${(g.lib || S.lib || 1) === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></div>` : ''}
     ${g.access === 'cookies' ? `<div style="margin-top:12px"><label class="field-label" for="i-cookies">Path to cookies.txt</label>
       <input id="i-cookies" type="text" data-input="i-cookies" value="${esc(g.cookies)}" placeholder="C:\\Users\\you\\cookies.txt" style="width:100%"></div>` : ''}
     <p class="hint">${winChromium
@@ -1028,16 +1044,33 @@ function viewSources() {
   <section class="section">
     <h2 class="h">Your playlists</h2>
     ${pls.length ? `<div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Playlist</th><th class="r">Videos</th><th class="r">Watch time</th><th>Last synced</th><th></th></tr></thead>
+      <thead><tr><th>Playlist</th>${many ? '<th>Library</th>' : ''}<th class="r">Videos</th><th class="r">Watch time</th><th>Last synced</th><th></th></tr></thead>
       <tbody>${pls.map(p => `<tr>
         <td><a href="#/" data-act="v-src" data-v="${esc(p.id)}" style="font-weight:500">${esc(p.title)}</a>
           ${p.removed_videos ? `<div class="faint" style="font-size:12.5px">${p.removed_videos} removed on YouTube, kept in library</div>` : ''}</td>
+        ${many ? `<td><select data-change="pl-lib" data-id="${esc(p.id)}" aria-label="Library for ${esc(p.title)}" style="max-width:160px">
+          ${S.data.libraries.map(l => `<option value="${l.id}" ${p.library_id === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></td>` : ''}
         <td class="r">${p.active_videos || 0}</td>
         <td class="r">${fmt(p.duration_seconds)}</td>
         <td class="muted">${esc(fmtDate(p.updated_at))}</td>
-        <td class="r" style="white-space:nowrap">${p.id === '_single' ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>' : `<button class="btn btn-sm" data-act="resync" data-url="${esc(p.original_url || p.id)}">Sync</button>`}
-          ${/^[\w-]+$/.test(p.id) && p.id !== '_single' ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}</td>
-      </tr>`).join('')}</tbody></table></div>` : '<p class="note">No playlists yet. Add one above.</p>'}
+        <td class="r" style="white-space:nowrap">${isSingle(p.id) ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>' : `<button class="btn btn-sm" data-act="resync" data-url="${esc(p.original_url || p.id)}">Sync</button>`}
+          ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}</td>
+      </tr>`).join('')}</tbody></table></div>` : `<p class="note">${S.lib && S.data.playlists.length ? `No playlists in ${esc(libName(S.lib))} yet. Add one above, or move one here from another library.` : 'No playlists yet. Add one above.'}</p>`}
+  </section>
+  ${viewLibraries()}`;
+}
+function viewLibraries() {
+  const libs = S.data.libraries;
+  return `<section class="section card">
+    <h2 class="h">Libraries</h2>
+    <p class="note">Keep different parts of your life apart, for example Tech, Health and Personal. Each library has its own playlists,
+      categories, interests for ratings, time left, triage and answers. Switch libraries at the top of the page.</p>
+    ${libs.map(l => `<div class="prov"><div style="display:flex;gap:8px;align-items:center;min-width:0">
+        <input type="text" value="${esc(l.name)}" data-change="lib-rename" data-lib="${l.id}" aria-label="Library name" style="max-width:220px">
+        <span class="faint" style="font-size:12.5px">${plural(l.playlists, 'playlist')}</span></div>
+      ${l.id === 1 ? '<span class="faint" style="font-size:12.5px">First library</span>' : `<button class="btn-text" data-act="lib-delete" data-lib="${l.id}" ${l.playlists ? 'disabled title="Move its playlists to another library first"' : ''}>Delete</button>`}</div>`).join('')}
+    <div class="actions"><input type="text" id="lib-new" placeholder="New library, e.g. Health" maxlength="40" style="width:240px">
+      <button class="btn btn-sm" data-act="lib-create">Create</button></div>
   </section>`;
 }
 function viewDetailsCard() {
@@ -1224,12 +1257,15 @@ async function runIngest(url) {
   const g = S.ingest;
   const browser = BROWSERS.some(([k]) => k === g.access) ? g.access : null;
   try {
-    await queued(await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies }), 'Sync');
+    await queued(await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies, library: g.lib || S.lib || 1 }), 'Sync');
   } catch (e) { toast(e.message, true); }
 }
 
 /* ---------------- categories ---------------- */
 function viewCategories() {
+  if (!S.lib) return `<section><div class="eyebrow">Categories</div><h1 class="display">Choose a library<em>each library has its own categories</em></h1>
+    <p class="lede">Pick a library at the top of the page to edit its categories.</p>
+    <div class="chips" style="margin-top:16px">${S.data.libraries.map(l => `<button class="chip" data-act="lib-go" data-lib="${l.id}">${esc(l.name)}</button>`).join('')}</div></section>`;
   const counts = {};
   for (const v of videos()) counts[v.category] = (counts[v.category] || 0) + 1;
   const tax = S.data.taxonomy, ai = S.data.ai, notes = ai.category_notes || {}, presets = new Set(ai.presets || []);
@@ -1345,7 +1381,8 @@ function renderSearchResults() {
   if (!sr.q.trim()) { box.innerHTML = ''; return; }
   if (!sr.res) { box.innerHTML = '<p class="note" style="margin-top:24px"><span class="spin" style="display:inline-block"></span> Searching…</p>'; return; }
   if (sr.res.short) { box.innerHTML = '<div class="empty">Type at least 3 letters.</div>'; return; }
-  const list = sr.res.results.filter(r => byId(r.video_id));
+  const here = new Set(videos().map(v => v.video_id));
+  const list = sr.res.results.filter(r => here.has(r.video_id));
   if (!list.length) { box.innerHTML = `<div class="empty">No matches for “${esc(sr.q)}”.</div>`; return; }
   const off = sr.meaning && sr.res.mode === 'keyword' ? ' · meaning index is off, so these are keyword matches (Settings → AI → download the embedding model)' : '';
   const exact = list.filter(r => r.exact).length, words = sr.q.trim().split(/\s+/).length > 1;
@@ -1407,8 +1444,8 @@ function viewAsk() {
           <button class="btn-text" data-act="ask-unscope" aria-label="Ask across the whole library" style="color:inherit;height:auto;padding:0 0 0 4px">✕</button></span>`
         : `<select data-change="ask-cat" aria-label="Category"><option value="">All categories</option>
         ${categoryNames().map(c => `<option value="${esc(c)}" ${a.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-      ${S.data.playlists.length > 1 ? `<select data-change="ask-src" aria-label="Playlist"><option value="">All playlists</option>
-        ${S.data.playlists.map(p => `<option value="${esc(p.id)}" ${a.src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>` : ''}
+      ${libPlaylists().length > 1 ? `<select data-change="ask-src" aria-label="Playlist"><option value="">All playlists</option>
+        ${libPlaylists().map(p => `<option value="${esc(p.id)}" ${a.src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>` : ''}
       <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched and skipped videos</span></label>`}
     </div>
     <p class="hint">${ready ? `Answered by ${esc(ai.uses.ask)}${local ? ', on this computer: about 5–30 s' : ''}.`
@@ -1488,8 +1525,9 @@ async function runAsk() {
   renderAsk();
   $('.ask-sep:last-of-type, #aresult .note')?.scrollIntoView({ block: 'nearest' });
   try {
+    const inLib = S.lib ? (libPlaylists().map(p => p.id).length ? libPlaylists().map(p => p.id) : ['_none_']) : [];
     const filters = a.video ? { video_ids: [a.video] }
-      : { categories: a.cat ? [a.cat] : [], playlists: a.src ? [a.src] : [], include_done: a.done };
+      : { categories: a.cat ? [a.cat] : [], playlists: a.src ? [a.src] : inLib, include_done: a.done };
     const r = await api('/api/ask', last ? { question: q, follow_up_of: last.id } : { question: q, filters });
     a.thread = [...a.thread, r]; a.q = '';
     history.replaceState(null, '', `#/ask?id=${r.id}`);
@@ -1627,7 +1665,8 @@ function viewGeneral() {
   </section>
 
   <section class="section card">
-    <h2 class="h">About you</h2>
+    <h2 class="h">About you${S.data.libraries.length > 1 ? ` · ${esc(S.lib ? libName(S.lib) : libName(1))}` : ''}</h2>
+    ${S.data.libraries.length > 1 ? `<p class="note">Interests are kept per library, so ratings judge each video against its own library's goals.${S.lib ? '' : ` “All libraries” is selected: this edits ${esc(libName(1))}.`}</p>` : ''}
     <div class="ai-grid">
       <div class="full"><label class="field-label" for="ai-interests">What do you want to learn? Ratings favour videos that fit this.</label>
         <textarea id="ai-interests" rows="3" placeholder="e.g. Building AI agents and RAG in Python, system design for interviews. Not interested in crypto or AI news hype.">${esc(ai.interests)}</textarea></div>
@@ -2042,6 +2081,19 @@ document.addEventListener('click', async e => {
       } catch (err) { toast(err.message, true); }
       break;
     }
+    case 'lib-go': S.lib = +el.dataset.lib; store.set('ytkb.lib', S.lib); await load(); break;
+    case 'lib-create': {
+      const name = $('#lib-new')?.value.trim();
+      if (!name) { toast('Type a name for the library', true); $('#lib-new')?.focus(); break; }
+      try { const r = await api('/api/libraries', { action: 'create', name }); S.lib = r.id; store.set('ytkb.lib', S.lib); await load(); toast(`Created ${name}. Add playlists to it, or move some here.`); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'lib-delete':
+      if (!confirm(`Delete the library “${libName(+el.dataset.lib)}”? It has no playlists, so no videos are affected.`)) break;
+      try { await api('/api/libraries', { action: 'delete', id: +el.dataset.lib }); if (S.lib === +el.dataset.lib) { S.lib = 1; store.set('ytkb.lib', 1); } await load(); toast('Library deleted'); }
+      catch (err) { toast(err.message, true); }
+      break;
     case 'job-stop': try { await api('/api/job/cancel', {}); toast('Stopping after the current step…'); } catch (err) { toast(err.message, true); } break;
     case 'job-drop': try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); toast('Removed from the queue'); } catch (err) { toast(err.message, true); } break;
     case 'jobs-toggle': S.jobsOpen = !S.jobsOpen; renderJobs(); break;
@@ -2168,6 +2220,12 @@ document.addEventListener('click', async e => {
 });
 document.addEventListener('change', async e => {
   const el = e.target, ch = el.dataset.change;
+  if (ch === 'lib') {
+    S.lib = +el.value; store.set('ytkb.lib', S.lib);
+    Object.assign(S.view, { cat: '', src: '' }); S.sel.clear(); S.ask.video = null; S.search.res = null;
+    await load(); if (route() === 'search' && S.search.q) runSearch();
+    toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
+  }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
   if (ch === 'speed') {
     S.speed = +el.value; store.set('ytkb.speed', S.speed);
@@ -2205,6 +2263,15 @@ document.addEventListener('change', async e => {
     case 'ask-done': S.ask.done = el.checked; break;
     case 't-cat': S.triage.cat = el.value; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
+    case 'i-lib': S.ingest.lib = +el.value; break;
+    case 'pl-lib':
+      try { await api('/api/playlists/library', { id: el.dataset.id, library: +el.value }); await load(); toast(`Moved to ${libName(+el.value)}`); }
+      catch (err) { toast(err.message, true); await load(); }
+      break;
+    case 'lib-rename':
+      try { S.data.libraries = (await api('/api/libraries', { action: 'rename', id: +el.dataset.lib, name: el.value })).libraries; renderBar(); toast('Renamed'); }
+      catch (err) { toast(err.message, true); await load(); }
+      break;
     case 'has-visuals': {
       const v = byId(el.dataset.id);
       try { await api('/api/videos/visuals', { ids: [el.dataset.id], value: el.checked }); if (v) v.has_visuals = el.checked ? 1 : 0; S.visPlan = null; renderDrawer(); }

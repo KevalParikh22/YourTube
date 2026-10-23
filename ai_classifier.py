@@ -218,19 +218,34 @@ Reply with JSON:
 
 # --- runners used by the CLI and the dashboard job ---------------------------
 
-def run_suggest(scope: str = "unsorted") -> bool:
+def run_suggest(scope: str = "unsorted", library: Optional[int] = None) -> bool:
+    """Category suggestions for one library, or (library=None) for each library with its own categories."""
+    import storage
+    libs = storage.video_libraries()
+    wanted = sorted({libs.get(v["video_id"], 1) for v in storage.videos_for_ai(scope)}) if library is None else [int(library)]
+    ok = True
+    for lib in wanted or [1]:
+        ok = _suggest_library(scope, lib, libs) and ok
+    return ok
+
+
+def _suggest_library(scope: str, library: int, libs: Dict[str, int]) -> bool:
     """Asks the configured model for category suggestions and stores them for review."""
     import llm
     import storage
     from classifier import load_taxonomy
 
-    settings = llm.load_settings()
-    videos = storage.videos_for_ai(scope)
-    print(f"AI suggestions with {llm.describe(settings, 'categorize')}")
+    settings = llm.for_library(llm.load_settings(), library)
+    videos = [v for v in storage.videos_for_ai(scope) if libs.get(v["video_id"], 1) == library]
+    names = {l["id"]: l["name"] for l in storage.get_libraries()}
+    print(f"AI suggestions for {names.get(library, 'library')} with {llm.describe(settings, 'categorize')}")
     if not videos:
         print("   Nothing to sort: no unlocked videos without a pending suggestion.")
         return True
-    taxonomy = load_taxonomy()
+    taxonomy = load_taxonomy(library=library)
+    if not taxonomy:
+        print("   This library has no categories yet. Add some, or use Propose categories with AI first.")
+        return True
     context = storage.ai_context([v['video_id'] for v in videos], EXCERPT_CHARS)
     if settings.get("use_descriptions", True) is False:
         for c in context.values():
@@ -256,26 +271,28 @@ def run_suggest(scope: str = "unsorted") -> bool:
     return True
 
 
-def run_discover(max_categories: int = 12) -> bool:
-    """Asks the configured model to propose a category set and stores it for review."""
+def run_discover(max_categories: int = 12, library: Optional[int] = None) -> bool:
+    """Asks the configured model to propose a category set for one library and stores it for review."""
     import llm
     import storage
     from classifier import load_taxonomy
 
-    settings = llm.load_settings()
-    videos = [v for v in storage.get_library() if v.get("status") not in storage.DONE_STATUSES] or storage.get_library()
+    library = int(library or 1)
+    settings = llm.for_library(llm.load_settings(), library)
+    everything = [v for v in storage.get_library() if v["library"] == library]
+    videos = [v for v in everything if v.get("status") not in storage.DONE_STATUSES] or everything
     print(f"Proposing categories with {llm.describe(settings, 'categorize')} from {len(videos)} videos…")
     try:
         complete = llm.make_completer(settings, "categorize")
         # Leave room for the instructions and a reply of ~12 categories with keywords
         budget = max(3_000, llm.context_chars(settings, "categorize") - 4_000)
         cats = discover_categories(videos, complete, presets=settings.get("presets"),
-                                   taxonomy=load_taxonomy(), max_categories=max_categories, max_chars=budget)
+                                   taxonomy=load_taxonomy(library=library), max_categories=max_categories, max_chars=budget)
     except LLMError as e:
         print(f"Error: {e}")
         return False
     settings = llm.load_settings()  # re-read: the user may have saved settings meanwhile
-    settings["proposal"] = {"categories": cats, "model": llm.describe(settings, "categorize")}
+    llm.set_library_settings(settings, library, proposal={"categories": cats, "model": llm.describe(settings, "categorize")})
     llm.save_settings(settings)
     print(f"Proposed {len(cats)} categories. Review them on the Categories page.")
     return True

@@ -42,17 +42,30 @@ DEFAULT_TAXONOMY: Dict[str, List[str]] = {
     ]
 }
 
-def load_taxonomy(path: str = TAXONOMY_PATH) -> Dict[str, List[str]]:
-    """Returns the user's taxonomy from taxonomy.json, or the default taxonomy."""
+def taxonomy_path(library: Optional[int] = None, path: str = TAXONOMY_PATH) -> str:
+    """Library 1 (the original one) uses taxonomy.json; library N uses taxonomy-N.json next to it."""
+    if not library or int(library) == 1:
+        return path
+    root, ext = os.path.splitext(path)
+    return f"{root}-{int(library)}{ext}"
+
+def load_taxonomy(path: str = TAXONOMY_PATH, library: Optional[int] = None) -> Dict[str, List[str]]:
+    """
+    A library's categories and keywords. Library 1 falls back to the built-in default taxonomy;
+    other libraries start empty (everything is General / Other until categories are added).
+    """
+    path = taxonomy_path(library, path)
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
             return {str(k): [str(kw) for kw in v] for k, v in data.items()}
+    if library and int(library) != 1:
+        return {}
     return {k: list(v) for k, v in DEFAULT_TAXONOMY.items()}
 
-def save_taxonomy(taxonomy: Dict[str, List[str]], path: str = TAXONOMY_PATH) -> None:
-    with open(path, "w", encoding="utf-8") as f:
+def save_taxonomy(taxonomy: Dict[str, List[str]], path: str = TAXONOMY_PATH, library: Optional[int] = None) -> None:
+    with open(taxonomy_path(library, path), "w", encoding="utf-8") as f:
         json.dump(taxonomy, f, indent=2, ensure_ascii=False)
 
 def classify_video(
@@ -64,7 +77,7 @@ def classify_video(
     Classifies a single video based on title and channel keywords.
     Returns the best matching category name or 'General / Other'.
     """
-    tax = taxonomy or load_taxonomy()
+    tax = load_taxonomy() if taxonomy is None else taxonomy
     text = f"{title.lower()} {channel.lower()}"
 
     # Tokenize words for accurate matching
@@ -97,7 +110,7 @@ def classify_playlist_videos(
     """
     Classifies a list of videos and adds or updates the 'category' key on each item.
     """
-    taxonomy = custom_taxonomy or load_taxonomy()
+    taxonomy = load_taxonomy() if custom_taxonomy is None else custom_taxonomy
     for v in videos:
         # Preserve existing manual assignment if already explicitly set
         if not v.get("category") or v.get("category") == "Uncategorized":
