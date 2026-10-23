@@ -129,3 +129,21 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 
 - Writing `[YT-KB]` playlists back via the Data API: 50 units per insert against a 10k/day quota, so it needs a paced multi-day queue, and the source playlist must be hard-blocked from every write. The user hasn't decided whether they want it.
 - Public release: the checklist in section 9 of the research doc (deferred).
+
+<!-- llm-team:start -->
+## Shared rules
+@AGENTS.md
+
+## Multi-LLM team (Claude = orchestrator)
+
+You can delegate work to Gemini, Kimi and Codex through `.team/team.sh`. This exists to save Claude usage limits.
+
+**Scope: these rules apply only while a `/team-*` command is running, or when the user asks you to delegate.** Otherwise work normally. Your own skills, subagents (Agent tool) and tools are unchanged and are not replaced by the team workers.
+
+When orchestrating, follow `.team/ORCHESTRATOR.md`. The short version:
+- **You:** plan, make design decisions, debug hard problems, review the final diff, commit. Keep your own token use low. Read `docs/architecture.md` and the plan instead of exploring the whole repo.
+- **Workers:** `.team/team.sh build|ask|review ...` runs them with automatic fallback (build: gemini → kimi → codex; review: codex → gemini → kimi).
+- Run `team.sh` with Bash `run_in_background: true`, because worker runs can take several minutes.
+- Don't trust a worker's report. Check `git diff` and the verify result yourself.
+- If every worker fails (exit code 3), or one task has failed twice, do the task yourself.
+<!-- llm-team:end -->

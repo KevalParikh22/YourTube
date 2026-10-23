@@ -9,3 +9,4 @@ cookies*.txt
 reports/
 media_cache/
 frames/
+.team/runs/
