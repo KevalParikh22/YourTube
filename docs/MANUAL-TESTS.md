@@ -2,7 +2,31 @@
 
 These need your eyes, your YouTube account or your hardware. Start the dashboard with `.venv/bin/python dashboard.py`. For each test, note **what you saw** in the "Result" column, especially anything confusing, wrong or slow, then share it.
 
-## 1. Library at real size
+## How to take the rest: short sessions
+
+Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a time, in this order. Each needs only the dashboard open. At the end of a session, paste your notes in the chat, even rough ones; fixes come in batches.
+
+| Session | Covers | Time | Before you start |
+|---|---|---|---|
+| **S1 · Ratings you can trust** | §2 (2.1–2.4), §7.6, §7.7, and S1 below | ~30 min | Settings → General → About you: write your interests. Ratings changed on 2026-10-24 (score breakdown, minutes), so re-rate 10–20 videos first: Triage → Rate |
+| **S2 · Libraries and the task queue** | §7.1–7.5, §2.5–2.6 | ~20 min | Nothing |
+| **S3 · Ask your library** | §6 | ~20 min | Ollama running (Settings → AI shows it) |
+| **S4 · Local media** | §3 | ~30 min + waiting | Pick 3–5 videos without captions and 3–5 with slides; keep the laptop on power |
+| **S5 · Cloud AI** | §5 | ~20 min | An API key (Claude or Gemini). Optional; skip if you only use local AI |
+| **S6 · Setup and decisions** | §4 | ~15 min | Nothing |
+
+### S1 extra checks (new ratings, 2026-10-24)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S1.1 | Why this score | Open a rated video → "Why this score" | Four factors with reasons you agree with; the formula line adds up to the score | |
+| S1.2 | Minutes | Read the Minutes of 3 videos you have watched | You could decide watch / skip from them alone; timestamps jump to the right part | |
+| S1.3 | Off-interest video | Find a good video outside your interests | It still scores well (interest only subtracts up to 2) | |
+| S1.4 | Your formula | Settings → General → How scores are calculated: change the interest penalty, save, re-rate one video | The new number follows the formula; Reset to default works | |
+| S1.5 | Stop | Start Sort unsorted with AI, then Stop during batch 2 | It says Stopping…, ends before the next batch, and keeps the suggestions made so far | |
+| S1.6 | Look and feel | Browse every page in light and dark | Clean fonts, styled dropdowns, tooltips (ⓘ) instead of paragraphs, readable categories; note anything still rough | |
+
+## 1. Library at real size ✓ done 2026-10-24
 
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
@@ -61,7 +85,7 @@ YTKB_LIVE=1 ANTHROPIC_API_KEY=... GEMINI_API_KEY=... .venv/bin/python -m unittes
 | 5.8 | Cloud categories | Categories → Propose with AI and Sort unsorted with the cloud AI | Sensible results; compare with local | |
 | 5.9 | Local only | AI → tick Local only | Cloud AIs show as blocked; rating or asking with a cloud AI gives a clear message; nothing is sent | |
 
-## 7. Libraries, queue and settings (feedback round, 2026-10-23)
+## 7. Libraries, queue and settings (feedback round, 2026-10-23) · session S2
 
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|

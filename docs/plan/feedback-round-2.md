@@ -162,7 +162,7 @@
 
 ### T8: Manual test plan as sessions
 - **worker:** claude
-- **status:** todo
+- **status:** done
 - **files:** `docs/MANUAL-TESTS.md`
 - **steps:** Design notes D.
 - **acceptance:**
