@@ -119,7 +119,7 @@
 
 ### T5: Visual foundation — fonts, favicon, dropdowns, header search, rail, category text
 - **worker:** gemini
-- **status:** todo
+- **status:** done (codex; gemini hit its free-tier quota)
 - **files:** `web/index.html`
 - **steps:** everything in Design notes C except tooltips and pagination: fonts, favicon, select and input styling, icon-only header search plus the `/` shortcut, rail scrolling, category chips and contrast.
 - **acceptance:**

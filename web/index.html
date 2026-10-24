@@ -4,9 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>YourTube</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Newsreader:opsz,wght@6..72,400;6..72,500&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23b5522b'/%3E%3Cpath d='M14 10v20l16-10z' fill='white'/%3E%3Cpath d='m7 21 3 3 5-6' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
   :root {
     --bg: #faf9f7;
@@ -16,21 +14,20 @@
     --line-strong: #d6d2cb;
     --ink: #1d1c1a;
     --ink-2: #57534d;
-    --ink-3: #8c877f;
+    --ink-3: #706b64;
     --accent: #b5522b;
     --accent-ink: #ffffff;
     --done: #3f7a54;
     --watch: #2f7a4b; --watch-bg: #e3f1e7;
     --skim: #9a6a0c; --skim-bg: #f8edd3;
     --skip: #7d776f; --skip-bg: #eeebe6;
-    --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
-    --serif: "Newsreader", Georgia, "Times New Roman", serif;
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
       --bg: #151413; --raised: #1c1b19; --sunken: #242220; --line: #2b2926; --line-strong: #3a3733;
-      --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #7f7a72;
+      --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #aaa49b;
       --accent: #e0805a; --accent-ink: #1a1009; --done: #7fbf93;
       --watch: #86cf9d; --watch-bg: #1d3325; --skim: #e7bd62; --skim-bg: #392d14; --skip: #a39d94; --skip-bg: #2a2825;
       color-scheme: dark;
@@ -38,7 +35,7 @@
   }
   :root[data-theme="dark"] {
     --bg: #151413; --raised: #1c1b19; --sunken: #242220; --line: #2b2926; --line-strong: #3a3733;
-    --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #7f7a72;
+    --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #aaa49b;
     --accent: #e0805a; --accent-ink: #1a1009; --done: #7fbf93;
     --watch: #86cf9d; --watch-bg: #1d3325; --skim: #e7bd62; --skim-bg: #392d14; --skip: #a39d94; --skip-bg: #2a2825;
     color-scheme: dark;
@@ -48,7 +45,7 @@
   html, body { margin: 0; }
   body {
     background: var(--bg); color: var(--ink);
-    font: 14px/1.55 var(--sans); font-feature-settings: "cv11", "ss01";
+    font: 14px/1.5 var(--sans); font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
   }
   a { color: inherit; }
@@ -65,7 +62,7 @@
     backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
   }
   .bar-in { max-width: 1160px; margin: 0 auto; padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 28px; }
-  .logo { font-family: var(--serif); font-size: 20px; font-weight: 500; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
+  .logo { font-size: 17px; font-weight: 700; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
   .tabs { display: flex; gap: 22px; height: 100%; }
   .tabs a {
     display: flex; align-items: center; height: 100%; text-decoration: none; color: var(--ink-3); font-weight: 500;
@@ -78,10 +75,11 @@
   /* ---------- controls ---------- */
   select, input[type="text"], input[type="search"], input[type="number"], input[type="password"], textarea {
     font: inherit; color: var(--ink); background: var(--raised); border: 1px solid var(--line-strong);
-    border-radius: 6px; height: 34px; padding: 0 10px; min-width: 0;
+    border-radius: 8px; height: 32px; padding: 0 10px; min-width: 0;
   }
+  select { appearance: none; padding-right: 32px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m2 4 4 4 4-4' fill='none' stroke='%23706b64' stroke-width='1.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
   textarea { height: auto; padding: 8px 10px; width: 100%; resize: vertical; line-height: 1.5; }
-  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--ink-2); box-shadow: 0 0 0 3px var(--sunken); }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .btn {
     display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 6px;
@@ -102,19 +100,19 @@
   /* ---------- page ---------- */
   .page { max-width: 1160px; margin: 0 auto; padding: 40px 32px 96px; }
   .eyebrow { font-size: 12.5px; color: var(--ink-3); font-weight: 500; letter-spacing: .02em; }
-  .display { font-family: var(--serif); font-weight: 400; font-size: 44px; line-height: 1.1; letter-spacing: -.02em; margin: 6px 0 8px; }
+  .display { font-weight: 600; font-size: 32px; line-height: 1.1; letter-spacing: -.02em; margin: 6px 0 8px; }
   .display em { font-style: normal; color: var(--ink-3); font-size: 22px; letter-spacing: 0; margin-left: 8px; }
   .lede { margin: 0; color: var(--ink-2); font-size: 15px; }
   .progress { height: 3px; background: var(--line); border-radius: 2px; margin-top: 22px; overflow: hidden; display: flex; }
   .progress i { display: block; background: var(--done); }
   .progress i + i { background: color-mix(in srgb, var(--done) 40%, transparent); }
-  h2.h { font-family: var(--serif); font-weight: 500; font-size: 22px; letter-spacing: -.01em; margin: 0 0 4px; }
+  h2.h { font-weight: 600; font-size: 17px; margin: 0 0 4px; }
   .section { margin-top: 48px; }
   .note { font-size: 13px; color: var(--ink-2); margin: 0; }
 
   /* ---------- library ---------- */
   .lib { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; margin-top: 40px; align-items: start; }
-  .rail { position: sticky; top: 80px; display: flex; flex-direction: column; gap: 28px; }
+  .rail { position: sticky; top: 80px; max-height: calc(100vh - 96px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; display: flex; flex-direction: column; gap: 28px; }
   .rail h4 { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
   .rail a {
     display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; margin: 0 -8px; border-radius: 5px;
@@ -122,7 +120,7 @@
   }
   .rail a:hover { background: var(--sunken); color: var(--ink); }
   .rail a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
-  .rail a .lbl { flex: 1; min-width: 0; line-height: 1.35; padding: 1px 0; }
+  .rail a .lbl { flex: 1; min-width: 0; line-height: 1.35; padding: 1px 0; overflow-wrap: anywhere; }
   .rail a .c { font-size: 12.5px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
   .rail-pick { display: none; }
 
@@ -136,7 +134,7 @@
   }
   .selbar .btn-text { color: color-mix(in srgb, var(--bg) 72%, transparent); }
   .selbar .btn-text:hover { color: var(--bg); }
-  .selbar select { height: 28px; background: transparent; color: var(--bg); border-color: color-mix(in srgb, var(--bg) 30%, transparent); font-size: 12.5px; margin: 0 4px; }
+  .selbar select { font-size: 12.5px; margin: 0 4px; }
   .selbar select option { color: var(--ink); background: var(--raised); }
   .selbar strong { margin-right: 10px; font-weight: 600; }
   .selbar .grow { flex: 1; }
@@ -156,7 +154,9 @@
   .row-main { all: unset; cursor: pointer; min-width: 0; display: block; width: 100%; overflow: hidden; }
   .row-title { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-main:hover .row-title { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ink-3); }
-  .row-meta { display: block; font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 1px; }
+  .row-meta { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--ink-2); overflow: hidden; white-space: nowrap; margin-top: 1px; }
+  .cat-chip { display: inline-block; flex: 0 1 auto; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 18px; padding: 0 6px; border-radius: 5px; color: var(--ink-2); background: var(--sunken); }
+  .tri-meta .cat-chip { color: var(--ink-2); }
   .row-meta .gone { color: var(--accent); }
   .row-time { text-align: right; font-variant-numeric: tabular-nums; font-size: 13.5px; white-space: nowrap; }
   .row-time small { display: block; font-size: 11.5px; color: var(--ink-3); }
@@ -174,7 +174,7 @@
 
   .more { padding: 20px 0; text-align: center; }
   .empty { padding: 56px 0; text-align: center; color: var(--ink-2); }
-  .empty h2 { font-family: var(--serif); font-weight: 500; font-size: 26px; color: var(--ink); margin: 0 0 6px; }
+  .empty h2 { font-weight: 600; font-size: 20px; color: var(--ink); margin: 0 0 6px; }
   .empty .btn { margin-top: 18px; }
 
   /* ---------- tables ---------- */
@@ -188,14 +188,14 @@
   .tbl-wrap { overflow-x: auto; }
 
   /* ---------- plan ---------- */
-  .sentence { font-family: var(--serif); font-size: 22px; line-height: 2; color: var(--ink-2); margin: 10px 0 0; }
-  .sentence input, .sentence select {
+  .sentence { font-size: 22px; line-height: 2; color: var(--ink-2); margin: 10px 0 0; }
+  .sentence input {
     font: inherit; font-size: 20px; color: var(--ink); height: 36px; padding: 0 6px; border: 0;
     border-bottom: 1.5px solid var(--ink-3); border-radius: 0; background: transparent; text-align: center;
   }
   .sentence input[type="number"] { width: 72px; }
-  .sentence select { text-align: left; max-width: 280px; }
-  .sentence input:focus, .sentence select:focus { box-shadow: none; border-bottom-color: var(--accent); }
+  .sentence select { max-width: 280px; }
+  .sentence input:focus { box-shadow: none; border-bottom-color: var(--accent); }
   .meter { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; margin: 8px 0 4px; }
   .meter i { display: block; height: 100%; background: var(--accent); }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
@@ -219,6 +219,8 @@
   /* ---------- categories ---------- */
   .cat-row { display: grid; grid-template-columns: 240px minmax(0, 1fr) 120px; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .cat-row input[type="text"] { width: 100%; font-weight: 500; }
+  /* Keyword lists grow with their text instead of clipping it (field-sizing where supported, rows as fallback) */
+  textarea.kw, textarea.p-kw { field-sizing: content; min-height: 5.2em; max-height: 14em; line-height: 1.5; }
   .cat-row .meta { font-size: 12.5px; color: var(--ink-3); margin-top: 6px; }
   .cat-row .meta a { color: var(--ink-2); }
   .cat-row > div:last-child { text-align: right; }
@@ -252,7 +254,7 @@
   .chip .c { font-variant-numeric: tabular-nums; opacity: .7; }
   .tri-bar { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 28px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
   .tri-row { display: grid; grid-template-columns: 168px minmax(0, 1fr) auto; gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
-  .tri-row.is-skipped { opacity: .62; }
+  .tri-row.is-skipped .tri-meta { color: var(--ink-2); }
   .tri-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .tri-title { all: unset; cursor: pointer; font-weight: 600; font-size: 15px; line-height: 1.35; display: block; margin-top: 6px; }
   .tri-title:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ink-3); }
@@ -262,7 +264,7 @@
   .range { all: unset; cursor: pointer; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--skim); background: var(--skim-bg); border-radius: 4px; padding: 2px 7px; }
   .range:hover { text-decoration: underline; }
   .tri-acts { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 108px; }
-  .score-big { font-family: var(--serif); font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .score-big { font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
   .rate-box { border-radius: 8px; padding: 14px 16px; background: var(--sunken); }
   .rate-box .tldr { font-size: 13.5px; line-height: 1.55; margin: 10px 0 0; }
   .rate-box ul { list-style: none; margin: 10px 0 0; padding: 0; }
@@ -275,7 +277,7 @@
 
   /* ---------- video details ---------- */
   .det-counts { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--ink-2); }
-  .det-counts b { display: block; font-family: var(--serif); font-weight: 500; font-size: 22px; color: var(--ink); font-variant-numeric: tabular-nums; }
+  .det-counts b { display: block; font-weight: 600; font-size: 22px; color: var(--ink); font-variant-numeric: tabular-nums; }
   .chap, .tline { all: unset; cursor: pointer; display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 8px; padding: 3px 6px; margin: 0 -6px; border-radius: 4px; font-size: 13px; line-height: 1.45; }
   .chap:hover, .tline:hover { background: var(--sunken); }
   .chap time, .tline time { color: var(--accent); font-variant-numeric: tabular-nums; font-size: 12.5px; }
@@ -291,7 +293,7 @@
   .dl span { display: block; font-size: 12.5px; color: var(--ink-3); margin-top: 4px; }
   .guide { max-width: 860px; margin-top: 40px; }
   .guide h1 { display: none; }
-  .guide h2 { font-family: var(--serif); font-weight: 500; font-size: 24px; margin: 44px 0 8px; letter-spacing: -.01em; }
+  .guide h2 { font-weight: 600; font-size: 20px; margin: 44px 0 8px; }
   .guide h3 { font-size: 15px; margin: 26px 0 6px; }
   .guide p, .guide li { color: var(--ink-2); line-height: 1.65; }
   .guide hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
@@ -322,8 +324,7 @@
   .export-pop .btn-text { justify-content: flex-start; height: 32px; padding: 0 8px; }
 
   /* ---------- search ---------- */
-  #gsearch { width: 220px; height: 32px; }
-  #gsearch-btn { display: none; font-size: 18px; text-decoration: none; }
+  #gsearch-btn { display: inline-flex; font-size: 18px; text-decoration: none; }
   .ask { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 32px; align-items: start; margin-top: 8px; }
   .ask-box { display: flex; gap: 8px; margin-top: 18px; }
   .ask-box .search-big { margin-top: 0; }
@@ -357,7 +358,7 @@
   .hist a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
   .hist a small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
   #jobs { position: relative; }
-  .libsel { height: 30px; max-width: 170px; margin-left: 12px; font-weight: 500; }
+  .libsel { max-width: 170px; margin-left: 12px; font-weight: 500; }
   .done-banner { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; }
   .done-banner.ok { background: var(--watch-bg); color: var(--watch); }
   .done-banner.bad { background: var(--skip-bg); color: var(--skip); }
@@ -384,7 +385,6 @@
   .hit .k { font-size: 12px; color: var(--ink-3); white-space: nowrap; }
   .hit .k time { color: var(--accent); font-variant-numeric: tabular-nums; margin-left: 4px; }
   mark { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--ink); border-radius: 2px; padding: 0 1px; }
-  @media (max-width: 1000px) { #gsearch { width: 150px; } }
 
   /* ---------- drawer ---------- */
   .scrim { position: fixed; inset: 0; z-index: 40; background: rgba(20, 18, 15, .28); }
@@ -397,7 +397,7 @@
   .drawer-body { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 22px; }
   .embed { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
   .embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-  .drawer h3 { font-family: var(--serif); font-weight: 500; font-size: 22px; line-height: 1.25; margin: 0; letter-spacing: -.01em; }
+  .drawer h3 { font-weight: 600; font-size: 19px; line-height: 1.25; margin: 0; }
   .drawer .by { color: var(--ink-2); margin-top: 6px; font-size: 13.5px; }
   .speeds { display: flex; gap: 18px; font-size: 13px; color: var(--ink-3); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
   .speeds b { color: var(--ink); font-weight: 500; }
@@ -418,8 +418,6 @@
 
   /* ---------- responsive ---------- */
   @media (max-width: 760px) {
-    #gsearch { display: none; }
-    #gsearch-btn { display: inline-flex; }
     .s-row { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
     .hit { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .bar-in { padding: 0 16px; gap: 14px; }
@@ -454,7 +452,7 @@
     .logo { display: none; }
     .tabs { gap: 16px; overflow-x: auto; }
     .page { padding: 28px 16px 72px; }
-    .display { font-size: 34px; }
+    .display { font-size: 32px; }
     .display em { display: block; margin: 4px 0 0; font-size: 18px; }
     .sentence { font-size: 18px; }
     .row { grid-template-columns: 26px 72px minmax(0, 1fr) auto; gap: 10px; }
@@ -469,8 +467,7 @@
     <span id="libpick"></span>
     <nav class="tabs" id="tabs"></nav>
     <div class="bar-right">
-      <input type="search" id="gsearch" placeholder="Search everything" aria-label="Search titles, transcripts, chapters and notes">
-      <a class="btn icon-btn" id="gsearch-btn" href="#/search" aria-label="Search" title="Search">⌕</a>
+      <a class="btn icon-btn" id="gsearch-btn" href="#/search" aria-label="Search" title="Search (/)">⌕</a>
       <span id="jobs"></span>
     </div>
   </div>
@@ -731,7 +728,7 @@ function viewLibrary() {
       <div class="rail-group collapsible">
         <h4>Categories</h4>
         <a href="#/" data-act="v-cat" data-v="" class="${!cat ? 'on' : ''}"><span class="lbl">All categories</span></a>
-        ${cats.map(c => `<a href="#/" data-act="v-cat" data-v="${esc(c)}" class="${cat === c ? 'on' : ''}"><span class="lbl">${esc(c)}</span><span class="c">${catCounts[c] || 0}</span></a>`).join('')}
+        ${cats.map(c => `<a href="#/" data-act="v-cat" data-v="${esc(c)}" class="${cat === c ? 'on' : ''}" title="${esc(c)}"><span class="lbl">${esc(c)}</span><span class="c">${catCounts[c] || 0}</span></a>`).join('')}
       </div>
       ${libPlaylists().length > 1 || src ? `<div class="rail-group collapsible">
         <h4>Playlists</h4>
@@ -779,7 +776,7 @@ function renderList() {
 }
 function row(v) {
   const d = v.duration_seconds || 0;
-  const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : esc(v.category),
+  const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : `<span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span>`,
     isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '']
     .filter(Boolean).join(' · ');
   return `<li class="row ${isDone(v) ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
@@ -960,7 +957,7 @@ function triRow(v) {
     <div style="min-width:0">
       <div class="tri-head">${badge(v)}${skipped ? '<span class="vb vb-skip">Skipped</span>' : v.status === 'in_progress' ? '<span class="vb vb-none">In progress</span>' : ''}${r?.basis === 'metadata' ? '<span class="faint" style="font-size:12px">from title only</span>' : ''}</div>
       <button class="tri-title" data-act="open" data-id="${esc(v.video_id)}">${esc(v.title)}</button>
-      <div class="tri-meta">${esc(v.channel || 'Unknown channel')} · ${esc(v.category)} · ${timeText}</div>
+      <div class="tri-meta">${esc(v.channel || 'Unknown channel')} · <span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span> · ${timeText}</div>
       ${r?.reason ? `<div class="tri-reason">${esc(r.reason)}</div>` : ''}
       ${r?.skim?.length ? `<div class="ranges">${r.skim.map(x => `<button class="range" data-act="play-at" data-id="${esc(v.video_id)}" data-t="${x.start}" title="${esc(x.why)}">${clock(x.start)}–${clock(x.end)}</button>`).join('')}</div>` : ''}
     </div>
@@ -1297,17 +1294,17 @@ function viewCategories() {
   <section class="section">
     ${ai.proposal ? '<h2 class="h">Current categories</h2>' : ''}
     ${Object.keys(tax).map(n => `<div class="cat-row">
-      <div><input type="text" value="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
+      <div><input type="text" value="${esc(n)}" title="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
         <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div>
         <label class="keep" title="The AI keeps this category exactly as it is"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Keep</label>
         <label class="keep" title="Fetch captions for videos in this category" style="margin-left:12px"><input type="checkbox" data-change="transcripts" data-name="${esc(n)}" ${S.data.transcripts[n] !== false ? 'checked' : ''}> Transcripts</label>
         <label class="keep" title="Read slides, whiteboards and on-screen code for videos in this category" style="margin-left:12px"><input type="checkbox" data-change="visual-cat" data-name="${esc(n)}" ${S.data.visual_categories[n] ? 'checked' : ''}> Slides</label></div>
-      <div><textarea class="kw" data-name="${esc(n)}" rows="2" aria-label="Keywords for ${esc(n)}" placeholder="keywords, separated, by commas">${esc(tax[n].join(', '))}</textarea>
+      <div><textarea class="kw" data-name="${esc(n)}" rows="4" aria-label="Keywords for ${esc(n)}" placeholder="keywords, separated, by commas">${esc(tax[n].join(', '))}</textarea>
         ${notes[n] ? `<div class="desc">${esc(notes[n])}</div>` : ''}</div>
       <div><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
     ${manual.map(n => `<div class="cat-row">
-      <div><b style="font-weight:500">${esc(n)}</b><div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n], 'video')}</a> · set by hand</div></div>
+      <div><b style="font-weight:500;overflow-wrap:anywhere" title="${esc(n)}">${esc(n)}</b><div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n], 'video')}</a> · set by hand</div></div>
       <p class="note" style="padding-top:6px">No keywords yet. Only holds videos you moved here yourself.</p>
       <div><button class="btn-text" data-act="adopt-cat" data-name="${esc(n)}">Add keywords</button><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
@@ -1324,9 +1321,9 @@ function viewProposal(p, tax, counts) {
     <div id="proposal" style="margin-top:8px">
       ${p.categories.map((c, i) => `<div class="prop-row" data-i="${i}">
         <input type="checkbox" class="p-on" checked ${c.preset ? 'disabled title="Kept: you ticked Keep"' : ''} aria-label="Use ${esc(c.name)}">
-        <div><input type="text" class="p-name" value="${esc(c.name)}" style="width:100%;font-weight:500" ${c.preset ? 'readonly' : ''} aria-label="Name">
+        <div><input type="text" class="p-name" value="${esc(c.name)}" title="${esc(c.name)}" style="width:100%;font-weight:500" ${c.preset ? 'readonly' : ''} aria-label="Name">
           <div class="meta" style="font-size:12.5px;color:var(--ink-3);margin-top:6px">${c.preset ? '<span class="tag">kept</span>' : c.existing ? `<span class="tag">current</span> ${plural(counts[c.name] || 0, 'video')}` : '<span class="tag new">new</span>'}</div></div>
-        <div><textarea class="p-kw" rows="2" aria-label="Keywords">${esc(c.keywords.join(', '))}</textarea>
+        <div><textarea class="p-kw" rows="4" aria-label="Keywords">${esc(c.keywords.join(', '))}</textarea>
           ${c.description ? `<div class="desc p-desc">${esc(c.description)}</div>` : ''}</div>
       </div>`).join('')}
       ${dropped.length ? `<div style="margin-top:20px"><span class="field-label">Current categories the AI left out</span>
@@ -1394,7 +1391,7 @@ function renderSearchResults() {
       <div style="min-width:0">
         <div class="tri-head">${v.rating ? badge(v) : ''}${isDone(v) ? `<span class="vb vb-none">${STATUS_LABEL[v.status]}</span>` : ''}</div>
         <button class="tri-title" data-act="open" data-id="${esc(v.video_id)}">${esc(v.title)}</button>
-        <div class="tri-meta">${esc(v.channel || '')} · ${esc(v.category)} · ${fmt((v.duration_seconds || 0) / S.speed)} at ${sx(S.speed)}${r.matches > r.hits.length ? ` · ${r.matches} matches` : ''}</div>
+        <div class="tri-meta">${esc(v.channel || '')} · <span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span> · ${fmt((v.duration_seconds || 0) / S.speed)} at ${sx(S.speed)}${r.matches > r.hits.length ? ` · ${r.matches} matches` : ''}</div>
         <ul class="hits">${r.hits.map(h => `<li><button class="hit" data-act="play-at" data-id="${esc(v.video_id)}" data-t="${h.t == null ? 0 : Math.floor(h.t)}">
           <span class="k">${KIND_LABEL[h.kind]}${h.t != null ? `<time>${clock(h.t)}</time>` : ''}</span><span>${hl(h.snippet)}</span></button></li>`).join('')}</ul>
       </div>
@@ -2332,14 +2329,11 @@ document.addEventListener('focusout', e => { if (e.target.id === 'd-notes') save
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && S.drawer) { closeDrawer(); return; }
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
-  if (e.key === '/') { const box = $('#sq') || $('#q') || $('#gsearch'); if (box && box.offsetParent) { e.preventDefault(); box.focus(); } }
+  if (e.key === '/') { e.preventDefault(); if (route() !== 'search') location.hash = '#/search'; setTimeout(() => $('#sq')?.focus(), 50); }
   if (S.drawer && (e.key === 'j' || e.key === 'k')) $(`[data-act="step"][data-dir="${e.key === 'j' ? 1 : -1}"]`)?.click();
 
 });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); } });
-$('#gsearch').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && e.target.value.trim()) { goSearch(e.target.value.trim()); e.target.value = ''; e.target.blur(); }
-});
 addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); renderBar(); renderView(); scrollTo(0, 0); } });
 
 applyTheme();
