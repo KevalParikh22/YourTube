@@ -376,7 +376,7 @@
   .jobrow { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; }
   .jobrow .jl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .st { font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
-  .st-run { color: var(--accent); } .st-wait { color: var(--ink-3); } .st-ok { color: var(--watch); } .st-bad, .st-stop { color: var(--skip); }
+  .st-run, .st-stopping { color: var(--accent); } .st-wait { color: var(--ink-3); } .st-ok { color: var(--watch); } .st-bad, .st-stop { color: var(--skip); }
   .search-big { width: 100%; height: 46px !important; font-size: 17px !important; padding: 0 14px !important; margin-top: 18px; }
   .s-row { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .hits { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -516,6 +516,7 @@ const S = {
   triage: { verdict: 'all', cat: '', undo: [] },
   drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
+  stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, meaning: store.get('ytkb.meaning') === '1' },
   lib: Number.isInteger(+store.get('ytkb.lib')) && store.get('ytkb.lib') !== null ? +store.get('ytkb.lib') : 1,   // 0 = all libraries
   ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '' },
@@ -1174,16 +1175,17 @@ function renderJobs() {
   const box = $('#jobs'), job = S.data?.job;
   if (!box || !job) return;
   const waiting = job.queue?.length || 0, last = job.recent?.[0];
+  const stopping = !!job.stopping || S.stopPending;
   const flash = !job.running && last && S.flash?.id === last.id && Date.now() < S.flash.until;
   if (flash) setTimeout(renderJobs, S.flash.until - Date.now() + 50);
   const pill = job.running
-    ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}"><span class="spin"></span><span class="jl">${esc(job.label || 'Working')}</span>${waiting ? `<b>+${waiting} waiting</b>` : ''}</button>`
+    ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}"><span class="spin"></span><span class="jl">${stopping ? 'Stopping…' : esc(job.label || 'Working')}</span>${waiting ? `<b>+${waiting} waiting</b>` : ''}</button>`
     : flash ? `<button class="jobpill ${last.ok && !last.stopped ? 'ok' : 'bad'}" data-act="jobs-toggle"><span class="jl">${last.stopped ? 'Stopped' : last.ok ? 'Finished' : 'Failed'}: ${esc(last.label)}</span></button>`
     : job.recent?.length ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks">Tasks</button>` : '';
-  const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', wait: 'Waiting', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
+  const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
       <span class="jl" title="${esc(t.label)}">${esc(t.label)}</span>${action}</div>`;
   const panel = S.jobsOpen ? `<div class="jobpanel" role="dialog" aria-label="Tasks">
-      ${job.running ? row(job, 'run', '<button class="btn-text" data-act="job-stop">Stop</button>') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
+      ${job.running ? row(job, stopping ? 'stopping' : 'run', stopping ? '<button class="btn-text" disabled>Stopping…</button>' : '<button class="btn-text" data-act="job-stop">Stop</button>') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
       ${(job.queue || []).map(t => row(t, 'wait', `<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button>`)).join('')}
       ${(job.recent || []).length ? `<div class="faint" style="font-size:11.5px;margin:10px 0 4px">Recent</div>` + job.recent.map(t => row(t, t.stopped ? 'stop' : t.ok ? 'ok' : 'bad',
         `<span class="faint" style="font-size:11.5px">${esc(fmtLocal(t.finished_at))}</span>`)).join('') : ''}
@@ -1202,10 +1204,11 @@ function updateJob() {
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
   if (!mine || (!job.log && !job.running)) { box.innerHTML = waitLine; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
+  const stopping = !!job.stopping || S.stopPending;
   const stage = job.running ? jobStage(job) : '';
-  const head = job.running ? `<span class="status-line"><span class="spin"></span>${stage ? `<b style="font-weight:600">${esc(stage)}</b>&nbsp;·&nbsp;` : ''}${text[0]}${['details', 'sync', 'rate', 'pull', 'asr', 'visual', 'embed'].includes(job.kind) ? ' <button class="btn-text" data-act="job-stop">Stop</button>' : ''}</span>`
-    : `<div class="done-banner ${job.stopped ? 'bad' : job.ok ? 'ok' : 'bad'}"><b>${job.stopped ? 'Stopped' : job.ok ? 'Finished' : 'Failed'}</b>
-        <span>${esc(job.label || '')} · ${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span></div>`;
+  const head = job.running ? `<span class="status-line"><span class="spin"></span>${stage ? `<b style="font-weight:600">${esc(stage)}</b>&nbsp;·&nbsp;` : ''}${stopping ? 'Stopping…' : text[0]} ${stopping ? '<button class="btn-text" disabled>Stopping…</button>' : '<button class="btn-text" data-act="job-stop">Stop</button>'}</span>`
+    : `<div class="done-banner ${job.stopped ? 'bad' : job.ok ? 'ok' : 'bad'}"><b>${job.stopped ? `Stopped: ${esc(job.label || '')}` : job.ok ? 'Finished' : 'Failed'}</b>
+        <span>${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span></div>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div>${waitLine}<pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
   log.scrollTop = log.scrollHeight;
@@ -1231,7 +1234,8 @@ async function taskFinished(t) {
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
   S.flash = { id: t.id, until: Date.now() + 15000 };
-  toast(t.stopped ? `Stopped: ${t.label}` : t.ok ? text[1] : text[2], !t.ok);
+  S.stopPending = false;
+  if (!t.stopped) toast(t.ok ? text[1] : text[2], !t.ok);
   const job = S.data.job; await load(); S.data.job = job;
 }
 // After asking the server to start a task: say whether it started or is waiting, then follow the queue
@@ -2091,7 +2095,16 @@ document.addEventListener('click', async e => {
       try { await api('/api/libraries', { action: 'delete', id: +el.dataset.lib }); if (S.lib === +el.dataset.lib) { S.lib = 1; store.set('ytkb.lib', 1); } await load(); toast('Library deleted'); }
       catch (err) { toast(err.message, true); }
       break;
-    case 'job-stop': try { await api('/api/job/cancel', {}); toast('Stopping after the current step…'); } catch (err) { toast(err.message, true); } break;
+    case 'job-stop':
+      if (S.stopPending || S.data.job.stopping) break;
+      S.stopPending = true; updateJob(); renderJobs();
+      try {
+        const result = await api('/api/job/cancel', {});
+        if (result.ok) toast('Stopping…');
+        else { S.stopPending = false; toast('The task has already ended', true); }
+        await refreshJob();
+      } catch (err) { S.stopPending = false; updateJob(); renderJobs(); toast(err.message, true); }
+      break;
     case 'job-drop': try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); toast('Removed from the queue'); } catch (err) { toast(err.message, true); } break;
     case 'jobs-toggle': S.jobsOpen = !S.jobsOpen; renderJobs(); break;
     case 'tri-undo': triageUndo(); break;

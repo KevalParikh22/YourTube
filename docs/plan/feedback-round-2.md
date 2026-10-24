@@ -75,7 +75,7 @@
 
 ### T2: Stop feedback in the UI
 - **worker:** gemini
-- **status:** todo
+- **status:** done (codex)
 - **depends on:** T1, T5
 - **files:** `web/index.html`
 - **steps:**
