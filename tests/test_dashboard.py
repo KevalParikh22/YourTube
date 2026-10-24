@@ -126,7 +126,7 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual(self.call("/api/details/fetch", {"ids": "a"})[0], 400)
 
     def test_cancel_without_job(self):
-        self.assertEqual(self.call("/api/job/cancel", {})[1], {"ok": False})
+        self.assertEqual(self.call("/api/job/cancel", {})[1], {"ok": False, "stopping": False})
 
     def test_local_endpoints(self):
         self.assertEqual(self.call("/api/local/pull", {"model": "bad name!"})[0], 400)

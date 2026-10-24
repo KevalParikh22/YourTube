@@ -62,6 +62,7 @@ class QueueTest(unittest.TestCase):
         self.assertEqual([t["id"] for t in job.snapshot()["queue"]], [two["id"]])
         self.assertTrue(job.request_stop())                                       # stops the running one
         self.assertTrue(job.stop_requested())
+        self.assertTrue(job.snapshot()["stopping"])
         gate.set()
         self.assertTrue(wait_until(lambda: not job.snapshot()["running"] and not job.snapshot()["queue"]))
         self.assertTrue(job.snapshot()["recent"][-1]["stopped"])

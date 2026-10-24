@@ -72,6 +72,7 @@ class Job:
     def snapshot(self):
         with self.lock:
             snap = {k: v for k, v in self.state.items() if k != "key"}
+            snap["stopping"] = bool(snap["running"] and self._stop.is_set())
             if snap["running"]:
                 snap["log"] = self._buf.getvalue()
             snap["queue"] = [{k: t[k] for k in ("id", "kind", "label", "queued_at")} for t in self.pending]
@@ -138,8 +139,11 @@ def _library_name(library):
 def _sync(url, browser, cookies_file, library=1):
     from main import run_pipeline  # deferred so the dashboard starts even if yt-dlp is missing
     settings = llm.load_settings()
-    ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False, library=library,
-                      ai_suggest=settings["auto_after_sync"] and llm.is_configured(settings, "categorize"))
+    ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False, library=library)
+    if ok and settings["auto_after_sync"] and llm.is_configured(settings, "categorize") and not JOB.stop_requested():
+        from ai_classifier import run_suggest
+        print()
+        run_suggest("unsorted", library=library, should_stop=JOB.stop_requested)
     if ok and settings.get("details_after_sync"):
         from enrich import run_enrich
         print()
@@ -574,7 +578,8 @@ class Handler(BaseHTTPRequestHandler):
                 task_id = body.get("id")
                 if task_id is not None and (not isinstance(task_id, int) or isinstance(task_id, bool)):
                     return self._error("id must be a number")
-                return self._json({"ok": JOB.request_stop(task_id)})
+                ok = JOB.request_stop(task_id)
+                return self._json({"ok": ok, "stopping": JOB.stop_requested() if ok else False})
 
             if path == "/api/details/fetch":
                 from enrich import run_enrich
@@ -788,13 +793,13 @@ class Handler(BaseHTTPRequestHandler):
             if not llm.is_configured(llm.load_settings(), "categorize"):
                 return self._error("Set up an AI provider in Settings → AI first")
             if path == "/api/ai/discover":
-                started = JOB.start("discover", f"Propose categories: {_library_name(lib)}", lambda: run_discover(library=lib), key=lib)
+                started = JOB.start("discover", f"Propose categories: {_library_name(lib)}", lambda: run_discover(library=lib, should_stop=JOB.stop_requested), key=lib)
             else:
                 scope = body.get("scope") or "unsorted"
                 if scope not in ("unsorted", "unlocked"):
                     return self._error("Invalid scope")
                 started = JOB.start("suggest", "Suggest categories" + (f": {_library_name(lib)}" if lib else ""),
-                                    lambda: run_suggest(scope, library=lib), key=[scope, lib])
+                                    lambda: run_suggest(scope, library=lib, should_stop=JOB.stop_requested), key=[scope, lib])
             return self._queued(started)
 
         if path == "/api/ai/proposal/apply":

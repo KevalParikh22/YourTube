@@ -159,11 +159,12 @@ def assign_categories(
     batch_size: int = BATCH_SIZE,
     log: Callable[[str], None] = print,
     max_chars: int = BATCH_CHARS,
+    should_stop: Callable[[], bool] = lambda: False,
 ) -> Dict[str, Any]:
     """
     Suggests one category per video, in batches. Unknown answers fall back to the catch-all.
     Videos may carry 'summary', 'description' and 'excerpt' (see storage.ai_context) for better guesses.
-    Returns {'suggestions': [{'video_id', 'category', 'confidence'}], 'failed_batches': n}.
+    Returns {'suggestions': [{'video_id', 'category', 'confidence'}], 'failed_batches': n, 'stopped': bool}.
     """
     names = [c for c in categories if c and c != FALLBACK_CATEGORY]
     if not names:
@@ -177,6 +178,8 @@ def assign_categories(
     failed = 0
     batches = _pack(videos, batch_size, max(2_000, max_chars - len(cat_text)))
     for n, batch in enumerate(batches, 1):
+        if should_stop():
+            break
         log(f"   Batch {n}/{len(batches)} ({len(batch)} videos)…")
         prompt = f"""Categories:
 {cat_text}
@@ -213,23 +216,29 @@ Reply with JSON:
             suggestions[vid] = {"video_id": vid, "category": category, "confidence": confidence}
     if batches and failed == len(batches):
         raise LLMError("Every batch failed. Check the AI settings and try again.")
-    return {"suggestions": list(suggestions.values()), "failed_batches": failed}
+    return {"suggestions": list(suggestions.values()), "failed_batches": failed,
+            "stopped": should_stop()}
 
 
 # --- runners used by the CLI and the dashboard job ---------------------------
 
-def run_suggest(scope: str = "unsorted", library: Optional[int] = None) -> bool:
+def run_suggest(scope: str = "unsorted", library: Optional[int] = None,
+                should_stop: Callable[[], bool] = lambda: False) -> bool:
     """Category suggestions for one library, or (library=None) for each library with its own categories."""
     import storage
     libs = storage.video_libraries()
     wanted = sorted({libs.get(v["video_id"], 1) for v in storage.videos_for_ai(scope)}) if library is None else [int(library)]
     ok = True
     for lib in wanted or [1]:
-        ok = _suggest_library(scope, lib, libs) and ok
+        if should_stop():
+            print("Stopped before the next library.")
+            break
+        ok = _suggest_library(scope, lib, libs, should_stop) and ok
     return ok
 
 
-def _suggest_library(scope: str, library: int, libs: Dict[str, int]) -> bool:
+def _suggest_library(scope: str, library: int, libs: Dict[str, int],
+                     should_stop: Callable[[], bool] = lambda: False) -> bool:
     """Asks the configured model for category suggestions and stores them for review."""
     import llm
     import storage
@@ -257,6 +266,7 @@ def _suggest_library(scope: str, library: int, libs: Dict[str, int]) -> bool:
         print(f"   Sorting {len(videos)} videos into {len(taxonomy)} categories"
               + (f"; {known} with a summary, description or transcript" if known else "; titles only (fetch details for better results)") + "…")
         result = assign_categories(videos, list(taxonomy), complete, notes=settings.get("category_notes"),
+                                   should_stop=should_stop,
                                    max_chars=min(BATCH_CHARS, llm.context_chars(settings, "categorize")))
     except LLMError as e:
         print(f"Error: {e}")
@@ -267,11 +277,15 @@ def _suggest_library(scope: str, library: int, libs: Dict[str, int]) -> bool:
     print(f"{stored} suggestion{'' if stored == 1 else 's'} ready for review"
           + (f", {same} already in the suggested category" if same else "")
           + (f", {result['failed_batches']} batches failed" if result["failed_batches"] else "") + ".")
+    if result["stopped"]:
+        print(f"Stopped. {stored} suggestions so far are saved.")
+        return True
     print("   Nothing changes until you accept them (Library → AI suggestions).")
     return True
 
 
-def run_discover(max_categories: int = 12, library: Optional[int] = None) -> bool:
+def run_discover(max_categories: int = 12, library: Optional[int] = None,
+                 should_stop: Callable[[], bool] = lambda: False) -> bool:
     """Asks the configured model to propose a category set for one library and stores it for review."""
     import llm
     import storage
@@ -282,6 +296,9 @@ def run_discover(max_categories: int = 12, library: Optional[int] = None) -> boo
     everything = [v for v in storage.get_library() if v["library"] == library]
     videos = [v for v in everything if v.get("status") not in storage.DONE_STATUSES] or everything
     print(f"Proposing categories with {llm.describe(settings, 'categorize')} from {len(videos)} videos…")
+    if should_stop():
+        print("Stopped before asking the model.")
+        return False
     try:
         complete = llm.make_completer(settings, "categorize")
         # Leave room for the instructions and a reply of ~12 categories with keywords

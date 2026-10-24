@@ -3,6 +3,7 @@ import re
 import os
 import tempfile
 import unittest
+from unittest import mock
 
 import llm
 from ai_classifier import FALLBACK_CATEGORY, assign_categories, discover_categories
@@ -69,8 +70,36 @@ class DiscoverTest(unittest.TestCase):
         with self.assertRaises(LLMError):
             discover_categories([], fake("{}"))
 
+    def test_run_discover_stopped_before_model_call(self):
+        import ai_classifier
+        with mock.patch("llm.load_settings", return_value={"provider": "ollama"}), \
+             mock.patch("llm.for_library", return_value={}), \
+             mock.patch("storage.get_library", return_value=[{"library": 1, "status": "new"}]), \
+             mock.patch("llm.make_completer") as make_completer:
+            self.assertFalse(ai_classifier.run_discover(library=1, should_stop=lambda: True))
+            make_completer.assert_not_called()
+
 
 class AssignTest(unittest.TestCase):
+    def test_stops_before_first_batch(self):
+        complete = fake('{"items": []}')
+        out = assign_categories([{"video_id": "a", "title": "A"}], ["Cooking"], complete,
+                               should_stop=lambda: True, log=lambda m: None)
+        self.assertEqual(complete.calls, [])
+        self.assertTrue(out["stopped"])
+        self.assertEqual(out["suggestions"], [])
+
+    def test_stops_after_second_batch(self):
+        videos = [{"video_id": f"v{i}", "title": f"T{i}"} for i in range(11)]
+        def reply(prompt):
+            return '{"items": [{"i": 1, "category": "Cooking", "confidence": 1}]}'
+        complete = fake(reply)
+        out = assign_categories(videos, ["Cooking"], complete, batch_size=1,
+                               should_stop=lambda: len(complete.calls) >= 2, log=lambda m: None)
+        self.assertEqual(len(complete.calls), 2)
+        self.assertEqual([s["video_id"] for s in out["suggestions"]], ["v0", "v1"])
+        self.assertTrue(out["stopped"])
+
     def test_batches_and_validates(self):
         videos = [{"video_id": f"v{i}", "title": f"T{i}", "channel": ""} for i in range(5)]
         def reply(prompt):

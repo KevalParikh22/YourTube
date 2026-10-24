@@ -60,7 +60,7 @@
 
 ### T1: Stop works for category sorting and proposals (backend)
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **files:** `ai_classifier.py`, `dashboard.py`, `tests/test_ai.py`, `tests/test_queue.py`
 - **steps:**
   1. Add `should_stop` to `assign_categories`, `run_suggest`, `_suggest_library` and `run_discover` exactly as in Design notes A; save partial suggestions.
