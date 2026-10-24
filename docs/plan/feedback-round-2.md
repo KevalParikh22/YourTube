@@ -132,7 +132,7 @@
 
 ### T6a: Tooltips and short labels — Library, Plan, Triage, Playlists
 - **worker:** gemini
-- **status:** todo
+- **status:** done (codex)
 - **depends on:** T5, T4
 - **files:** `web/index.html`
 - **steps:** add the `tip()` helper and CSS (Design notes C); on these four pages turn multi-line explanations into labels plus tips; give every control a visible label.

@@ -109,6 +109,10 @@
   h2.h { font-weight: 600; font-size: 17px; margin: 0 0 4px; }
   .section { margin-top: 48px; }
   .note { font-size: 13px; color: var(--ink-2); margin: 0; }
+  .tip { position: relative; display: inline-grid; place-items: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--line-strong); border-radius: 50%; background: var(--raised); color: var(--ink-2); font-size: 11px; font-weight: 600; cursor: help; vertical-align: middle; }
+  .tip::after { content: attr(data-tip); position: absolute; z-index: 40; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%); width: max-content; max-width: 280px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--raised); color: var(--ink); box-shadow: 0 4px 16px #0002; font-size: 12px; font-weight: 400; line-height: 1.45; text-align: left; white-space: normal; opacity: 0; visibility: hidden; pointer-events: none; }
+  .tip:hover::after, .tip:focus-visible::after { opacity: 1; visibility: visible; }
+  .tip-text { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
   /* ---------- library ---------- */
   .lib { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; margin-top: 40px; align-items: start; }
@@ -534,6 +538,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sx = s => `${s}×`;
 const plural = (n, w) => `${n} ${n === 1 ? w : /[^aeiou]y$/.test(w) ? w.slice(0, -1) + 'ies' : w + 's'}`;
+const tip = text => `<button type="button" class="tip" aria-label="More info" data-tip="${esc(text)}"><span aria-hidden="true">i</span><span class="tip-text">${esc(text)}</span></button>`;
 function fmt(sec) {
   sec = Math.round(sec || 0);
   const h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
@@ -750,8 +755,10 @@ function viewLibrary() {
     </aside>
     <div>
       <div class="list-head">
-        <input type="search" id="q" placeholder="Search titles, channels and notes" value="${esc(S.view.q)}" aria-label="Search">
-        <select data-change="v-sort" aria-label="Sort">
+        <label class="field-label" for="q">Search ${tip('Find videos by title, channel or notes.')}</label>
+        <input type="search" id="q" placeholder="Titles, channels and notes" value="${esc(S.view.q)}" aria-label="Search">
+        <label class="field-label" for="v-sort">Sort</label>
+        <select id="v-sort" data-change="v-sort" aria-label="Sort">
           ${[['order', 'Playlist order'], ['shortest', 'Shortest first'], ['longest', 'Longest first'], ['title', 'Title'], ['channel', 'Channel']]
             .map(([k, l]) => `<option value="${k}" ${S.view.sort === k ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
@@ -864,14 +871,14 @@ function viewPlan() {
   <section>
     <div class="eyebrow">Plan</div>
     <h1 class="display">${allDays ? `Done by ${finish(allDays)}` : 'All watched'}<em>${allDays ? plural(allDays, 'study day') : ''}</em></h1>
-    <p class="sentence">I can watch <input type="number" min="5" step="5" value="${p.mins}" data-change="p-mins" aria-label="Minutes per day"> minutes a day,
-      <input type="number" min="1" max="7" value="${p.days}" data-change="p-days" aria-label="Days per week"> days a week, at
-      <select data-change="speed" aria-label="Speed">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select> speed.</p>
+    <p class="sentence">Minutes/day <input type="number" min="5" step="5" value="${p.mins}" data-change="p-mins" aria-label="Minutes per day"> · Days/week
+      <input type="number" min="1" max="7" value="${p.days}" data-change="p-days" aria-label="Days per week"> · Speed
+      <select data-change="speed" aria-label="Speed">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select></p>
   </section>
 
   <section class="section">
     <h2 class="h">By category</h2>
-    <p class="note">How long each category takes on its own. Dates count from today.</p>
+    <p class="note">Time by category ${tip('Each category is estimated separately. Completion dates count from today.')}</p>
     <div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Category</th><th class="r">Left</th><th class="r">Time at ${sx(S.speed)}</th><th class="r">Study days</th><th class="r">Done by</th></tr></thead>
       <tbody>${rows.map(({ c, st, sd }) => `<tr><td><a href="#/" data-act="v-cat" data-v="${esc(c)}">${esc(c)}</a></td>
@@ -882,10 +889,10 @@ function viewPlan() {
 
   <section class="section">
     <h2 class="h">Today's session</h2>
-    <p class="sentence">Fill <input type="number" min="5" step="5" value="${S.session.mins}" data-change="s-mins" aria-label="Session minutes"> minutes from
-      <select data-change="s-cat" aria-label="Category"><option value="">any category</option>${categoryNames().map(c => `<option value="${esc(c)}" ${S.session.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>,
-      <select data-change="s-order" aria-label="Order">${[['order', 'in playlist order'], ['shortest', 'shortest first'], ['longest', 'longest first'], ['progress', 'unfinished first']]
-        .map(([k, l]) => `<option value="${k}" ${S.session.order === k ? 'selected' : ''}>${l}</option>`).join('')}</select>.</p>
+    <p class="sentence">Session (min) <input type="number" min="5" step="5" value="${S.session.mins}" data-change="s-mins" aria-label="Session minutes"> · Category
+      <select data-change="s-cat" aria-label="Category"><option value="">Any category</option>${categoryNames().map(c => `<option value="${esc(c)}" ${S.session.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      · Order <select data-change="s-order" aria-label="Order">${[['order', 'Playlist order'], ['shortest', 'Shortest first'], ['longest', 'Longest first'], ['progress', 'Unfinished first']]
+        .map(([k, l]) => `<option value="${k}" ${S.session.order === k ? 'selected' : ''}>${l}</option>`).join('')}</select></p>
     <div style="margin-top:20px">
       <div class="note">${plural(s.picked.length, 'video')} · ${fmt(used)} of ${S.session.mins}m</div>
       <div class="meter"><i style="width:${Math.min(100, (used / (S.session.mins * 60)) * 100)}%"></i></div>
@@ -935,7 +942,7 @@ function viewTriage() {
   <section>
     <div class="eyebrow">Triage${t.cat ? ` · ${esc(t.cat)}` : ''}</div>
     <h1 class="display num">${fmt(follow / S.speed)}<em>if you follow the ratings, instead of ${fmt(all / S.speed)} for everything at ${sx(S.speed)}</em></h1>
-    <p class="lede">${open.length - unrated} of ${plural(open.length, 'unwatched video')} rated. The AI weighs depth, fit with your interests, time against value and freshness. Nothing changes until you act.</p>
+    <p class="lede">${open.length - unrated} of ${plural(open.length, 'unwatched video')} rated. Nothing changes until you act. ${tip('Ratings weigh depth, fit with your interests, time against value and freshness.')}</p>
     ${!ai.ready_for.rate ? `<div class="banner"><span>Choose an AI for ratings to get a Watch / Skim / Skip verdict for every video.</span><a class="btn btn-sm" href="#/ai">Set up AI</a></div>`
       : unrated ? `<div class="banner"><span>${plural(unrated, 'video')} not rated yet${open.filter(v => !v.rating && v.details?.status !== 'done').length ? '. Videos without transcripts are rated from title and description only' : ''}.</span>
         <button class="btn btn-dark btn-sm" data-act="rate-batch" data-job-btn>Rate ${plural(unrated, 'video')}</button></div>` : ''}
@@ -945,7 +952,7 @@ function viewTriage() {
     <div class="chips">
       ${[['all', 'All'], ['watch', 'Watch'], ['skim', 'Skim'], ['skip', 'Skip'], ['unrated', 'Not rated']].map(([k, l]) =>
         `<button class="chip ${t.verdict === k ? 'on' : ''}" data-act="tri-verdict" data-v="${k}">${l}<span class="c">${count(k)}</span></button>`).join('')}
-      <select data-change="t-cat" aria-label="Category" style="height:30px"><option value="">All categories</option>${cats.map(c => `<option value="${esc(c)}" ${t.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+      <label class="field-label" for="t-cat">Category</label><select id="t-cat" data-change="t-cat" aria-label="Category" style="height:30px"><option value="">All categories</option>${cats.map(c => `<option value="${esc(c)}" ${t.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
     </div>
     <div class="chips">
       ${t.undo.length ? `<button class="btn-text" data-act="tri-undo">Undo</button>` : ''}
@@ -1014,9 +1021,9 @@ function viewSources() {
     <div class="eyebrow">Playlists</div>
     <h1 class="display">${plural(pls.length, 'playlist')}<em>${plural(videos().length, 'video')} in your library</em></h1>
     <div class="policy">
-      <div><b>Read-only</b><p>YourTube only reads your playlists. It never adds, removes or reorders anything on YouTube.</p></div>
-      <div><b>Add as many as you like</b><p>A video saved in two playlists shows up once in your library and keeps a single status.</p></div>
-      <div><b>Kept until you've watched it</b><p>If you remove a video on YouTube, it stays here as "no longer in playlist" until you mark it watched.</p></div>
+      <div><b>Read-only ${tip('YourTube never adds, removes or reorders videos on YouTube.')}</b></div>
+      <div><b>Multiple playlists ${tip('A video saved in two playlists appears once in your library and keeps one status.')}</b></div>
+      <div><b>Removed videos ${tip('A removed video stays here as “no longer in playlist” until you mark it watched.')}</b></div>
     </div>
   </section>
 
@@ -1038,7 +1045,7 @@ function viewSources() {
       <input id="i-cookies" type="text" data-input="i-cookies" value="${esc(g.cookies)}" placeholder="C:\\Users\\you\\cookies.txt" style="width:100%"></div>` : ''}
     <p class="hint">${winChromium
       ? '<span class="warn-text">On Windows, Chrome-based browsers usually block reading their login.</span> If the sync fails, use Firefox or a cookies.txt export.'
-      : 'Private playlists and Watch Later need a sign-in. "Detect" uses the first browser that is signed in to YouTube. Syncing again keeps your statuses, notes and categories.'}
+      : `Sign-in help ${tip('Private playlists and Watch Later need a sign-in. Detect uses the first browser signed in to YouTube. Syncing again keeps statuses, notes and categories.')}`}
       ${S.data.ai.ready_for.categorize && S.data.ai.auto_after_sync ? '<br>After each sync, the AI suggests categories for new unsorted videos.' : ''}</p>
     <div id="job"></div>
   </section>
@@ -1067,8 +1074,7 @@ function viewLibraries() {
   const libs = S.data.libraries;
   return `<section class="section card">
     <h2 class="h">Libraries</h2>
-    <p class="note">Keep different parts of your life apart, for example Tech, Health and Personal. Each library has its own playlists,
-      categories, interests for ratings, time left, triage and answers. Switch libraries at the top of the page.</p>
+    <p class="note">Libraries ${tip('Separate areas such as Tech, Health and Personal. Each has its own playlists, categories, rating interests, time left, triage and answers. Switch libraries at the top.')}</p>
     ${libs.map(l => `<div class="prov"><div style="display:flex;gap:8px;align-items:center;min-width:0">
         <input type="text" value="${esc(l.name)}" data-change="lib-rename" data-lib="${l.id}" aria-label="Library name" style="max-width:220px">
         <span class="faint" style="font-size:12.5px">${plural(l.playlists, 'playlist')}</span></div>
@@ -1084,8 +1090,7 @@ function viewDetailsCard() {
   return `
   <section class="section card">
     <h2 class="h">Video details and transcripts</h2>
-    <p class="note">Descriptions, chapters and captions make videos searchable and let the AI summarize them. They are read
-      <b>without your sign-in</b>, one video every few seconds, so YouTube doesn't flag the traffic. Music categories are left out (switch per category on the Categories page).</p>
+    <p class="note">Video details ${tip('Descriptions, chapters and captions enable search and summaries. They are fetched without your sign-in, one video every few seconds. Music categories are excluded; change this on Categories.')}</p>
     <div class="det-counts">
       <span><b>${counts.done || 0}</b>with transcript</span>
       <span><b>${counts.no_captions || 0}</b>no captions</span>
@@ -1099,10 +1104,9 @@ function viewDetailsCard() {
         : need ? `<span class="faint" style="font-size:12.5px">About ${Math.max(1, Math.round(need * 5 / 60))} min</span>` : ''}
     </div>
     <label class="check" style="margin-top:14px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
-      <span>After each sync, also fetch details for up to 50 new videos: their descriptions, chapters and captions.
-        Transcripts, search inside videos and good ratings all need them; without this, use the button above.</span></label>
+      <span>Fetch details for new videos after each sync ${tip('Up to 50 new videos per sync: descriptions, chapters and captions. Transcripts, search inside videos and good ratings need them.')}</span></label>
     <label class="check" style="margin-top:10px"><input type="checkbox" data-change="use-descriptions" ${S.data.use_descriptions ? 'checked' : ''}>
-      <span>Use video descriptions in search and for the AI. They come with the captions at no extra cost; turn this off if yours are mostly links and sponsor text.</span></label>
+      <span>Use descriptions in search and AI ${tip('Descriptions come with the captions at no extra cost. Turn this off if they are mostly links and sponsor text.')}</span></label>
     ${viewAsr()}
     ${viewVisuals()}
   </section>`;
