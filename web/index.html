@@ -266,6 +266,11 @@
   .tri-acts { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 108px; }
   .score-big { font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
   .rate-box { border-radius: 8px; padding: 14px 16px; background: var(--sunken); }
+  .score-factors { display: grid; gap: 9px; margin-top: 12px; }
+  .factor > div:first-child { display:flex; justify-content:space-between; font-size:12px; }
+  .factor-track { height:5px; background:var(--line); border-radius:99px; overflow:hidden; margin:4px 0; }
+  .factor-track i { display:block; height:100%; background:var(--accent); }
+  .factor small, .minute-note { display:block; color:var(--ink-2); font-size:12px; }
   .rate-box .tldr { font-size: 13.5px; line-height: 1.55; margin: 10px 0 0; }
   .rate-box ul { list-style: none; margin: 10px 0 0; padding: 0; }
   .banner { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 12px 16px; border-radius: 8px; background: var(--skim-bg); color: var(--ink); margin-top: 20px; font-size: 13.5px; }
@@ -959,6 +964,7 @@ function triRow(v) {
       <div class="tri-head">${badge(v)}${skipped ? '<span class="vb vb-skip">Skipped</span>' : v.status === 'in_progress' ? '<span class="vb vb-none">In progress</span>' : ''}${r?.basis === 'metadata' ? '<span class="faint" style="font-size:12px">from title only</span>' : ''}</div>
       <button class="tri-title" data-act="open" data-id="${esc(v.video_id)}">${esc(v.title)}</button>
       <div class="tri-meta">${esc(v.channel || 'Unknown channel')} · <span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span> · ${timeText}</div>
+      ${r ? `<button class="btn-text" style="padding:0;height:auto;font-size:12px" data-act="open-why" data-id="${esc(v.video_id)}">Why?</button>${r.calc && Object.keys(r.breakdown || {}).length ? '' : `<span class="faint" style="font-size:12px"> · Rate again for a score breakdown</span>`}` : ''}
       ${r?.reason ? `<div class="tri-reason">${esc(r.reason)}</div>` : ''}
       ${r?.skim?.length ? `<div class="ranges">${r.skim.map(x => `<button class="range" data-act="play-at" data-id="${esc(v.video_id)}" data-t="${x.start}" title="${esc(x.why)}">${clock(x.start)}–${clock(x.end)}</button>`).join('')}</div>` : ''}
     </div>
@@ -1654,7 +1660,7 @@ function viewAI() {
   </section>`;
 }
 function viewGeneral() {
-  const ai = S.data.ai;
+  const ai = S.data.ai, formula = ratingFormula(ai.rating_formula || {});
   return `
   <section class="section card">
     <h2 class="h">Display</h2>
@@ -1663,6 +1669,18 @@ function viewGeneral() {
     <div class="route"><span class="field-label" style="margin:0">Theme</span>
       <select data-change="theme" style="width:100%">${[['auto', 'Match this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<option value="${k}" ${S.theme === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <p class="hint">All watch times use the default speed. The Plan page can change it too. These are kept in this browser.</p>
+  </section>
+
+  <section class="section card">
+    <h2 class="h">How scores are calculated</h2>
+    <p class="hint">Quality combines depth, time value and freshness. Fit adjusts that score with a penalty or bonus.</p>
+    <div class="ai-grid">
+      ${[['depth','Depth weight'],['value','Time value weight'],['freshness','Freshness weight']].map(([key,label]) => `<div><label class="field-label" for="formula-${key}">${label} (%)</label><input id="formula-${key}" type="number" min="0" max="100" step="1" data-formula="${key}" value="${Math.round(formula[key]*100)}"></div>`).join('')}
+      <div><label class="field-label" for="formula-interest_penalty">Interest penalty</label><input id="formula-interest_penalty" type="number" min="0" max="5" step="0.1" data-formula="interest_penalty" value="${formula.interest_penalty}"></div>
+      <div><label class="field-label" for="formula-interest_bonus">Interest bonus</label><input id="formula-interest_bonus" type="number" min="0" max="2" step="0.1" data-formula="interest_bonus" value="${formula.interest_bonus}"></div>
+    </div>
+    <div class="kv-line" id="formula-example">Example: ${formulaExample(formula)}</div>
+    <div class="actions"><button class="btn btn-dark btn-sm" data-act="formula-save">Save</button><button class="btn btn-sm" data-act="formula-reset">Reset to default</button></div>
   </section>
 
   <section class="section card">
@@ -1870,10 +1888,18 @@ function drawerRating(v) {
     ? `<div class="kv-line">No AI summary yet: the summary, key points and a Watch / Skim / Skip verdict come together when a video is rated.
         <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate and summarise this video</button></div>`
     : `<div class="kv-line">No AI summary yet. <a href="#/ai">Choose an AI for ratings</a> to get summaries.</div>`;
+  const factorLabels = { depth: 'Depth', fit: 'Fit', value: 'Time value', freshness: 'Freshness' };
+  const calc = r.calc;
+  const breakdown = r.breakdown || {};
+  const calcLine = calc ? `${calc.score} = quality ${calc.quality} (depth ${breakdown.depth?.score ?? '—'} × ${Math.round((calc.formula?.depth || 0)*100)}% + value ${breakdown.value?.score ?? '—'} × ${Math.round((calc.formula?.value || 0)*100)}% + freshness ${breakdown.freshness?.score ?? '—'} × ${Math.round((calc.formula?.freshness || 0)*100)}%) + interest ${calc.interest}` : '';
   return `<div class="rate-box">
     <div class="tri-head"><span class="score-big">${r.score.toFixed(1)}</span>${badge(v).replace(/<b>.*?<\/b>/, '')}
       <span class="muted" style="font-size:13px">${esc(r.reason)}</span></div>
+    <div id="why-score" class="field-label">Why this score</div>
+    ${Object.keys(breakdown).filter(k => factorLabels[k]).length ? `<div class="score-factors">${['depth','fit','value','freshness'].filter(k => breakdown[k]).map(k => `<div class="factor"><div><b>${factorLabels[k]}</b><span>${breakdown[k].score}/10</span></div><div class="factor-track"><i style="width:${Math.max(0,Math.min(10,+breakdown[k].score||0))*10}%"></i></div>${breakdown[k].why ? `<small>${esc(breakdown[k].why)}</small>` : ''}</div>`).join('')}</div>${calcLine ? `<div class="kv-line">${esc(calcLine)}</div>` : ''}` : `<div class="kv-line">Rate again for a score breakdown.</div>`}
     ${r.tldr ? `<p class="tldr">${esc(r.tldr)}</p>` : ''}
+    ${r.minutes?.length ? `<div class="field-label">Minutes</div><ul>${r.minutes.map(m => `<li><button class="chap" data-act="seek" data-t="${m.t}"><time>${clock(m.t)}</time><span><b>${esc(m.topic)}</b>${(m.notes || []).map(n => `<small class="minute-note">${esc(n)}</small>`).join('')}</span></button></li>`).join('')}</ul>` : ''}
+    ${r.takeaways?.length ? `<div class="field-label">Takeaways</div><ul>${r.takeaways.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${r.skim.length ? `<div class="ranges">${r.skim.map(x => `<button class="range" data-act="seek" data-t="${x.start}" title="${esc(x.why)}">${clock(x.start)}–${clock(x.end)} ${esc(x.why)}</button>`).join('')}</div>` : ''}
     ${r.points.length ? `<ul>${r.points.map(p => p.t != null
       ? `<li><button class="chap" data-act="seek" data-t="${p.t}"><time>${clock(p.t)}</time><span>${esc(p.text)}</span></button></li>`
@@ -1881,6 +1907,14 @@ function drawerRating(v) {
     <div class="kv-line">${r.basis === 'metadata' ? 'Rated from title and description only' : 'Rated from the transcript'} · ${esc(r.model || '')}
       · <button class="btn-text" style="padding:0;height:auto;font-size:12.5px" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate again</button></div>
   </div>`;
+}
+function ratingFormula(custom) {
+  return { depth: .45, value: .40, freshness: .15, interest_penalty: 2, interest_bonus: .5, ...custom };
+}
+function formulaExample(f) {
+  const quality = (7*f.depth + 6*f.value + 8*f.freshness) / Math.max(.0001, f.depth+f.value+f.freshness);
+  const fit = 5, interest = -f.interest_penalty * Math.max(0, Math.min(1, (7-fit)/4));
+  return `${(Math.max(0, Math.min(10, quality+interest))).toFixed(1)} = quality ${quality.toFixed(1)} (7 × ${Math.round(f.depth*100)}% + 6 × ${Math.round(f.value*100)}% + 8 × ${Math.round(f.freshness*100)}%) + interest ${interest.toFixed(1)}`;
 }
 function drawerSlides(v) {
   const vis = v.visual || {}, cached = S.detailCache[v.video_id], full = cached && cached !== 'loading' ? cached : null;
@@ -2005,6 +2039,7 @@ document.addEventListener('click', async e => {
     case 'cycle': { const v = byId(id); if (v) update([id], { status: NEXT[v.status] || 'in_progress' }); break; }
     case 'set-status': update([id], { status: el.dataset.status }); break;
     case 'open': openDrawer(id); break;
+    case 'open-why': openDrawer(id); requestAnimationFrame(() => $('#why-score')?.scrollIntoView({ behavior: 'smooth', block: 'start' })); break;
     case 'close': closeDrawer(); break;
     case 'step': { const i = S.visible.findIndex(x => x.video_id === S.drawer) + +el.dataset.dir; if (S.visible[i]) openDrawer(S.visible[i].video_id); break; }
     case 'pick': if (el.checked) S.sel.add(id); else S.sel.delete(id); renderList(); break;
@@ -2185,6 +2220,17 @@ document.addEventListener('click', async e => {
     case 'ai-edit': S.ai.provider = S.ai.provider === el.dataset.p ? null : el.dataset.p; S.ai.key = ''; refresh(); break;
     case 'ai-save': try { await saveAi(aiEditorBody(el.dataset.p)); refresh(); renderBar(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
     case 'ai-save-prefs': try { await saveAi(aiPrefsBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
+    case 'formula-save': {
+      const values = Object.fromEntries($$('[data-formula]').map(input => [input.dataset.formula, +input.value]));
+      values.depth /= 100; values.value /= 100; values.freshness /= 100;
+      try { await saveAi({ rating_formula: values }); refresh(); toast('Score formula saved'); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'formula-reset':
+      try { await saveAi({ rating_formula: {} }); refresh(); toast('Default formula restored'); }
+      catch (err) { toast(err.message, true); }
+      break;
     case 'ai-save-routes': try { await saveAi(aiRoutesBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
     case 'ai-clear-key': try { await saveAi({ edit: el.dataset.p, config: { api_key: '__clear__' } }); refresh(); toast('Key removed'); } catch (err) { toast(err.message, true); } break;
     case 'ai-test': {
@@ -2326,6 +2372,11 @@ document.addEventListener('change', async e => {
 let qT, sT, aT;
 document.addEventListener('input', e => {
   const el = e.target;
+  if (el.dataset.formula) {
+    const f = ratingFormula(Object.fromEntries($$('[data-formula]').map(input => [input.dataset.formula, +input.value / (['depth','value','freshness'].includes(input.dataset.formula) ? 100 : 1)])));
+    const example = $('#formula-example'); if (example) example.textContent = `Example: ${formulaExample(f)}`;
+    return;
+  }
   if (el.id === 'sq') {
     S.search.q = el.value; clearTimeout(sT);
     sT = setTimeout(() => { history.replaceState(null, '', `#/search?q=${encodeURIComponent(S.search.q)}`); runSearch(); }, 250);

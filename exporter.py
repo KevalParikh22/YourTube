@@ -127,6 +127,29 @@ def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
         out += ["## Verdict", "", f"**{r.get('score')} · {str(r.get('verdict', '')).capitalize()}**: {_md_text(r.get('reason'))}", ""]
         if r.get("tldr"):
             out += ["## Summary", "", _md_text(r["tldr"]), ""]
+        if r.get("minutes"):
+            out += ["## Minutes", ""]
+            for minute in r["minutes"]:
+                t = minute.get("t")
+                label = f"[{_clock(t)}]({_at(vid, t)}) " if t is not None else ""
+                out.append(f"- {label}{_md_text(minute.get('topic'))}")
+                out.extend(f"  - {_md_text(note)}" for note in minute.get("notes") or [])
+            out.append("")
+        if r.get("takeaways"):
+            out += ["## Takeaways", ""]
+            out += [f"- {_md_text(item)}" for item in r["takeaways"]]
+            out.append("")
+        if r.get("breakdown"):
+            out += ["## Why this score", ""]
+            for key, label in (("depth", "Depth"), ("fit", "Fit"), ("value", "Time value"), ("freshness", "Freshness")):
+                part = r["breakdown"].get(key)
+                if part:
+                    out.append(f"- **{label}: {part.get('score')}** — {_md_text(part.get('why'))}")
+            calc = r.get("calc") or r["breakdown"].get("calc")
+            if calc:
+                f = calc.get("formula") or {}
+                out.append(f"- Score: {calc.get('score')} = quality {calc.get('quality')} (depth {f.get('depth', 0) * 100:g}% + value {f.get('value', 0) * 100:g}% + freshness {f.get('freshness', 0) * 100:g}%) + interest {calc.get('interest')}")
+            out.append("")
         if r.get("points"):
             out += ["## Key points", ""]
             out += [f"- [{_clock(p['t'])}]({_at(vid, p['t'])}) {_md_text(p['text'])}" if p.get("t") is not None

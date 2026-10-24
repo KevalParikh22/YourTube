@@ -104,7 +104,7 @@
 
 ### T4: Show "Why this score", minutes and takeaways
 - **worker:** gemini
-- **status:** todo
+- **status:** done (codex)
 - **depends on:** T3, T2
 - **files:** `web/index.html`, `exporter.py`, `tests/test_extractor_exporter.py`
 - **steps:**

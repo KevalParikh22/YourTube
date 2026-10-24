@@ -24,6 +24,12 @@ class MarkdownTest(unittest.TestCase):
     V = {"video_id": "abc", "title": "Graph | RAG # [demo]", "channel": "Ch", "category": "AI & ML", "status": "unwatched",
          "duration_seconds": 3725, "notes": "my **own** notes",
          "rating": {"score": 8.0, "verdict": "skim", "reason": "good <b>stuff</b>", "tldr": "TLDR",
+                    "breakdown": {"depth": {"score": 8, "why": "deep *work*"}, "fit": {"score": 5, "why": "some fit"},
+                                  "value": {"score": 7, "why": "good value"}, "freshness": {"score": 6, "why": "new"}},
+                    "calc": {"score": 7.1, "quality": 7.2, "interest": -0.1,
+                             "formula": {"depth": .45, "value": .4, "freshness": .15}},
+                    "minutes": [{"t": 65, "topic": "Topic <one>", "notes": ["note *one*"]}],
+                    "takeaways": ["Do [this]"],
                     "points": [{"t": 65, "text": "point one"}, {"t": None, "text": "untimed"}],
                     "skim": [{"start": 60, "end": 3700, "why": "core"}]}}
 
@@ -37,6 +43,10 @@ class MarkdownTest(unittest.TestCase):
                        "- [1:00–1:01:40](https://www.youtube.com/watch?v=abc&t=60s) core",
                        "- [0:00](https://www.youtube.com/watch?v=abc&t=0s) Intro",
                        "good \\<b\\>stuff\\</b\\>", "my **own** notes"):
+            self.assertIn(needle, md)
+        for needle in ("## Minutes", "[1:05](https://www.youtube.com/watch?v=abc&t=65s) Topic \\<one\\>",
+                       "note \\*one\\*", "## Takeaways", "Do \\[this\\]", "## Why this score",
+                       "Depth: 8** — deep \\*work\\*", "Score: 7.1 = quality 7.2"):
             self.assertIn(needle, md)
 
     def test_zip(self):
