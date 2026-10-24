@@ -1,5 +1,5 @@
 ---
-description: Delegate one plan task to a worker LLM (fallback gemini → kimi → codex), then verify and commit
+description: Delegate one plan task to a worker LLM (fallback gemini → codex), then verify and commit
 argument-hint: <plan-file> <task-id> [worker]
 disable-model-invocation: true
 allowed-tools: Read, Edit, Bash(.team/team.sh:*), Bash(git status:*), Bash(git diff:*), Bash(git add:*), Bash(git commit:*), Bash(git stash list), Bash(git switch -c:*)

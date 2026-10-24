@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# team.sh: run Gemini / Kimi / Codex as workers with automatic fallback.
+# team.sh: run Gemini / opencode / Codex (and optionally Kimi) as workers with automatic fallback.
 # Claude (the orchestrator) calls this from its Bash tool. You can also run it by hand.
 #
 #   team.sh status
-#   team.sh build  --plan docs/plan/x.md --task T3 [--worker kimi] [--chain a,b] [--note "..."] [--no-verify] [--allow-dirty]
+#   team.sh build  --plan docs/plan/x.md --task T3 [--worker opencode] [--chain a,b] [--note "..."] [--no-verify] [--allow-dirty]
 #   team.sh build  --prompt-file my-task.md        (free-form task instead of a plan task)
 #   team.sh ask    "question" [--save docs/file.md] [--worker gemini]
 #   team.sh review [--base main] [--plan docs/plan/x.md] [--worker codex]
@@ -16,7 +16,7 @@ TEAM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$TEAM_DIR/.." && pwd)"
 cd "$ROOT" || exit 2
 # non-interactive shells (Claude's Bash tool) skip ~/.bashrc, so add the usual per-user CLI folders
-for d in "$HOME/.local/bin" "$HOME/.kimi-code/bin" "$HOME/.npm-global/bin"; do
+for d in "$HOME/.local/bin" "$HOME/.kimi-code/bin" "$HOME/.opencode/bin" "$HOME/.npm-global/bin"; do
   [ -d "$d" ] && case ":$PATH:" in *":$d:"*) ;; *) PATH="$PATH:$d" ;; esac
 done
 export PATH
@@ -180,7 +180,7 @@ cmd_status() {
   echo "chains:   build=[$BUILD_CHAIN]  review=[$REVIEW_CHAIN]  ask=[$ASK_CHAIN]"
   local vc; vc="$(detect_verify || true)"
   echo "verify:   ${vc:-(none found, so set the Verify line in AGENTS.md or VERIFY_CMD in .team/team.conf)}"
-  for w in gemini kimi codex claude; do
+  for w in gemini opencode kimi codex claude; do
     if installed "$w"; then printf "  %-7s ✓ %s\n" "$w" "$(timeout 10 "$w" --version 2>/dev/null | head -1)"
     else printf "  %-7s ✗ not installed\n" "$w"; fi
   done

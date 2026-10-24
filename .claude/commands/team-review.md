@@ -1,5 +1,5 @@
 ---
-description: Get a worker LLM (codex → gemini → kimi) to review the branch diff; Claude triages the findings
+description: Get a worker LLM (codex → gemini) to review the branch diff; Claude triages the findings
 argument-hint: [plan-file] [--base <ref>] [extra focus]
 disable-model-invocation: true
 allowed-tools: Read, Bash(.team/team.sh review:*), Bash(git diff:*), Bash(git log:*)

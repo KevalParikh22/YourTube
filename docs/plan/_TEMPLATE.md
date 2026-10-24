@@ -10,7 +10,7 @@
 ## Tasks
 
 ### T1: <short title>
-- **worker:** gemini | kimi | codex | claude
+- **worker:** gemini | codex | claude (or an optional worker from .team/team.conf)
 - **status:** todo | done | failed
 - **files:** `src/...`, `src/....test.ts`
 - **steps:**

@@ -1,6 +1,6 @@
 # AGENTS.md — rules for every AI working in this repo
 
-Claude Code, Gemini CLI, Codex CLI and Kimi CLI all read this file.
+Claude Code, Gemini CLI and Codex CLI (and any optional worker, such as opencode or Kimi) read this file.
 It is the single source of truth. Follow it exactly, whichever model you are.
 
 ---
@@ -48,9 +48,9 @@ These habits are what make output reliable. They are mandatory.
 
 ## 4. Team protocol (multi-LLM)
 
-This repo is worked on by several AI tools. **Claude is the orchestrator**: it plans, assigns tasks, verifies and commits. Gemini, Kimi and Codex are **workers**.
+This repo is worked on by several AI tools. **Claude is the orchestrator**: it plans, assigns tasks, verifies and commits. Gemini and Codex are **workers** by default; opencode and Kimi can be added in `.team/team.conf`.
 
-**If you are a worker (Gemini / Kimi / Codex):**
+**If you are a worker (Gemini / Codex / any optional worker):**
 - Your task arrives as a prompt that references a plan file in `docs/plan/`. Read that plan and do ONLY the task id you were given.
 - **Do not** `git commit`, `git push`, switch branches, or edit `HANDOFF.md` or `docs/plan/*`. The orchestrator does that.
 - **Do not** edit `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.claude/`, `.team/`.

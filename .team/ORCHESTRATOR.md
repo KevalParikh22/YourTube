@@ -2,7 +2,7 @@
 
 Claude normally plays the orchestrator. **If Claude is out of usage**, open Gemini CLI in this repo and say:
 "Act as the orchestrator described in `.team/ORCHESTRATOR.md`."
-Gemini then follows the same steps and leaves itself out of the build chain (`--chain kimi,codex`).
+Gemini then follows the same steps and leaves itself out of the build chain (`--chain codex`).
 
 ---
 
@@ -12,9 +12,20 @@ Gemini then follows the same steps and leaves itself out of the build chain (`--
 |---|---|---|
 | Plan / architecture / hard bugs / final review / commit | **Claude** | Best judgement. Its quota is the scarcest, so spend it on decisions, not typing |
 | Main builder | **Gemini** | Biggest quota on Pro, 1M-token context |
-| Second builder | **Kimi** | Good at boilerplate, frontend and refactors; takes over when Gemini is rate-limited |
+| Second builder | **Codex** | Takes over when Gemini is rate-limited |
 | Reviewer / small fixes | **Codex** | Small free quota, strong at reviewing code. Keep its prompts short |
 | Read-only research ("explain module X", "summarise the repo") | **Gemini** via `team.sh ask` | Huge context, cheap for us |
+
+## Worker setup
+
+Keys live in each tool's own config in your home folder, never in this repo.
+
+- **Gemini:** create `~/.gemini/.env` with one line, `GEMINI_API_KEY=<your key>` (key from aistudio.google.com/apikey). The CLI reads that file in headless runs, which `team.sh` uses. Run `gemini` once by hand to check it works. A free key gives smaller limits than a paid plan, so expect rate limits on long builds; the chain then moves on.
+- **Codex:** `codex login`.
+
+**Choosing workers.** The default team is three models: Claude orchestrates, Gemini and Codex work. The chains in `.team/team.conf` decide which workers run and in what order; add or remove names there. Optional workers with ready adapters:
+- **opencode:** any OpenRouter, Groq or Ollama model. Run `opencode auth login`, set `OPENCODE_MODEL`, add `opencode` to a chain. Free models are weaker and rate-limited, so they trade quality for fallback.
+- **Kimi:** needs a paid Kimi Code plan; run `kimi` once to log in, then add `kimi` to a chain.
 
 ## The loop
 
@@ -41,7 +52,7 @@ Gemini then follows the same steps and leaves itself out of the build chain (`--
 ### 3. Accept or retry
 - **Verify passes, diff matches the plan and stays in scope:** `git add -A && git commit -m "<feature>: T3 <title>"`, then tick the task in the plan.
 - **Small problem:** fix it yourself if the fix is under ~10 lines, otherwise retry with feedback:
-  `team.sh build --plan ... --task T3 --worker kimi --note "Previous attempt failed: <error>. Fix by ..."`
+  `team.sh build --plan ... --task T3 --worker codex --note "Previous attempt failed: <error>. Fix by ..."`
 - **Second failure on the same task:** stop delegating it and do it yourself (the orchestrator).
 - **Exit code 3 (all workers failed or rate-limited):** do it yourself, or pause and write `HANDOFF.md`.
 

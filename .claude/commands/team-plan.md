@@ -14,7 +14,7 @@ Use as few of your own tokens as you can:
 3. Copy `docs/plan/_TEMPLATE.md` to `docs/plan/<feature-slug>.md` and fill it in:
    - Concrete **Design notes**: names, types, function signatures, API shapes, file locations. Workers must not have to make design decisions.
    - Tasks `T1…Tn`, each about 1–3 files and under ~200 lines, in dependency order, with steps, acceptance criteria and a verify command.
-   - `worker:` gemini for most tasks, kimi for boilerplate or UI, codex only for small focused fixes, **claude** for anything security-sensitive or needing deep judgement.
+   - `worker:` gemini for most tasks, codex only for small focused fixes, **claude** for anything security-sensitive or needing deep judgement.
 4. If on main/master, create the branch named in the plan (`git switch -c feat/<slug>`).
 5. Update `HANDOFF.md` (active plan, next up).
 

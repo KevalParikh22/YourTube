@@ -136,13 +136,13 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
 
 ## Multi-LLM team (Claude = orchestrator)
 
-You can delegate work to Gemini, Kimi and Codex through `.team/team.sh`. This exists to save Claude usage limits.
+You can delegate work to Gemini and Codex (optional extra workers: opencode, Kimi; see `.team/team.conf`) through `.team/team.sh`. This exists to save Claude usage limits.
 
 **Scope: these rules apply only while a `/team-*` command is running, or when the user asks you to delegate.** Otherwise work normally. Your own skills, subagents (Agent tool) and tools are unchanged and are not replaced by the team workers.
 
 When orchestrating, follow `.team/ORCHESTRATOR.md`. The short version:
 - **You:** plan, make design decisions, debug hard problems, review the final diff, commit. Keep your own token use low. Read `docs/architecture.md` and the plan instead of exploring the whole repo.
-- **Workers:** `.team/team.sh build|ask|review ...` runs them with automatic fallback (build: gemini → kimi → codex; review: codex → gemini → kimi).
+- **Workers:** `.team/team.sh build|ask|review ...` runs them with automatic fallback (build: gemini → codex; review: codex → gemini; chains set in `.team/team.conf`).
 - Run `team.sh` with Bash `run_in_background: true`, because worker runs can take several minutes.
 - Don't trust a worker's report. Check `git diff` and the verify result yourself.
 - If every worker fails (exit code 3), or one task has failed twice, do the task yourself.
