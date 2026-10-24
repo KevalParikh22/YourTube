@@ -222,6 +222,11 @@ def init_db(db_path: str = DB_PATH) -> None:
         cursor.execute("INSERT OR IGNORE INTO libraries (id, name) VALUES (1, ?)", (DEFAULT_LIBRARY_NAME,))
         if "library_id" not in _columns(cursor, "playlists"):
             cursor.execute("ALTER TABLE playlists ADD COLUMN library_id INTEGER NOT NULL DEFAULT 1")
+        # Explainable ratings: per-factor scores, meeting-style minutes and takeaways
+        rating_cols = _columns(cursor, "video_ratings")
+        for col, ddl in (("breakdown", "TEXT DEFAULT '{}'"), ("minutes", "TEXT DEFAULT '[]'"), ("takeaways", "TEXT DEFAULT '[]'")):
+            if col not in rating_cols:
+                cursor.execute(f"ALTER TABLE video_ratings ADD COLUMN {col} {ddl}")
 
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_category ON videos(category)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_videos_playlist ON videos(playlist_id)")
@@ -420,6 +425,9 @@ def get_library(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
         for row in cursor.execute("SELECT * FROM video_ratings"):
             r = dict(row)
             r['points'], r['skim'] = json.loads(r['points'] or '[]'), json.loads(r['skim'] or '[]')
+            r['breakdown'] = json.loads(r.get('breakdown') or '{}')
+            r['calc'] = r['breakdown'].pop('calc', None)   # how the score was computed (rater.compute_score)
+            r['minutes'], r['takeaways'] = json.loads(r.get('minutes') or '[]'), json.loads(r.get('takeaways') or '[]')
             ratings[r.pop('video_id')] = r
     reasons = {c['video_id']: c['reason'] for c in videos_needing_asr(db_path=db_path)}
     hints = visual_hints(db_path=db_path)
@@ -819,16 +827,22 @@ def save_rating(video_id: str, rating: Dict[str, Any], model: str = "", db_path:
     init_db(db_path)
     with get_connection(db_path) as conn:
         conn.execute("""
-            INSERT INTO video_ratings (video_id, score, verdict, reason, tldr, points, skim, basis, language, model, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            INSERT INTO video_ratings (video_id, score, verdict, reason, tldr, points, skim, basis, language, model,
+                                       breakdown, minutes, takeaways, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
             ON CONFLICT(video_id) DO UPDATE SET
                 score = excluded.score, verdict = excluded.verdict, reason = excluded.reason, tldr = excluded.tldr,
                 points = excluded.points, skim = excluded.skim, basis = excluded.basis, language = excluded.language,
-                model = excluded.model, created_at = CURRENT_TIMESTAMP
+                model = excluded.model, breakdown = excluded.breakdown, minutes = excluded.minutes,
+                takeaways = excluded.takeaways, created_at = CURRENT_TIMESTAMP
         """, (video_id, rating['score'], rating['verdict'], rating.get('reason', ''), rating.get('tldr', ''),
               json.dumps(rating.get('points') or [], ensure_ascii=False),
               json.dumps(rating.get('skim') or [], ensure_ascii=False),
-              rating.get('basis'), rating.get('language'), model))
+              rating.get('basis'), rating.get('language'), model,
+              json.dumps({**(rating.get('breakdown') or {}), **({"calc": rating["calc"]} if rating.get("calc") else {})},
+                         ensure_ascii=False),
+              json.dumps(rating.get('minutes') or [], ensure_ascii=False),
+              json.dumps(rating.get('takeaways') or [], ensure_ascii=False)))
         _reindex(conn.cursor(), [video_id], kinds=("summary",))
         conn.commit()
 
@@ -905,11 +919,17 @@ def _docs_for(cursor: sqlite3.Cursor, video_id: str, kind: str) -> List[tuple]:
                     "SELECT t_s, text, visual FROM visual_segments WHERE video_id = ? ORDER BY t_s", (video_id,)).fetchall()
                 if (text or "").strip() or (visual or "").strip()]
     if kind == "summary":
-        r = cursor.execute("SELECT reason, tldr, points FROM video_ratings WHERE video_id = ?", (video_id,)).fetchone()
+        r = cursor.execute("SELECT reason, tldr, points, minutes, takeaways FROM video_ratings WHERE video_id = ?",
+                           (video_id,)).fetchone()
         if not r:
             return []
         rows = [(None, " ".join(x for x in (r[1], r[0]) if x))]
-        rows += [(p.get("t"), p.get("text")) for p in json.loads(r[2] or "[]") if p.get("text")]
+        minutes = json.loads(r[3] or "[]")
+        if minutes:   # newer ratings: one piece per minute topic, with its notes
+            rows += [(m.get("t"), ": ".join(x for x in (m.get("topic"), " ".join(m.get("notes") or [])) if x)) for m in minutes]
+        else:
+            rows += [(p.get("t"), p.get("text")) for p in json.loads(r[2] or "[]") if p.get("text")]
+        rows += [(None, t) for t in json.loads(r[4] or "[]") if t]
         return [x for x in rows if (x[1] or "").strip()]
     raise ValueError(kind)
 

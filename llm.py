@@ -91,6 +91,7 @@ def default_settings() -> Dict[str, Any]:
         "visual_height": 480,     # frame resolution for slide reading (720 for small text)
         "embed_model": "qwen3-embedding:0.6b",   # Ollama embedding model for meaning-based search (Phase 2)
         "use_descriptions": True, # search video descriptions and send them to the AI (they are fetched either way)
+        "rating_formula": {},     # overrides of rater.DEFAULT_FORMULA (weights, interest penalty and bonus)
     }
 
 def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
@@ -175,6 +176,7 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
         "visual_height": int(settings.get("visual_height") or 480),
         "embed_model": settings.get("embed_model") or "qwen3-embedding:0.6b",
         "use_descriptions": settings.get("use_descriptions", True) is not False,
+        "rating_formula": settings.get("rating_formula") or {},
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},
         "uses": {t: describe(settings, t) for t in TASKS},

@@ -162,3 +162,83 @@ class DescriptionSettingTest(unittest.TestCase):
         off, _ = rater.build_prompt(v, [], {"language": "English", "use_descriptions": False})
         self.assertIn("Sponsor links", on)
         self.assertNotIn("Sponsor links", off)
+
+
+class ExplainableRatingTest(unittest.TestCase):
+    FULL = {"depth": {"score": 8, "why": "Shows the full LoRA math"}, "fit": {"score": 6, "why": "Partly matches"},
+            "value": {"score": 7, "why": "Dense"}, "freshness": {"score": 4, "why": "Uses an old library version"}}
+
+    def test_score_is_quality_adjusted_by_interest(self):
+        r = rater.validate({"breakdown": self.FULL, "score": 2, "verdict": "skip"}, 600)
+        # quality 8×.45 + 7×.40 + 4×.15 = 7.0; fit 6 is one point under 7: -2 × 1/4 = -0.5; the model's 2 is ignored
+        self.assertEqual((r["score"], r["calc"]["quality"], r["calc"]["interest"]), (6.5, 7.0, -0.5))
+        self.assertEqual(r["verdict"], "skim")              # skip is two steps from 6.5, so the score decides
+        self.assertEqual(r["breakdown"]["freshness"]["why"], "Uses an old library version")
+        self.assertEqual(r["reason"], "Strongest: depth and quality (8). Weakest: freshness (4).")   # model gave none
+
+    def test_partial_breakdown_falls_back_to_the_models_score(self):
+        r = rater.validate({"breakdown": {"depth": {"score": 9}}, "score": 5, "verdict": "skim"}, 600)
+        self.assertEqual((r["score"], list(r["breakdown"])), (5.0, ["depth"]))
+        only = rater.validate({"breakdown": {"depth": 9, "fit": "x"}, "verdict": "watch"}, 600)
+        self.assertEqual(only["score"], 9.0)                # no model score: the factors that exist
+
+    def test_verdict_follows_the_score_away_from_boundaries(self):
+        low = {k: {"score": 2} for k in rater.WEIGHTS}
+        self.assertEqual(rater.validate({"breakdown": low, "verdict": "watch"}, 600)["verdict"], "skip")
+        edge = {k: {"score": 6.5} for k in rater.WEIGHTS}
+        self.assertEqual(rater.validate({"breakdown": edge, "verdict": "watch"}, 600)["verdict"], "watch")   # 6.5 is near 7
+        self.assertEqual(rater.validate({"breakdown": edge, "verdict": "skip"}, 600)["verdict"], "skim")
+
+    def test_minutes_and_takeaways(self):
+        minutes = [{"t": "5:00", "topic": "Second", "notes": ["b"]}, {"t": "0:30", "topic": "First", "notes": ["a", "", 3]},
+                   {"t": "99:00", "topic": "Past the end", "notes": ["x"]}, {"t": "nope", "topic": "Bad time"}]
+        minutes += [{"t": f"{i}:10", "topic": f"T{i}", "notes": ["n"] * 5} for i in range(6, 9)]
+        r = rater.validate({"score": 6, "verdict": "skim", "minutes": minutes, "takeaways": [f"k{i}" for i in range(8)]}, 600)
+        self.assertEqual([m["topic"] for m in r["minutes"]], ["First", "Second", "T6", "T7", "T8"])
+        self.assertEqual(r["minutes"][0], {"t": 30, "topic": "First", "notes": ["a"]})
+        self.assertEqual(len(r["minutes"][2]["notes"]), 3)
+        self.assertEqual(len(r["takeaways"]), 5)
+        self.assertEqual(r["points"][0], {"t": 30, "text": "First"})   # older readers still get points
+
+
+class RatingStorageTest(unittest.TestCase):
+    def test_new_fields_round_trip_and_old_tables_migrate(self):
+        import sqlite3
+        import storage
+        from tests.helpers import playlist, temp_db, video
+        db = temp_db()
+        storage.save_playlist(playlist(), [video("r1", "LoRA")], db_path=db)
+        conn = sqlite3.connect(db)
+        conn.executescript("ALTER TABLE video_ratings DROP COLUMN breakdown; ALTER TABLE video_ratings DROP COLUMN minutes; "
+                           "ALTER TABLE video_ratings DROP COLUMN takeaways;")
+        conn.close()
+        storage.init_db(db)
+        storage.save_rating("r1", {"score": 6.8, "verdict": "skim", "breakdown": {"depth": {"score": 8, "why": "w"}},
+                                   "calc": {"score": 6.8, "quality": 7.3, "interest": -0.5},
+                                   "minutes": [{"t": 30, "topic": "Adapters", "notes": ["Only two small matrices train"]}],
+                                   "takeaways": ["Start with QLoRA"]}, db_path=db)
+        r = next(v for v in storage.get_library(db_path=db) if v["video_id"] == "r1")["rating"]
+        self.assertEqual((r["breakdown"]["depth"]["score"], r["minutes"][0]["topic"], r["takeaways"]), (8, "Adapters", ["Start with QLoRA"]))
+        self.assertEqual((list(r["breakdown"]), r["calc"]["interest"]), (["depth"], -0.5))     # calc kept apart
+        hits = storage.search("small matrices", db_path=db)["results"]
+        self.assertEqual(hits[0]["hits"][0]["kind"], "summary")                 # minutes are searchable
+
+
+class FormulaTest(unittest.TestCase):
+    def b(self, depth, fit, value, freshness):
+        return {k: {"score": v} for k, v in zip(("depth", "fit", "value", "freshness"), (depth, fit, value, freshness))}
+
+    def test_great_video_outside_your_interests_still_scores_well(self):
+        calc = rater.compute_score(self.b(9, 2, 9, 9))
+        self.assertEqual((calc["quality"], calc["interest"], calc["score"]), (9.0, -2.0, 7.0))
+        self.assertEqual(rater.compute_score(self.b(9, 5, 9, 9))["interest"], -1.0)   # half way: half the penalty
+        self.assertEqual(rater.compute_score(self.b(6, 9, 6, 6))["score"], 6.5)       # strong match: +0.5
+        self.assertIsNone(rater.compute_score({"depth": {"score": 5}}))
+
+    def test_formula_can_be_configured(self):
+        f = rater.formula_of({"rating_formula": {"interest_penalty": 4, "depth": 1, "value": 0, "freshness": 0, "bogus": 3}})
+        self.assertEqual((f["interest_penalty"], f["interest_bonus"], f["depth"]), (4.0, 0.5, 1.0))
+        self.assertEqual(rater.compute_score(self.b(8, 3, 1, 1), f)["score"], 4.0)    # only depth counts, full penalty 4
+        self.assertEqual(rater.formula_of({"rating_formula": {"interest_penalty": 99, "depth": "x"}})["interest_penalty"], 5.0)
+        zero = rater.formula_of({"rating_formula": {"depth": 0, "value": 0, "freshness": 0}})
+        self.assertEqual(zero["depth"], rater.DEFAULT_FORMULA["depth"])               # all-zero weights fall back

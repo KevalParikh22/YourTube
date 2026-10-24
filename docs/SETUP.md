@@ -247,6 +247,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `visuals.<category>` | off | Read slides for videos in this category |
 | `vision_model` | `""` | Ollama model that reads frames; empty means the Ollama text model |
 | `visual_height` | `480` | Frame quality for slide reading: `480` or `720` |
+| `rating_formula` | `{}` | Overrides for how scores are computed: `depth`, `value`, `freshness` (weights 0–1), `interest_penalty` (0–5, default 2), `interest_bonus` (0–2, default 0.5) |
 | `use_descriptions` | `true` | Search video descriptions and send them to the AI (they are fetched with the captions either way) |
 | `embed_model` | `"qwen3-embedding:0.6b"` | Ollama model for meaning-based search and questions (Phase 2) |
 | `asr_model` | `"auto"` | Local speech-to-text model: `auto` (large-v3-turbo on a GPU, small on the CPU), `large-v3-turbo`, `small` or `medium` |

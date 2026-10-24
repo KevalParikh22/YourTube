@@ -755,6 +755,11 @@ class Handler(BaseHTTPRequestHandler):
                 settings["vision_model"] = body["vision_model"]
             if isinstance(body.get("embed_model"), str) and re.fullmatch(r"[\w.\-/]+(:[\w.\-]+)?", body["embed_model"]):
                 settings["embed_model"] = body["embed_model"]
+            if isinstance(body.get("rating_formula"), dict):
+                import rater
+                custom = body["rating_formula"]
+                settings["rating_formula"] = {k: v for k, v in rater.formula_of({"rating_formula": custom}).items()
+                                              if k in custom} if custom else {}
             if body.get("visual_height") in (480, 720):
                 settings["visual_height"] = body["visual_height"]
             if isinstance(body.get("interests"), str):

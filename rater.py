@@ -18,7 +18,15 @@ from llm import LLMError, parse_json
 VERDICTS = ("watch", "skim", "skip")
 BLOCK_SECONDS = 30            # transcript lines are merged into blocks this long
 CHAR_BUDGET_REMOTE = 200_000  # about 50k tokens of transcript
-OUTPUT_TOKENS = 700           # rough output per rating, for cost estimates
+OUTPUT_TOKENS = 1100          # rough output per rating (breakdown, minutes, takeaways), for cost estimates
+# The overall score is computed in code from four factor scores, so every number can be explained:
+#   score = quality - penalty * clamp((FIT_OK - fit) / FIT_SPAN, 0, 1) + (bonus if fit >= FIT_BONUS)
+# where quality is the weighted mean of depth, value and freshness (about the video itself), and fit
+# (match with the learner's interests) only adjusts it: a great off-interest video still scores well.
+WEIGHTS = {"depth": 0.45, "fit": 0.0, "value": 0.40, "freshness": 0.15}   # fit is applied as the adjustment below
+DEFAULT_FORMULA = {"depth": 0.45, "value": 0.40, "freshness": 0.15, "interest_penalty": 2.0, "interest_bonus": 0.5}
+FIT_OK, FIT_SPAN, FIT_BONUS = 7.0, 4.0, 9.0   # no penalty at fit >= 7, full penalty at fit <= 3, bonus at fit >= 9
+FACTOR_LABEL = {"depth": "Depth and quality", "fit": "Fit with your interests", "value": "Time value", "freshness": "Freshness"}
 
 SYSTEM = (
     "You help a busy learner decide which videos in their YouTube backlog deserve their time. "
@@ -112,25 +120,34 @@ Chapters:
 
 {source}
 {f"{chr(10)}On-screen text (slides, code, whiteboard), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}
-Rate how worth watching this video is for this learner, from 0 to 10, weighing:
-1. Depth and quality: real substance and accuracy, versus hype, clickbait or padding.
-2. Fit with their interests and categories.
-3. Time against value: does it earn its length, or would a summary be enough?
-4. Freshness: for fast-moving topics, penalise content that is outdated today. Call it outdated only when the content itself
-   relies on things that have since changed (old versions, prices, events). Age alone, or an unknown date, is not evidence.
+Score four factors from 0 to 10, each with a short reason (at most 18 words) that names something specific in this video:
+- depth: real substance and accuracy, versus hype, clickbait or padding. 8 or more only for expert-level, detailed content;
+  generic tips or listicles are 3 to 5.
+- fit: how well it matches the learner's stated interests. 9 or 10 only when the topic is named in their interests;
+  at most 5 when their interests don't mention the topic at all.
+- value: does it earn its length, or would these notes be enough?
+- freshness: for fast-moving topics, is it outdated today? Call it outdated only when the content itself relies on things
+  that have since changed (old versions, prices, events). Age alone, or an unknown date, is not evidence: then score 7.
+Use the whole scale; most backlog videos are not 8 or more on every factor.
 
-Use the whole scale. 8 to 10: exceptional and clearly worth the full time for this learner. 5 to 7: useful, but parts or a summary may be enough.
-Below 5: weak, off-topic, padded or outdated. A typical backlog has many videos below 5.
-
-Verdict: "watch" (worth the full time), "skim" (only parts are worth it), or "skip" (not worth it, or the summary covers it).
+Verdict: "watch" (worth the full time), "skim" (only parts are worth it), or "skip" (not worth it, or the notes cover it).
 worth_watching: for "skim", the 1 to 4 best parts TO WATCH, with what each one teaches. Never the intro, sponsor, recap or outro.
 For "watch" and "skip", leave it empty.
-Write reason (at most 20 words), tldr (at most 2 sentences) and points (3 to 7 key takeaways) in {language}.
+
+Then write notes the learner can decide from without watching, like minutes of a meeting:
+- minutes: 3 to 8 topics in time order. Each has the time it starts, a topic (at most 8 words) and 1 to 3 notes
+  (at most 20 words each) saying what is actually said, claimed or shown, not "the video discusses X".
+- takeaways: 3 to 5 concrete conclusions or actions.
+- tldr: at most 2 sentences. reason: at most 20 words, why this verdict.
+Write all text in {language}.
 Times: copy them exactly as written in the transcript or chapters, like "4:05" or "1:02:30" (hours:minutes:seconds). Only use times that appear there.
 
 Reply with JSON in this shape (replace every <...>):
-{{"score": <0-10>, "verdict": "<watch|skim|skip>", "reason": "<...>", "tldr": "<...>",
- "points": [{{"t": "<time>", "text": "<...>"}}],
+{{"breakdown": {{"depth": {{"score": <0-10>, "why": "<...>"}}, "fit": {{"score": <0-10>, "why": "<...>"}},
+               "value": {{"score": <0-10>, "why": "<...>"}}, "freshness": {{"score": <0-10>, "why": "<...>"}}}},
+ "verdict": "<watch|skim|skip>", "reason": "<...>", "tldr": "<...>",
+ "minutes": [{{"t": "<time>", "topic": "<...>", "notes": ["<...>"]}}],
+ "takeaways": ["<...>"],
  "worth_watching": [{{"start": "<time>", "end": "<time>", "why": "<what this part teaches>"}}]}}"""
     return prompt, basis
 
@@ -148,14 +165,71 @@ def parse_time(x: Any) -> Optional[int]:
     h, mnt, sec = int(m.group(1) or 0), int(m.group(2)), int(m.group(3))
     return h * 3600 + mnt * 60 + sec if sec < 60 and (not m.group(1) or mnt < 60) else None
 
-def validate(raw: Any, duration: int) -> Dict[str, Any]:
+def _clamp(x: Any) -> Optional[float]:
+    try:
+        return round(max(0.0, min(10.0, float(x))), 1)
+    except (TypeError, ValueError):
+        return None
+
+def _text(x: Any, limit: int) -> str:
+    return " ".join(str(x or "").split())[:limit]
+
+def breakdown_of(raw: Any) -> Dict[str, Dict[str, Any]]:
+    """The factor scores the model gave: {factor: {'score', 'why'}}, only factors with a usable score."""
+    out = {}
+    for k in WEIGHTS:
+        part = raw.get(k) if isinstance(raw, dict) else None
+        if isinstance(part, (int, float, str)) and not isinstance(part, bool):
+            part = {"score": part}
+        if isinstance(part, dict) and _clamp(part.get("score")) is not None:
+            out[k] = {"score": _clamp(part.get("score")), "why": _text(part.get("why"), 160)}
+    return out
+
+def formula_of(settings: Optional[Dict[str, Any]]) -> Dict[str, float]:
+    """The scoring formula: DEFAULT_FORMULA with valid numbers from settings["rating_formula"] (weights 0-1, penalty 0-5, bonus 0-2)."""
+    f = dict(DEFAULT_FORMULA)
+    custom = (settings or {}).get("rating_formula") or {}
+    limits = {"depth": 1, "value": 1, "freshness": 1, "interest_penalty": 5, "interest_bonus": 2}
+    for k, hi in limits.items():
+        try:
+            f[k] = max(0.0, min(float(hi), float(custom[k])))
+        except (KeyError, TypeError, ValueError):
+            pass
+    if f["depth"] + f["value"] + f["freshness"] <= 0:
+        f.update({k: DEFAULT_FORMULA[k] for k in ("depth", "value", "freshness")})
+    return f
+
+def compute_score(breakdown: Dict[str, Dict[str, Any]], formula: Optional[Dict[str, float]] = None) -> Optional[Dict[str, Any]]:
+    """
+    {'score', 'quality', 'interest', 'formula'} from a complete breakdown, or None when a factor is missing.
+    interest is the adjustment for fit: 0 down to -penalty, or +bonus for a strong match.
+    """
+    if any(k not in breakdown for k in WEIGHTS):
+        return None
+    f = formula or dict(DEFAULT_FORMULA)
+    weights = {k: f[k] for k in ("depth", "value", "freshness")}
+    quality = sum(w * breakdown[k]["score"] for k, w in weights.items()) / sum(weights.values())
+    fit = breakdown["fit"]["score"]
+    interest = -f["interest_penalty"] * max(0.0, min(1.0, (FIT_OK - fit) / FIT_SPAN))
+    if fit >= FIT_BONUS:
+        interest += f["interest_bonus"]
+    return {"score": round(max(0.0, min(10.0, quality + interest)), 1), "quality": round(quality, 1),
+            "interest": round(interest, 1) + 0.0, "formula": f}   # + 0.0 turns -0.0 into 0.0
+
+def _verdict_for(score: float) -> str:
+    return "watch" if score >= 7 else "skim" if score >= 4 else "skip"
+
+def validate(raw: Any, duration: int, formula: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
     """Normalises a model reply; raises LLMError if it has no usable score or verdict."""
     if not isinstance(raw, dict):
         raise LLMError("The rating was not a JSON object")
-    try:
-        score = round(max(0.0, min(10.0, float(raw.get("score")))), 1)
-    except (TypeError, ValueError):
-        score = None
+    breakdown = breakdown_of(raw.get("breakdown"))
+    calc = compute_score(breakdown, formula)
+    score = calc["score"] if calc else None
+    if score is None:   # older reply shape or a partial breakdown: the model's own number, else the mean of what exists
+        score = _clamp(raw.get("score"))
+        if score is None and breakdown:
+            score = round(sum(b["score"] for b in breakdown.values()) / len(breakdown), 1)
     verdict = str(raw.get("verdict") or "").strip().lower()
     if verdict not in VERDICTS:
         if score is None:
@@ -163,14 +237,31 @@ def validate(raw: Any, duration: int) -> Dict[str, Any]:
         verdict = "watch" if score >= 7 else "skim" if score >= 4 else "skip"
     if score is None:
         score = {"watch": 8.0, "skim": 5.5, "skip": 2.0}[verdict]
+    # The verdict must fit the score, except right at a boundary where the model's judgement can tip it
+    expected = _verdict_for(score)
+    boundary = {frozenset(("skim", "watch")): 7, frozenset(("skip", "skim")): 4}.get(frozenset((verdict, expected)))
+    if verdict != expected and (boundary is None or abs(score - boundary) > 1):
+        verdict = expected
     limit = duration if duration > 0 else 10 ** 6
 
     def sec(x: Any) -> Optional[int]:
         v = parse_time(x)
         return v if v is not None and 0 <= v <= limit else None
 
+    minutes = []
+    for m in raw.get("minutes") or []:
+        if not isinstance(m, dict):
+            continue
+        t, topic = sec(m.get("t")), _text(m.get("topic"), 80)
+        notes = [_text(n, 200) for n in (m.get("notes") or []) if isinstance(n, str) and n.strip()][:3]
+        if t is not None and (topic or notes):
+            minutes.append({"t": t, "topic": topic, "notes": notes})
+    minutes = sorted(minutes, key=lambda m: m["t"])[:8]
+    takeaways = [_text(x, 200) for x in (raw.get("takeaways") or []) if isinstance(x, str) and x.strip()][:5]
     points = []
-    for p in raw.get("points") or []:
+    if minutes:   # the older single-line points, for anything that still reads them
+        points = [{"t": m["t"], "text": m["topic"] or m["notes"][0]} for m in minutes]
+    for p in raw.get("points") or [] if not minutes else []:
         if isinstance(p, dict) and str(p.get("text") or "").strip():
             points.append({"t": sec(p.get("t")), "text": " ".join(str(p["text"]).split())[:300]})
     skim = []
@@ -187,18 +278,24 @@ def validate(raw: Any, duration: int) -> Dict[str, Any]:
             skim.append({"start": start, "end": end, "why": " ".join(str(r.get("why") or "").split())[:160]})
     if verdict == "skim" and not skim and score < 4:
         verdict = "skip"   # nothing marked worth watching, and weak overall
+    reason = " ".join(str(raw.get("reason") or "").split())[:240]
+    if not reason and breakdown:   # the model left it out: say what drove the score
+        hi = max(breakdown, key=lambda k: breakdown[k]["score"])
+        lo = min(breakdown, key=lambda k: breakdown[k]["score"])
+        reason = f"Strongest: {FACTOR_LABEL[hi].lower()} ({breakdown[hi]['score']:g}). Weakest: {FACTOR_LABEL[lo].lower()} ({breakdown[lo]['score']:g})."
     return {
         "score": score, "verdict": verdict,
-        "reason": " ".join(str(raw.get("reason") or "").split())[:240],
+        "reason": reason,
         "tldr": " ".join(str(raw.get("tldr") or "").split())[:600],
-        "points": points[:7], "skim": sorted(skim, key=lambda r: r["start"])[:4],
+        "points": points[:8], "skim": sorted(skim, key=lambda r: r["start"])[:4],
+        "breakdown": breakdown, "calc": calc, "minutes": minutes, "takeaways": takeaways,
     }
 
 
 def rate_video(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
                complete: Callable[[str, str], str], budget: int = CHAR_BUDGET_REMOTE) -> Dict[str, Any]:
     prompt, basis = build_prompt(video, segments, settings, budget=budget)
-    rating = validate(parse_json(complete(SYSTEM, prompt)), video.get('duration_seconds') or 0)
+    rating = validate(parse_json(complete(SYSTEM, prompt)), video.get('duration_seconds') or 0, formula_of(settings))
     return {**rating, "basis": basis, "language": settings.get("language") or "English"}
 
 

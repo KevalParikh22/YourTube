@@ -28,7 +28,7 @@
    "takeaways": ["<≤20 words>", "..."],
    "worth_watching": [{"start": "<time>", "end": "<time>", "why": "..."}]}
   ```
-- **The score is computed in code, not by the model**, so it is explainable: `score = round(0.35*depth + 0.30*fit + 0.25*value + 0.10*freshness, 1)`. Weights live in `rater.WEIGHTS = {"depth": .35, "fit": .30, "value": .25, "freshness": .10}`. If the breakdown is missing or partial, fall back to the model's `score` (old behaviour), and treat missing parts as absent rather than zero. The verdict is checked against the score: watch ≥ 7, skim 4–7, skip < 4 unless the model's verdict is within 1 point of a boundary.
+- **The score is computed in code, not by the model** (`rater.compute_score`; agreed with the user on 2026-10-24): **score = quality − interest penalty (+ bonus)**. Quality is the weighted mean of depth 45%, value 40% and freshness 15% (the video itself). Interest adjusts it from fit: no penalty at fit ≥ 7, −2 at fit ≤ 3, linear in between, +0.5 at fit ≥ 9. So a great off-interest video (quality 9, fit 2) still scores 7. Defaults are in `rater.DEFAULT_FORMULA`; the user can override them in `settings["rating_formula"]` (`rater.formula_of` clamps: weights 0–1, penalty 0–5, bonus 0–2), saved through `POST /api/ai/settings {rating_formula}`. Each rating stores `calc = {score, quality, interest, formula}` (inside the `breakdown` JSON under `calc`; `get_library` returns it as `rating.calc`). The panel shows e.g. `4.8 = quality 4.8 (depth 4 × 45% + value 5 × 40% + freshness 7 × 15%) + interest 0`. If the breakdown is missing or partial, fall back to the model's `score` (old behaviour), and treat missing parts as absent rather than zero. The verdict is checked against the score: watch ≥ 7, skim 4–7, skip < 4 unless the model's verdict is within 1 point of a boundary.
 - `minutes`: 3–8 topics in time order, each with 1–3 notes, built like meeting minutes (what is covered, the claims made, the steps shown). `takeaways`: 3–5 conclusions you could act on. `points` (old) stays readable for old ratings; new ratings fill `points` from `minutes` (`t` + `topic`) for older UI and exports.
 - `validate()` clamps sub-scores to 0–10, drops minute entries without a valid time (same `sec()` rule), sorts by time, limits to 8 topics, 3 notes and 5 takeaways, and trims text lengths.
 - Storage: `video_ratings` gains `breakdown TEXT DEFAULT '{}'`, `minutes TEXT DEFAULT '[]'`, `takeaways TEXT DEFAULT '[]'` (migration in `init_db`). `save_rating` stores them; `get_library` parses them into `rating.breakdown/minutes/takeaways`. The search summary text (`_reindex` kind `summary`) also includes minute topics and takeaways.
@@ -40,6 +40,7 @@
   4. **Minutes**: topics with clickable timestamps that seek the player, notes as bullets.
   5. Takeaways.
   6. Worth watching ranges.
+  **Settings → General → "How scores are calculated"**: number inputs for the three quality weights (shown as %), the interest penalty and the bonus, a live example line, Save and "Reset to default" (sends `rating_formula: {}`). Changes apply to new ratings; old ratings keep their stored `calc`.
   Triage rows show a small "Why?" link that opens the panel at "Why this score". Old ratings without a breakdown show "Rate again for a score breakdown". Exported notes (`exporter.video_markdown`) gain "## Minutes" (timestamp links), "## Takeaways" and "## Why this score".
 
 ### C. UI polish (T5–T7)
@@ -88,7 +89,7 @@
 
 ### T3: Explainable score, minutes and takeaways (rating engine)
 - **worker:** claude
-- **status:** todo
+- **status:** done
 - **files:** `rater.py`, `storage.py`, `tests/test_rater.py`, `tests/test_storage.py`
 - **steps:**
   1. New prompt and JSON shape, `WEIGHTS`, the computed score, and the verdict check (Design notes B).
@@ -107,7 +108,8 @@
 - **depends on:** T3, T2
 - **files:** `web/index.html`, `exporter.py`, `tests/test_extractor_exporter.py`
 - **steps:**
-  1. Video panel sections in the order in Design notes B; minute timestamps call `seek`.
+  0. Settings → General "How scores are calculated" editor (Design notes B).
+  1. Video panel sections in the order in Design notes B; minute timestamps call `seek`; the formula line uses `rating.calc`.
   2. Triage "Why?" link; old ratings get the "Rate again" hint.
   3. Exported notes: Minutes, Takeaways and Why this score (escape with `_md_text`).
 - **acceptance:**
