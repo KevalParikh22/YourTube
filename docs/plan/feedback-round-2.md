@@ -152,7 +152,7 @@
 
 ### T7: Fix pagination
 - **worker:** codex
-- **status:** todo
+- **status:** done (the "1–50 / 51–100" buttons were YouTube queue links; now one Play on YouTube menu, "Showing X of Y", Show more on Library, Triage and Search; Search stays capped at its top 50 matches)
 - **depends on:** T6b
 - **files:** `web/index.html`
 - **steps:** reproduce "Show more" on Library with more than 150 videos; fix it; add the same "Show more" (50 at a time) to Triage and Search results. Report what was broken.

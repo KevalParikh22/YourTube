@@ -132,6 +132,12 @@
   .list-head input[type="search"] { flex: 1 1 220px; }
   .list-sum { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; min-height: 52px; padding: 10px 0; font-size: 13px; color: var(--ink-2); border-bottom: 1px solid var(--line); }
   .play-links { display: flex; gap: 6px; flex-wrap: wrap; }
+  .play-menu { position: relative; }
+  .play-menu summary { list-style: none; }
+  .play-menu summary::-webkit-details-marker { display: none; }
+  .play-menu-links { position: absolute; z-index: 10; right: 0; top: calc(100% + 4px); min-width: 220px; padding: 6px; display: grid; gap: 2px; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 8px; box-shadow: 0 4px 16px #0002; }
+  .play-menu-links a { padding: 7px 9px; border-radius: 5px; text-decoration: none; font-size: 12.5px; }
+  .play-menu-links a:hover { background: var(--sunken); }
   .selbar {
     position: sticky; top: 64px; z-index: 5; display: flex; align-items: center; gap: 2px; flex-wrap: wrap; min-height: 52px;
     background: var(--ink); color: var(--bg); padding: 6px 8px 6px 14px; border-radius: 8px; margin: 8px 0;
@@ -523,11 +529,11 @@ const S = {
   session: { cat: '', mins: 45, order: 'order' },
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
-  triage: { verdict: 'all', cat: '', undo: [] },
+  triage: { verdict: 'all', cat: '', undo: [], limit: 50 },
   drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
-  search: { q: '', kind: 'all', res: null, seq: 0, meaning: store.get('ytkb.meaning') === '1' },
+  search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
   lib: Number.isInteger(+store.get('ytkb.lib')) && store.get('ytkb.lib') !== null ? +store.get('ytkb.lib') : 1,   // 0 = all libraries
   ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '' },
 };
@@ -617,9 +623,8 @@ function playLinks(list, label = 'Play') {
   const todo = list.filter(v => !isDone(v));
   const urls = queueUrls(todo);
   if (!urls.length) return '';
-  if (urls.length === 1) return `<a class="btn btn-dark btn-sm" href="${esc(urls[0])}" target="_blank" rel="noopener">▶ ${label}</a>`;
-  return urls.map((u, i) => `<a class="btn ${i ? '' : 'btn-dark '}btn-sm" href="${esc(u)}" target="_blank" rel="noopener"
-    title="A YouTube queue holds up to 50 videos">${i ? '' : `▶ ${label} `}${i * 50 + 1}–${Math.min((i + 1) * 50, todo.length)}</a>`).join('');
+  return `<details class="play-menu"><summary class="btn btn-dark btn-sm">▶ Play on YouTube</summary><div class="play-menu-links">${urls.map((u, i) =>
+    `<a href="${esc(u)}" target="_blank" rel="noopener">Videos ${i * 50 + 1}–${Math.min((i + 1) * 50, todo.length)} (opens YouTube)</a>`).join('')}</div></details>`;
 }
 const statusIcon = s => s === 'completed'
   ? '<svg viewBox="0 0 20 20"><circle class="st-fill" cx="10" cy="10" r="8.5"/><path class="st-check" d="M6.5 10.2l2.4 2.4 4.6-5"/></svg>'
@@ -689,7 +694,7 @@ function renderView() {
   }
   else if (r === 'search') {
     const q = routeParam('q');
-    if (q != null && q !== S.search.q) { S.search.q = q; S.search.res = null; }
+    if (q != null && q !== S.search.q) { S.search.q = q; S.search.res = null; S.search.limit = 50; }
     v.innerHTML = viewSearch(); renderSearchResults();
     if (S.search.q && !S.search.res) runSearch();
     else $('#sq')?.focus();
@@ -782,11 +787,11 @@ function renderList() {
   const st = stats(list);
   box.innerHTML = `
     ${q.trim().length >= 3 ? `<p class="hint" style="margin:10px 0 0"><a href="#/search?q=${encodeURIComponent(q.trim())}">Search inside transcripts, chapters and summaries for “${esc(q.trim())}” →</a></p>` : ''}
-    ${S.sel.size ? selBar() : status === 'suggested' ? sugSum(list) : `<div class="list-sum"><span>${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
+    ${S.sel.size ? selBar() : status === 'suggested' ? sugSum(list) : `<div class="list-sum"><span>Showing ${Math.min(S.limit, list.length)} of ${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
       <span class="play-links">${list.length ? exportMenu() : ''}${playLinks(list)}</span></div>`}
     ${list.length ? `<ul class="rows ${S.sel.size ? 'selecting' : ''}">${list.slice(0, S.limit).map(row).join('')}</ul>`
       : `<div class="empty">Nothing here${q ? ' matches your search' : ''}.</div>`}
-    ${list.length > S.limit ? `<div class="more"><button class="btn" data-act="more">Show ${list.length - S.limit} more</button></div>` : ''}`;
+    ${list.length > S.limit ? `<div class="more"><button class="btn" data-act="more">Show ${Math.min(50, list.length - S.limit)} more</button></div>` : ''}`;
 }
 function row(v) {
   const d = v.duration_seconds || 0;
@@ -960,7 +965,8 @@ function viewTriage() {
       ${skippable.length ? `<button class="btn btn-sm" data-act="accept-skips" data-ids="${esc(skippable.map(v => v.video_id).join(','))}">Accept ${plural(skippable.length, 'skip')}</button>` : ''}
     </div>
   </div>
-  ${list.length ? list.map(triRow).join('') : `<div class="empty">Nothing here.</div>`}`;
+  ${list.length ? list.slice(0, t.limit).map(triRow).join('') : `<div class="empty">Nothing here.</div>`}
+  ${list.length > t.limit ? `<div class="more"><button class="btn" data-act="tri-more">Show ${Math.min(50, list.length - t.limit)} more</button></div>` : ''}`;
 }
 function triRow(v) {
   const r = v.rating, d = v.duration_seconds || 0, skipped = v.status === 'skipped';
@@ -1396,7 +1402,8 @@ function renderSearchResults() {
   if (!list.length) { box.innerHTML = `<div class="empty">No matches for “${esc(sr.q)}”.</div>`; return; }
   const off = sr.meaning && sr.res.mode === 'keyword' ? ' · meaning index is off, so these are keyword matches (Settings → AI → download the embedding model)' : '';
   const exact = list.filter(r => r.exact).length, words = sr.q.trim().split(/\s+/).length > 1;
-  box.innerHTML = `<div class="list-sum"><span>${plural(list.length, 'video')}${list.length >= 50 ? ' (top 50)' : ''}${sr.meaning ? ' · by meaning' : ''}${words && exact ? ` · ${exact} with the exact phrase` : ''}${off}</span></div>` + list.map((r, i) => {
+  const shown = list.slice(0, sr.limit);
+  box.innerHTML = `<div class="list-sum"><span>Showing ${shown.length} of ${plural(list.length, 'match')}${list.length >= 50 ? ' (top 50 returned by search)' : ''}${sr.meaning ? ' · by meaning' : ''}${words && exact ? ` · ${exact} with the exact phrase` : ''}${off}</span></div>` + shown.map((r, i) => {
     const v = byId(r.video_id);
     const divider = words && exact && i === exact ? `<div class="list-sum" style="margin-top:18px"><span>${sr.meaning ? 'Related by meaning' : 'With the words apart'}</span></div>` : '';
     return `${divider}<div class="s-row">
@@ -1409,7 +1416,7 @@ function renderSearchResults() {
           <span class="k">${KIND_LABEL[h.kind]}${h.t != null ? `<time>${clock(h.t)}</time>` : ''}</span><span>${hl(h.snippet)}</span></button></li>`).join('')}</ul>
       </div>
     </div>`;
-  }).join('');
+  }).join('') + (list.length > sr.limit ? `<div class="more"><button class="btn" data-act="search-more">Show ${Math.min(50, list.length - sr.limit)} more</button></div>` : '');
 }
 async function runSearch() {
   const sr = S.search, seq = ++sr.seq;
@@ -2048,7 +2055,9 @@ document.addEventListener('click', async e => {
       toast(`${plural(ids.length, 'video')} marked ${STATUS_LABEL[el.dataset.status].toLowerCase()}`);
       break;
     }
-    case 'more': S.limit += 150; renderList(); break;
+    case 'more': S.limit += 50; renderList(); break;
+    case 'tri-more': S.triage.limit += 50; refresh(); break;
+    case 'search-more': S.search.limit += 50; renderSearchResults(); break;
     case 'seek': seek(+el.dataset.t); break;
     case 'ask-go': runAsk(); break;
     case 'ask-new': S.ask.thread = []; S.ask.q = ''; location.hash = '#/ask'; break;
@@ -2095,8 +2104,8 @@ document.addEventListener('click', async e => {
       } catch (err) { toast(err.message, true); }
       break;
     case 'export-notes': el.closest('details')?.removeAttribute('open'); exportNotes(el.dataset.scope === 'sel' ? [...S.sel] : S.visible.map(v => v.video_id)); break;
-    case 'tri-verdict': S.triage.verdict = el.dataset.v; refresh(); break;
-    case 's-kind': S.search.kind = el.dataset.v; S.search.res = null; refresh(); runSearch(); break;
+    case 'tri-verdict': S.triage.verdict = el.dataset.v; S.triage.limit = 50; refresh(); break;
+    case 's-kind': S.search.kind = el.dataset.v; S.search.res = null; S.search.limit = 50; refresh(); runSearch(); break;
     case 'tri-set': setStatuses([id], el.dataset.status); break;
     case 'accept-skips': {
       const ids = el.dataset.ids.split(',').filter(Boolean);
@@ -2314,7 +2323,7 @@ document.addEventListener('change', async e => {
     case 'ask-cat': S.ask.cat = el.value; break;
     case 'ask-src': S.ask.src = el.value; break;
     case 'ask-done': S.ask.done = el.checked; break;
-    case 't-cat': S.triage.cat = el.value; refresh(); break;
+    case 't-cat': S.triage.cat = el.value; S.triage.limit = 50; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
     case 'i-lib': S.ingest.lib = +el.value; break;
     case 'pl-lib':
@@ -2375,7 +2384,7 @@ document.addEventListener('input', e => {
     return;
   }
   if (el.id === 'sq') {
-    S.search.q = el.value; clearTimeout(sT);
+    S.search.q = el.value; S.search.limit = 50; clearTimeout(sT);
     sT = setTimeout(() => { history.replaceState(null, '', `#/search?q=${encodeURIComponent(S.search.q)}`); runSearch(); }, 250);
     return;
   }
