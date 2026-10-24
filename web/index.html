@@ -1895,7 +1895,10 @@ function drawerRating(v) {
   const factorLabels = { depth: 'Depth', fit: 'Fit', value: 'Time value', freshness: 'Freshness' };
   const calc = r.calc;
   const breakdown = r.breakdown || {};
-  const calcLine = calc ? `${calc.score} = quality ${calc.quality} (depth ${breakdown.depth?.score ?? '—'} × ${Math.round((calc.formula?.depth || 0)*100)}% + value ${breakdown.value?.score ?? '—'} × ${Math.round((calc.formula?.value || 0)*100)}% + freshness ${breakdown.freshness?.score ?? '—'} × ${Math.round((calc.formula?.freshness || 0)*100)}%) + interest ${calc.interest}` : '';
+  // Quality uses the weights divided by their sum (rater.compute_score), so show those shares
+  const wsum = calc ? ['depth', 'value', 'freshness'].reduce((a, k) => a + (calc.formula?.[k] || 0), 0) || 1 : 1;
+  const pct = k => Math.round((calc?.formula?.[k] || 0) / wsum * 100);
+  const calcLine = calc ? `${calc.score} = quality ${calc.quality} (depth ${breakdown.depth?.score ?? '—'} × ${pct('depth')}% + value ${breakdown.value?.score ?? '—'} × ${pct('value')}% + freshness ${breakdown.freshness?.score ?? '—'} × ${pct('freshness')}%) + interest ${calc.interest}` : '';
   return `<div class="rate-box">
     <div class="tri-head"><span class="score-big">${r.score.toFixed(1)}</span>${badge(v).replace(/<b>.*?<\/b>/, '')}
       <span class="muted" style="font-size:13px">${esc(r.reason)}</span></div>

@@ -3,7 +3,7 @@
 Read this first in every new session, whatever the tool. The orchestrator keeps it updated.
 
 **Last updated:** 2026-10-24 by claude
-**Branch:** feat/llm-team-kit (the plan names feat/feedback-round-2; create it when work starts)
+**Branch:** feat/feedback-round-2 (checkpoint tag before it: checkpoint-before-feedback-2)
 **Active plan:** docs/plan/feedback-round-2.md
 
 ## Done
@@ -11,17 +11,16 @@ Read this first in every new session, whatever the tool. The orchestrator keeps 
 - Manual tests §1 (library at real size) passed on 2026-10-24.
 
 ## In progress
-- Planning feedback round 2: Stop that works, explainable ratings with minutes, UI polish, pagination, test sessions.
+- Nothing. Feedback round 2 (docs/plan/feedback-round-2.md): T1-T8 done, branch reviewed by codex; its one real finding (formula weights display) fixed.
 
 ## Next up
-- T1 (codex): Stop for category sorting and proposals, backend.
-- T3 (claude): explainable score, minutes and takeaways.
-- T5 (gemini): visual foundation. Then T2, T4, T6a, T6b, T7, run in that order, because they all edit web/index.html.
-- T8 (claude): manual test sessions.
+- User runs manual test sessions S1-S6 (docs/MANUAL-TESTS.md), starting with S1 (new ratings).
+- Phase 3 (better Ask answers) once the user decides.
+- Push: needs a remote URL from the user, and a decision on rewriting the commit email first.
 
 ## Problems / blockers
-- Waiting on the user: an "opendots" style reference, which page pagination fails on, and where category text is hard to read.
-- The user's team-kit edits (.team/, .claude/commands/, AGENTS.md, CLAUDE.md) are uncommitted on feat/llm-team-kit.
+- No git remote yet.
 
 ## Worker quota notes
-- 
+- Gemini (free key, gemini-2.5-flash) hits its 250k input-tokens/minute limit on any task touching web/index.html; codex did T2-T7.
+- team.conf fixes 2026-10-24: codex `--sandbox workspace-write` (no more --full-auto); gemini `--skip-trust`.
