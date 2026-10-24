@@ -335,7 +335,8 @@
   /* ---------- search ---------- */
   #gsearch-btn { display: inline-flex; font-size: 18px; text-decoration: none; }
   .ask { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 32px; align-items: start; margin-top: 8px; }
-  .ask-box { display: flex; gap: 8px; margin-top: 18px; }
+  .ask-box { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+  .ask-box > .field-label { flex: 0 0 100%; margin-bottom: -4px; }
   .ask-box .search-big { margin-top: 0; }
   .ask-box .btn { height: 46px; padding: 0 20px; font-size: 15px; }
   .ask-filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
@@ -1290,9 +1291,7 @@ function viewCategories() {
   <section>
     <div class="eyebrow">Categories</div>
     <h1 class="display">${plural(Object.keys(tax).length + manual.length, 'category')}<em>${fb ? `${fb} unsorted` : 'everything sorted'}</em></h1>
-    <p class="lede" style="max-width:680px">Keywords sort videos instantly and offline. The AI can propose a better set of categories from your library,
-      keeping the ones you tick as <b>Keep</b>, and suggest a category for each unsorted video. You review everything before it changes.
-      A video you move by hand stays where you put it.</p>
+    <p class="lede">Edit category names, keywords and sorting options. ${tip('Keywords sort videos instantly and offline. AI can propose categories or suggest a category for each unsorted video. You review every AI suggestion before it changes anything; videos you move by hand stay where you put them.')}</p>
     <div class="actions">
       <button class="btn btn-dark btn-sm" data-act="reclassify">Save and re-sort</button>
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
@@ -1308,18 +1307,18 @@ function viewCategories() {
   <section class="section">
     ${ai.proposal ? '<h2 class="h">Current categories</h2>' : ''}
     ${Object.keys(tax).map(n => `<div class="cat-row">
-      <div><input type="text" value="${esc(n)}" title="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
+      <div><label class="field-label">Category name</label><input type="text" value="${esc(n)}" title="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
         <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div>
-        <label class="keep" title="The AI keeps this category exactly as it is"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Keep</label>
-        <label class="keep" title="Fetch captions for videos in this category" style="margin-left:12px"><input type="checkbox" data-change="transcripts" data-name="${esc(n)}" ${S.data.transcripts[n] !== false ? 'checked' : ''}> Transcripts</label>
-        <label class="keep" title="Read slides, whiteboards and on-screen code for videos in this category" style="margin-left:12px"><input type="checkbox" data-change="visual-cat" data-name="${esc(n)}" ${S.data.visual_categories[n] ? 'checked' : ''}> Slides</label></div>
-      <div><textarea class="kw" data-name="${esc(n)}" rows="4" aria-label="Keywords for ${esc(n)}" placeholder="keywords, separated, by commas">${esc(tax[n].join(', '))}</textarea>
-        ${notes[n] ? `<div class="desc">${esc(notes[n])}</div>` : ''}</div>
+        <label class="keep"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Keep ${tip('AI proposals leave this category unchanged.')}</label>
+        <label class="keep" style="margin-left:12px"><input type="checkbox" data-change="transcripts" data-name="${esc(n)}" ${S.data.transcripts[n] !== false ? 'checked' : ''}> Transcripts ${tip('Fetch captions for videos in this category.')}</label>
+        <label class="keep" style="margin-left:12px"><input type="checkbox" data-change="visual-cat" data-name="${esc(n)}" ${S.data.visual_categories[n] ? 'checked' : ''}> Slides ${tip('Read slides, whiteboards and on-screen code.')}</label></div>
+      <div><label class="field-label" for="kw-${n.replace(/[^\w-]/g, '_')}">Keywords</label><textarea id="kw-${n.replace(/[^\w-]/g, '_')}" class="kw" data-name="${esc(n)}" rows="4" placeholder="Separate keywords with commas">${esc(tax[n].join(', '))}</textarea>
+        ${notes[n] ? `<div class="field-label">Category note ${tip(notes[n])}</div>` : ''}</div>
       <div><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
     ${manual.map(n => `<div class="cat-row">
       <div><b style="font-weight:500;overflow-wrap:anywhere" title="${esc(n)}">${esc(n)}</b><div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n], 'video')}</a> · set by hand</div></div>
-      <p class="note" style="padding-top:6px">No keywords yet. Only holds videos you moved here yourself.</p>
+      <p class="field-label" style="padding-top:6px">No keywords ${tip('This category only holds videos you moved here yourself.')}</p>
       <div><button class="btn-text" data-act="adopt-cat" data-name="${esc(n)}">Add keywords</button><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
   </section>`;
@@ -1330,15 +1329,14 @@ function viewProposal(p, tax, counts) {
   return `
   <section class="section card">
     <h2 class="h">Proposed categories</h2>
-    <p class="note">From ${esc(p.model || 'the AI')}. Untick any you don't want, and edit names or keywords. Applying saves these categories
-      and re-sorts by keywords. Then use “Sort unsorted with AI” for what keywords miss.</p>
+    <p class="note">Review proposed categories ${tip(`Suggested by ${p.model || 'the AI'}. Untick categories to leave them out, then edit names or keywords. Applying saves the categories and re-sorts by keywords. Use AI sorting for videos keywords miss.`)}</p>
     <div id="proposal" style="margin-top:8px">
       ${p.categories.map((c, i) => `<div class="prop-row" data-i="${i}">
-        <input type="checkbox" class="p-on" checked ${c.preset ? 'disabled title="Kept: you ticked Keep"' : ''} aria-label="Use ${esc(c.name)}">
+        <label class="check"><input type="checkbox" class="p-on" checked ${c.preset ? 'disabled title="Kept: you ticked Keep"' : ''}> Use</label>
         <div><input type="text" class="p-name" value="${esc(c.name)}" title="${esc(c.name)}" style="width:100%;font-weight:500" ${c.preset ? 'readonly' : ''} aria-label="Name">
           <div class="meta" style="font-size:12.5px;color:var(--ink-3);margin-top:6px">${c.preset ? '<span class="tag">kept</span>' : c.existing ? `<span class="tag">current</span> ${plural(counts[c.name] || 0, 'video')}` : '<span class="tag new">new</span>'}</div></div>
-        <div><textarea class="p-kw" rows="4" aria-label="Keywords">${esc(c.keywords.join(', '))}</textarea>
-          ${c.description ? `<div class="desc p-desc">${esc(c.description)}</div>` : ''}</div>
+        <div><label class="field-label">Keywords</label><textarea class="p-kw" rows="4" aria-label="Keywords">${esc(c.keywords.join(', '))}</textarea>
+          ${c.description ? `<div class="field-label">Description ${tip(c.description)}</div>` : ''}</div>
       </div>`).join('')}
       ${dropped.length ? `<div style="margin-top:20px"><span class="field-label">Current categories the AI left out</span>
         ${dropped.map(n => `<label class="check" style="margin-top:8px"><input type="checkbox" class="p-drop" value="${esc(n)}">
@@ -1374,15 +1372,16 @@ function viewSearch() {
   return `
   <section>
     <div class="eyebrow">Search</div>
-    <h1 class="display">Find it again<em>titles, chapters, transcripts, AI summaries and your notes</em></h1>
-    <input type="search" id="sq" class="search-big" value="${esc(sr.q)}" placeholder="e.g. neo4j setup, &quot;plan mode&quot;, lora" aria-label="Search">
+    <h1 class="display">Find it again<em>Search your library</em></h1>
+    <label class="field-label" for="sq">Search ${tip('Search titles, chapters, transcripts, AI summaries and your notes. Use quotes for an exact phrase; words of 3+ letters match inside longer words.')}</label>
+    <input type="search" id="sq" class="search-big" value="${esc(sr.q)}" placeholder="e.g. neo4j setup, &quot;plan mode&quot;, lora">
     <div class="chips" style="margin-top:14px">${SEARCH_KINDS.map(([k, l]) =>
       `<button class="chip ${sr.kind === k ? 'on' : ''}" data-act="s-kind" data-v="${k}">${l}</button>`).join('')}
       <span style="flex:1"></span>
-      <label class="check" style="align-items:center" title="Also find pieces that mean the same thing in other words or another language">
+      <label class="check" style="align-items:center">
         <input type="checkbox" data-change="s-meaning" ${sr.meaning ? 'checked' : ''} style="margin:0"><span class="note">By meaning</span></label></div>
-    <p class="hint">${sr.meaning ? 'By meaning: closest pieces first, even without the same words (“make models smaller” finds “quantization”). Every video gets a closest piece, so look at the top results. ' : ''}${indexed} of ${plural(videos().length, 'video')} have transcripts.
-      ${indexed < videos().length ? '<a href="#/sources">Fetch details</a> to search inside more of them.' : ''} Use quotes for an exact phrase; words of 3+ letters match inside longer words.</p>
+    <p class="hint">By meaning ${tip('Find pieces with similar meaning, even when they use different words or another language. Results are ordered by closeness, so check the top matches.')}</p>
+    <p class="hint">${indexed} of ${plural(videos().length, 'video')} have transcripts. ${indexed < videos().length ? '<a href="#/sources">Fetch details</a> to search inside more.' : ''}</p>
   </section>
   <div id="sresults"></div>`;
 }
@@ -1439,7 +1438,8 @@ function viewAsk() {
   const a = S.ask, ai = S.data.ai, ready = ai.ready_for.ask, th = a.thread, follow = th.length > 0;
   const local = ai.providers[ai.tasks.ask || ai.tasks.rate || ai.provider]?.local;
   const box = `<div class="ask-box">
-      <input type="text" id="aq" class="search-big" value="${esc(a.q)}" maxlength="1000" aria-label="${follow ? 'Follow-up question' : 'Question'}" ${a.busy ? 'disabled' : ''}
+      <label class="field-label" for="aq">${follow ? 'Follow-up' : 'Question'}</label>
+      <input type="text" id="aq" class="search-big" value="${esc(a.q)}" maxlength="1000" ${a.busy ? 'disabled' : ''}
         placeholder="${follow ? 'Ask a follow-up, e.g. “and where does he show the code?”' : a.video ? 'Ask about this video' : 'e.g. How do I fine-tune a big model on one GPU?'}">
       <button class="btn btn-dark" data-act="ask-go" ${a.busy || !ready ? 'disabled' : ''}>${a.busy ? '<span class="spin" style="display:inline-block"></span>' : follow ? 'Ask' : 'Ask'}</button>
     </div>`;
@@ -1447,21 +1447,19 @@ function viewAsk() {
   return `
   <section>
     <div class="eyebrow">Ask</div>
-    <h1 class="display">Ask your library<em>answers cite the exact videos and moments</em></h1>
+    <h1 class="display">Ask your library<em>Get answers from your videos</em></h1>
     ${follow ? `<div class="ask-filters"><button class="btn btn-sm" data-act="ask-new">+ New question</button>
         ${askScope(th[0].filters) ? `<span class="note faint">Within: ${esc(askScope(th[0].filters))}</span>` : ''}</div>` : `${box}
     <div class="ask-filters">
       ${vid ? `<span class="chip on" style="max-width:100%"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Only: ${esc(vid.title)}</span>
           <button class="btn-text" data-act="ask-unscope" aria-label="Ask across the whole library" style="color:inherit;height:auto;padding:0 0 0 4px">✕</button></span>`
-        : `<select data-change="ask-cat" aria-label="Category"><option value="">All categories</option>
+        : `<label class="field-label">Category <select data-change="ask-cat"><option value="">All categories</option>
         ${categoryNames().map(c => `<option value="${esc(c)}" ${a.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-      ${libPlaylists().length > 1 ? `<select data-change="ask-src" aria-label="Playlist"><option value="">All playlists</option>
-        ${libPlaylists().map(p => `<option value="${esc(p.id)}" ${a.src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select>` : ''}
-      <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched and skipped videos</span></label>`}
+      </label>${libPlaylists().length > 1 ? `<label class="field-label">Playlist <select data-change="ask-src"><option value="">All playlists</option>
+        ${libPlaylists().map(p => `<option value="${esc(p.id)}" ${a.src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select></label>` : ''}
+      <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched</span> ${tip('Include videos marked watched or skipped in the answer.')}</label>`}
     </div>
-    <p class="hint">${ready ? `Answered by ${esc(ai.uses.ask)}${local ? ', on this computer: about 5–30 s' : ''}.`
-      : 'Choose an AI for questions first: <a href="#/ai">Settings → AI</a> → Which AI does what.'}
-      Answers use only your videos' transcripts, slides, chapters, summaries and notes. Click a number to play that moment.</p>`}
+    <p class="hint">${ready ? `Answer model: ${esc(ai.uses.ask)}${local ? ' · Runs on this computer' : ''}.` : 'Set up an AI for questions in Settings → AI.'} ${tip("Answers use your videos' transcripts, slides, chapters, summaries and notes. Click a citation number to play that moment.")}</p>`}
   </section>
   <div class="ask">
     <div id="aresult">${askResult()}${follow ? `<div style="margin-top:22px">${box}</div>` : ''}</div>
@@ -1561,8 +1559,7 @@ function viewSetup() {
   const win = S.data.platform === 'win32';
   return `
   <section>
-    <p class="lede" style="max-width:700px">Download the setup script, put it in the YourTube folder (the one with <code>dashboard.py</code>) and run it.
-      It installs the app, and with the local AI option also Ollama and a model that fits the computer. It asks before installing anything system-wide.</p>
+    <p class="lede">Setup scripts and guide ${tip('Download a setup script, place it in the YourTube folder (the one with dashboard.py), and run it. The local AI option also installs Ollama and a model that fits the computer. The script asks before installing anything system-wide.')}</p>
     <div class="dl-grid">
       <a class="dl" href="/download/setup.sh" download><b>⬇ setup.sh</b><span>Linux and macOS · <code>bash setup.sh --local-ai</code></span></a>
       <a class="dl" href="/download/setup.ps1" download><b>⬇ setup.ps1</b><span>Windows PowerShell · <code>-LocalAI</code> · not yet tested</span></a>
@@ -1637,8 +1634,7 @@ function viewAI() {
     </select>`;
   return `
   <section>
-    <p class="lede" style="max-width:700px"><b style="font-weight:600">${ready.length ? plural(ready.length, 'AI') + ' ready' : 'No AI set up yet'}${ai.ready ? ' · default: ' + esc(ai.providers[ai.provider].label) : ''}.</b> Set up as many as you like, cloud or local, and choose which one does each job. The AI only suggests and rates:
-      nothing changes until you accept. Only titles, descriptions and transcripts are sent, never your cookies. Local models keep everything on this computer.</p>
+    <p class="lede"><b style="font-weight:600">${ready.length ? plural(ready.length, 'AI') + ' ready' : 'No AI set up yet'}${ai.ready ? ' · default: ' + esc(ai.providers[ai.provider].label) : ''}.</b> Choose AI providers for each task. ${tip('AI only suggests and rates; nothing changes until you accept. Cloud AI receives titles, descriptions and transcripts, never cookies. Local models keep data on this computer.')}</p>
   </section>
 
   ${viewLocal()}
@@ -1658,8 +1654,7 @@ function viewAI() {
       <div class="route"><span class="field-label" style="margin:0">Default</span>${pick('provider', ai.provider, false)}</div>
       ${Object.entries(ai.task_labels).map(([t, label]) => `<div class="route"><span class="field-label" style="margin:0">${esc(label)}</span>${pick(t, ai.tasks[t] || '', true)}</div>`).join('')}
     </div>
-    <p class="hint">Tip: a cheap or local model works well for categories. Ratings read whole transcripts, so a model with a large context window gives better ratings.
-      Questions follow the ratings choice unless you pick one.</p>
+    <p class="hint">AI choices ${tip('A smaller or local model often works well for categories. Ratings read whole transcripts, so a larger context window can help. Questions use the ratings choice unless you choose another model.')}</p>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
   </section>`;
 }
@@ -1668,16 +1663,16 @@ function viewGeneral() {
   return `
   <section class="section card">
     <h2 class="h">Display</h2>
-    <div class="route" style="margin-top:8px"><span class="field-label" style="margin:0">Default playback speed</span>
+    <div class="route" style="margin-top:8px"><label class="field-label" style="margin:0">Playback speed</label>
       <select data-change="speed" style="width:100%">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}${x === 1 ? ' (normal)' : ''}</option>`).join('')}</select></div>
-    <div class="route"><span class="field-label" style="margin:0">Theme</span>
+    <div class="route"><label class="field-label" style="margin:0">Theme</label>
       <select data-change="theme" style="width:100%">${[['auto', 'Match this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<option value="${k}" ${S.theme === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    <p class="hint">All watch times use the default speed. The Plan page can change it too. These are kept in this browser.</p>
+    <p class="hint">Display options ${tip('Watch times use this speed by default; the Plan page can change it too. Display settings are saved in this browser.')}</p>
   </section>
 
   <section class="section card">
     <h2 class="h">How scores are calculated</h2>
-    <p class="hint">Quality combines depth, time value and freshness. Fit adjusts that score with a penalty or bonus.</p>
+    <p class="hint">Score formula ${tip('Quality combines depth, time value and freshness. Fit adjusts the result with an interest penalty or bonus.')}</p>
     <div class="ai-grid">
       ${[['depth','Depth weight'],['value','Time value weight'],['freshness','Freshness weight']].map(([key,label]) => `<div><label class="field-label" for="formula-${key}">${label} (%)</label><input id="formula-${key}" type="number" min="0" max="100" step="1" data-formula="${key}" value="${Math.round(formula[key]*100)}"></div>`).join('')}
       <div><label class="field-label" for="formula-interest_penalty">Interest penalty</label><input id="formula-interest_penalty" type="number" min="0" max="5" step="0.1" data-formula="interest_penalty" value="${formula.interest_penalty}"></div>
@@ -1689,15 +1684,15 @@ function viewGeneral() {
 
   <section class="section card">
     <h2 class="h">About you${S.data.libraries.length > 1 ? ` · ${esc(S.lib ? libName(S.lib) : libName(1))}` : ''}</h2>
-    ${S.data.libraries.length > 1 ? `<p class="note">Interests are kept per library, so ratings judge each video against its own library's goals.${S.lib ? '' : ` “All libraries” is selected: this edits ${esc(libName(1))}.`}</p>` : ''}
+    ${S.data.libraries.length > 1 ? `<p class="note">Library-specific interests ${tip(`Ratings judge each video against its library's goals.${S.lib ? '' : ` “All libraries” is selected: this edits ${libName(1)}.`}`)}</p>` : ''}
     <div class="ai-grid">
-      <div class="full"><label class="field-label" for="ai-interests">What do you want to learn? Ratings favour videos that fit this.</label>
+      <div class="full"><label class="field-label" for="ai-interests">Learning interests ${tip('Ratings favour videos that fit these interests.')}</label>
         <textarea id="ai-interests" rows="3" placeholder="e.g. Building AI agents and RAG in Python, system design for interviews. Not interested in crypto or AI news hype.">${esc(ai.interests)}</textarea></div>
-      <div><label class="field-label" for="ai-lang">Language for summaries and reasons</label>
+      <div><label class="field-label" for="ai-lang">Response language</label>
         <input id="ai-lang" type="text" list="ai-langs" value="${esc(ai.language)}"><datalist id="ai-langs">${LANGUAGES.map(l => `<option value="${l}">`).join('')}</datalist></div>
       <div></div>
       <label class="check full"><input type="checkbox" id="ai-auto" ${ai.auto_after_sync ? 'checked' : ''}>
-        <span>After each playlist sync, suggest categories for new unsorted videos</span></label>
+        <span>Suggest after sync</span> ${tip('After each playlist sync, suggest categories for new unsorted videos.')}</label>
     </div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
   </section>`;
@@ -1728,8 +1723,7 @@ function viewLocal() {
   return `
   <section class="section card">
     <h2 class="h">Local AI on this computer</h2>
-    <p class="note">Runs models on your own machine with Ollama: free, private and works offline. Run the whole setup in one go with
-      <code>bash scripts/setup.sh --local-ai</code> (Windows: <code>scripts\\setup.ps1 -LocalAI</code>). <a href="#/setup">Setup guide and downloads →</a></p>
+    <p class="note">Local AI ${tip('Run models on your own machine with Ollama: free, private and works offline. Run bash scripts/setup.sh --local-ai (Windows: scripts/setup.ps1 -LocalAI) to set up Ollama and a suitable model.')} <a href="#/setup">Setup guide and downloads →</a></p>
     <div style="margin-top:8px">
       ${row(L.gpu.ok, 'GPU', L.gpu.detail)}
       ${row(L.memory.ok, 'Memory', L.memory.detail)}
@@ -1746,19 +1740,19 @@ function viewLocal() {
       ${L.recommended.filter(r => !have.has(r.model)).map(r => `<div class="prov"><div>${r.best ? '<span class="vb vb-watch" style="margin-right:6px">Best fit</span>' : ''}<b style="font-weight:500">${esc(r.model)}</b>
         <span class="faint" style="font-size:12.5px"> · ${esc(r.size)} · ${esc(r.why)}${r.fits_gpu ? '' : ' Too big for this GPU: runs partly on the CPU.'}</span></div>
         <button class="btn btn-sm ${r.best ? 'btn-dark' : ''}" data-act="local-pull" data-model="${esc(r.model)}" data-job-btn>Download</button></div>`).join('')}
-      <div class="actions"><input type="text" id="local-model" placeholder="Any Ollama model, e.g. gemma4:e2b" style="width:260px">
+      <div class="actions"><label class="field-label" for="local-model">Model name</label><input type="text" id="local-model" placeholder="e.g. gemma4:e2b" style="width:260px">
         <button class="btn btn-sm" data-act="local-pull" data-job-btn>Download</button></div>` : ''}
-    <div class="route" style="margin-top:14px"><span class="field-label" style="margin:0">Speech-to-text model</span>
+    <div class="route" style="margin-top:14px"><label class="field-label" style="margin:0">Speech model</label>
       <select data-change="asr-model" style="width:100%">${[['auto', 'Auto: large-v3-turbo on a GPU, small on the CPU'], ['large-v3-turbo', 'large-v3-turbo (best; ~1.6 GB)'],
         ['small', 'small (faster on CPU; ~0.5 GB)'], ['medium', 'medium (~1.5 GB)']].map(([k, l]) => `<option value="${k}" ${ai.asr_model === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-    ${L.ollama.running ? `<div class="route"><span class="field-label" style="margin:0">Vision model (slides)</span>
+    ${L.ollama.running ? `<div class="route"><label class="field-label" style="margin:0">Slide model</label>
       <select data-change="vision-model" style="width:100%"><option value="" ${!ai.vision_model ? 'selected' : ''}>Same as the text model${ai.providers.ollama.model ? ` (${esc(ai.providers.ollama.model)})` : ''}</option>
         ${(L.ollama.models || []).map(m => `<option value="${esc(m.name)}" ${ai.vision_model === m.name ? 'selected' : ''} ${m.vision ? '' : 'disabled'}>${esc(m.name)}${m.vision ? '' : ' (no image support)'}</option>`).join('')}</select></div>
-    <div class="route"><span class="field-label" style="margin:0">Slide frame quality</span>
+    <div class="route"><label class="field-label" style="margin:0">Frame quality</label>
       <select data-change="visual-height" style="width:100%">${[[480, '480p (default, smaller downloads)'], [720, '720p (small text, ~2× download)']].map(([k, l]) => `<option value="${k}" ${ai.visual_height === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
     ${viewEmbed(L, running)}
     <label class="check" style="margin-top:16px"><input type="checkbox" data-change="local-only" ${ai.local_only ? 'checked' : ''}>
-      <span><b style="font-weight:500">Local only</b>: never send anything to a cloud AI (Claude, Gemini, hosted open-weight models)</span></label>
+      <span><b style="font-weight:500">Local only</b></span> ${tip('Never send anything to a cloud AI (Claude, Gemini or hosted open-weight models).')}</label>
     <div class="actions"><button class="btn-text" data-act="local-check">Check again</button></div>
     <div id="job"></div>
   </section>`;
@@ -1774,8 +1768,7 @@ function viewEmbed(L, running) {
   const known = E.choices.some(c => c.model === E.model) ? E.choices : [{ model: E.model, size: '', why: 'Your choice.', installed: E.installed }, ...E.choices];
   return `
     <h3 style="font-size:14px;margin:22px 0 4px">Meaning-based search</h3>
-    <p class="note">Ask and Search → By meaning find pieces by what they mean, in any language, using a small embedding model.
-      The index updates by itself after syncs, details, transcription, slide reading and ratings.</p>
+    <p class="note">Meaning index ${tip('Ask and Search → By meaning finds pieces by what they mean, in any language, using a small embedding model. The index updates after syncs, details, transcription, slide reading and ratings.')}</p>
     <div class="prov"><div><span class="dot ${E.installed && E.embedded >= E.pieces && E.pieces ? 'ok' : ''}"></span><b style="font-weight:500">Index</b>
       <span class="faint" style="font-size:12.5px"> · ${esc(state)}</span></div><span></span></div>
     ${E.pieces ? `<div class="progress" style="margin:6px 0 4px"><i style="width:${pct}%"></i></div>` : ''}
@@ -1800,7 +1793,7 @@ function aiEditor(k, p) {
       <input id="ai-base" type="text" value="${esc(p.base_url)}" placeholder="${p.kind === 'ollama' ? 'http://localhost:11434' : 'https://…/v1'}"></div>` : '<div></div>'}
     ${p.kind === 'ollama' ? `<div><label class="field-label" for="ai-ctx">Context size (tokens)</label>
       <input id="ai-ctx" type="number" min="2048" max="131072" step="1024" value="${p.num_ctx}">
-      <div class="hint" style="margin-top:6px">How much transcript the model reads at once. Bigger uses more memory; 8192 suits a 4 GB GPU.</div></div><div></div>` : ''}
+      <div class="hint" style="margin-top:6px">Context size ${tip('How much transcript the model reads at once. Larger values use more memory; 8192 suits a 4 GB GPU.')}</div></div><div></div>` : ''}
     <div class="full"><label class="field-label" for="ai-key">API key</label>
       <input id="ai-key" type="password" autocomplete="off" value="${esc(S.ai.key)}" data-input="ai-key" placeholder="${p.key_source ? '••••••••' : ''}">
       <div class="hint" style="margin-top:6px">${keyNote} Stored only in <code>settings.json</code> on this computer.

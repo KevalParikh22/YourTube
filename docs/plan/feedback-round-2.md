@@ -143,7 +143,7 @@
 
 ### T6b: Tooltips and short labels — Categories, Search, Ask, Settings (General, AI, Setup)
 - **worker:** gemini
-- **status:** todo
+- **status:** done (codex)
 - **depends on:** T6a
 - **files:** `web/index.html`
 - **steps:** same rules as T6a on the remaining pages (the Setup guide content itself stays as written).
