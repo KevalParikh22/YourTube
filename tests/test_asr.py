@@ -52,7 +52,11 @@ class SourcesTest(unittest.TestCase):
     def test_both_kept_and_user_chooses(self):
         storage.save_local_transcript("wrong", [{"start": 0, "text": "fine tuning has become important"}], "en", "turbo", db_path=self.db)
         d = storage.get_details("wrong", db_path=self.db)
-        self.assertEqual((d["transcript"], d["sources"]), ("captions", ["captions", "local-asr"]))   # captions stay active
+        # Wrong-script captions: the local transcript is used automatically (decided 2026-10-25), captions are kept
+        self.assertEqual((d["transcript"], d["sources"]), ("local-asr", ["captions", "local-asr"]))
+        self.assertEqual(storage.search("important", db_path=self.db)["results"][0]["video_id"], "wrong")
+        storage.set_transcript_source("wrong", "captions", db_path=self.db)               # the user's choice wins
+        self.assertEqual(storage.get_details("wrong", db_path=self.db)["transcript"], "captions")
         self.assertEqual(storage.search("important", db_path=self.db)["results"], [])
         storage.set_transcript_source("wrong", "local-asr", db_path=self.db)
         self.assertEqual(storage.get_segments("wrong", db_path=self.db)[0]["text"], "fine tuning has become important")

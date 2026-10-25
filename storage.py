@@ -1042,7 +1042,18 @@ def _active_source(conn, video_id: str) -> str:
     chosen = row[0] if row else None
     if chosen in have:
         return chosen
+    if "captions" in have and "local-asr" in have and _captions_wrong(conn, video_id):
+        return "local-asr"   # wrong-script auto-captions: the local transcript, unless the user picked captions
     return "captions" if "captions" in have or not have else have[0]
+
+def _captions_wrong(conn, video_id: str) -> bool:
+    r = conn.execute("SELECT v.title, d.description, d.caption_kind FROM videos v JOIN video_details d ON d.video_id = v.video_id "
+                     "WHERE v.video_id = ?", (video_id,)).fetchone()
+    if not r:
+        return False
+    sample = " ".join(t for (t,) in conn.execute(
+        "SELECT text FROM transcript_segments WHERE video_id = ? AND source = 'captions' ORDER BY start_s LIMIT 40", (video_id,)))
+    return captions_look_wrong(sample, r[0] or "", r[1] or "", r[2] or "")
 
 def set_transcript_source(video_id: str, source: str, db_path: str = DB_PATH) -> None:
     """Makes captions or the local transcript the one search, ratings and summaries use."""
@@ -1088,8 +1099,8 @@ def _script_share(text: str) -> float:
 def captions_look_wrong(caption_text: str, title: str, description: str = "", caption_kind: str = "") -> bool:
     """
     Auto-captions in a non-Latin script for a video whose title and description are in Latin script:
-    the spike found English speech auto-captioned in Devanagari this way. It's only a hint; the local
-    transcript is kept next to the captions and the user chooses.
+    the spike found English speech auto-captioned in Devanagari this way. When a local transcript exists, it is
+    used instead (decided 2026-10-25); the captions are kept and the user can switch back per video.
     """
     if caption_kind != "auto" or not caption_text:
         return False

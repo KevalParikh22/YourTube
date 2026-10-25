@@ -90,7 +90,7 @@ Statuses: `unwatched`, `in_progress`, `completed`, `skipped`. `storage.DONE_STAT
   3. Unload Ollama, then transcribe (`large-v3-turbo` int8 on CUDA, `small` int8 on CPU; `settings["asr_model"]`).
   4. Delete the audio, then pause if the GPU runs hot.
 - `media_jobs` tracks each job's status, tries, progress and timings. Downloaded media lives only in git-ignored `media_cache/`.
-- `transcript_segments.source` is `captions` or `local-asr`. A video can have both; `video_details.transcript_source` picks one (NULL = captions, or the local transcript when there are no captions). **Every transcript reader must go through `_active_source`.** `save_details` replaces only `captions` rows.
+- `transcript_segments.source` is `captions` or `local-asr`. A video can have both; `video_details.transcript_source` picks one (NULL = captions; the local transcript when there are no captions, or when the captions look wrong-script (`_captions_wrong`, decided 2026-10-25)). **Every transcript reader must go through `_active_source`.** `save_details` replaces only `captions` rows.
 - `requirements-local.txt` holds faster-whisper and the NVIDIA cuBLAS/cuDNN wheels; `preload_cuda_libs()` loads them without LD_LIBRARY_PATH.
 
 **Slides and whiteboards (Phase 2.5 L2, `local_visual.py`)**:
