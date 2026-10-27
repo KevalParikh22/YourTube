@@ -2194,7 +2194,7 @@ function drawerSummary(v) {
     : '<div class="kv-line">No summary yet. <a href="#/ai">Choose an AI for summaries in Settings</a>.</div>';
   const s = result.summary, moments = result.moments || {};
   const at = t => Number.isFinite(+t) ? Math.max(0, Math.floor(+t)) : 0;
-  const time = t => `<button class="time-link" data-act="seek" data-t="${at(t)}">${clock(at(t))}</button>`;
+  const time = t => t == null || !Number.isFinite(+t) ? '' : `<button class="time-link" data-act="seek" data-t="${at(t)}">${clock(at(t))}</button>`;   // no time: no fake 0:00 link
   const relationLabel = { prerequisite: 'Prerequisites', deeper: 'Go deeper', other_view: 'Other views', same_topic: 'Same topic' };
   const grouped = {};
   for (const item of s.learn_more?.related || []) (grouped[item.relation] ||= []).push(item);
