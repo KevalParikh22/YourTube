@@ -13,6 +13,7 @@ import datetime as dt
 import re
 from typing import Any, Callable, Dict, List, Optional
 
+from exporter import _clock
 from llm import LLMError, parse_json
 
 VERDICTS = ("watch", "skim", "skip")
@@ -34,11 +35,6 @@ SYSTEM = (
     "Reply with JSON only."
 )
 
-
-def _clock(sec: float) -> str:
-    sec = int(sec or 0)
-    h, m, s = sec // 3600, sec % 3600 // 60, sec % 60
-    return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 def transcript_blocks(segments: List[Dict[str, Any]], block: int = BLOCK_SECONDS) -> List[Dict[str, Any]]:
     """Merges caption lines into ~30 s blocks: [{'start', 'text'}]."""

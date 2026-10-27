@@ -11,6 +11,8 @@ import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
 
+import exporter
+
 TOP = 8                # pieces sent to the answer model (spike: rank-6 answers still reach it)
 PIECE_CHARS = 1200     # longest excerpt sent; cut further when the model's context is small
 SOURCE_CHARS = 600     # excerpt text kept with a saved answer
@@ -47,8 +49,7 @@ _lock = threading.Lock()   # one answer at a time: a local model can't run two a
 
 
 def clock(sec: Optional[float]) -> str:
-    sec = int(sec or 0)
-    return f"{sec // 3600}:{sec % 3600 // 60:02d}:{sec % 60:02d}" if sec >= 3600 else f"{sec // 60}:{sec % 60:02d}"
+    return exporter._clock(sec)
 
 
 def excerpts(pieces: List[Dict[str, Any]], budget: int) -> str:
