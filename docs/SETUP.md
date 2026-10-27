@@ -209,6 +209,8 @@ Settings → **General**:
 | Transcribe videos without usable captions on this computer | Playlists → Transcribe N videos locally, or a video's panel | — |
 | Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment. Tick **By meaning** to also find the same idea in other words or another language | — |
 | Ask a question across your videos | **Ask** → type the question → click a number in the answer to play that moment. Ask follow-ups below the answer ("and where does he show the code?"); **+ New question** starts over. Past conversations stay in the list on the right; **Export note** saves one as Markdown | — |
+| Summarise a video | Open it → **Summarise** (or select videos → Summarise selected). About 1–2 minutes per video with a local model. You get a TL;DR, minutes with timestamps, key claims and quotes, check-yourself questions, takeaways, related moments in your other videos, and Learn more (prerequisites, deeper, other views, YouTube searches) | — |
+| Knowledge pages | **Knowledge** tab → Build (or Update) a topic once some of its videos are summarised → Open; every point links to the moment it comes from; **Export note** for Obsidian | — |
 | Ask about one video | Open the video → **Ask about this video** | — |
 | Category suggestions after sync | Settings → General → About you → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
@@ -242,7 +244,8 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `providers.<name>.base_url` | per provider | Server URL (Ollama: `http://localhost:11434`) |
 | `providers.<name>.api_key` | `""` | API key (or use the environment variable) |
 | `providers.ollama.num_ctx` | `8192` | Ollama context size in tokens |
-| `tasks.categorize`, `tasks.rate`, `tasks.ask` | unset | Provider for that job; unset means the default (`ask` follows `rate`) |
+| `tasks.categorize`, `tasks.rate`, `tasks.summarize`, `tasks.ask` | unset | Provider for that job; unset means the default (`summarize` and `ask` follow `rate`) |
+| `show_descriptions` | `false` | Show video descriptions open in the video panel (they are collapsed by default) |
 | `local_only` | `false` | Block every cloud AI |
 | `visuals.<category>` | off | Read slides for videos in this category |
 | `vision_model` | `""` | Ollama model that reads frames; empty means the Ollama text model |

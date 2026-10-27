@@ -84,7 +84,7 @@
 
 ### T5: Docs and manual tests
 - **worker:** claude
-- **status:** todo
+- **status:** done
 - **depends on:** T1–T4
 - **files:** `docs/SETUP.md`, `docs/MANUAL-TESTS.md` (new session S7: summaries, learn more, knowledge pages), `CLAUDE.md`, `docs/PRD-Phase-3.md` (decisions above + results)
 - **verify:** read-through

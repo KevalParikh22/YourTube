@@ -14,6 +14,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | **S4 · Local media** | §3 | ~30 min + waiting | Pick 3–5 videos without captions and 3–5 with slides; keep the laptop on power |
 | **S5 · Cloud AI** | §5 | ~20 min | An API key (Claude or Gemini). Optional; skip if you only use local AI |
 | **S6 · Setup and decisions** | §4 | ~15 min | Nothing |
+| **S7 · Summaries and knowledge (Phase 3)** | S7 below | ~40 min + waiting | Ollama running; pick 4–5 videos of one category you know well |
 
 ### S1 extra checks (new ratings, 2026-10-24)
 
@@ -25,6 +26,19 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S1.4 | Your formula | Settings → General → How scores are calculated: change the interest penalty, save, re-rate one video | The new number follows the formula; Reset to default works | |
 | S1.5 | Stop | Start Sort unsorted with AI, then Stop during batch 2 | It says Stopping…, ends before the next batch, and keeps the suggestions made so far | |
 | S1.6 | Look and feel | Browse every page in light and dark | Clean fonts, styled dropdowns, tooltips (ⓘ) instead of paragraphs, readable categories; note anything still rough | |
+
+### S7 checks (summaries and knowledge pages, 2026-10-28)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S7.1 | Summarise | Open a video you have watched → Summarise (1–2 min) | TL;DR, minutes, claims and quotes, questions, takeaways; accurate to what was said; timestamps land right | |
+| S7.2 | Better than YouTube | Compare with YouTube's own summary of the same video | Ours is more useful for deciding and for revising; note what is missing | |
+| S7.3 | Check yourself | Answer the questions before opening the answers | Questions test the important ideas; answers and times are right | |
+| S7.4 | Related moments | Look at "Also in" chips under the minutes | They point to genuinely related parts of your other videos | |
+| S7.5 | Learn more | Read the related videos and YouTube searches | Sensible prerequisites / deeper / other views; the searches fill real gaps | |
+| S7.6 | Knowledge page | Summarise 4–5 videos of one category → Knowledge → Build → Open | A page you could study from; every point's chips open the right moment; Export note works in Obsidian | |
+| S7.7 | Stale page | Summarise one more video of that category | The page shows Update; Update includes it | |
+| S7.8 | Description | Open a video; then Settings → General → Show descriptions | Collapsed by default; open when the setting is on | |
 
 ## 1. Library at real size ✓ done 2026-10-24
 
