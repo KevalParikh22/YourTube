@@ -199,7 +199,7 @@ def _pull_then_index(model):
         embedder.run_embed(should_stop=JOB.stop_requested)
     return ok
 
-AUTO_EMBED_KINDS = {"sync", "details", "asr", "visual", "rate"}
+AUTO_EMBED_KINDS = {"sync", "details", "asr", "visual", "rate", "summarize"}
 JOB = Job()
 
 def _all_category_names():
@@ -420,6 +420,13 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/local/status":
             import local_setup
             return self._json(local_setup.status())
+        if url.path == "/api/summary":
+            import summarizer
+            vid = (qs.get("id") or [""])[0]
+            summary = storage.get_summary(vid)
+            if summary is None:
+                return self._error("Not summarised yet", 404)
+            return self._json({"summary": summary, "moments": summarizer.related_moments(vid, summary)})
         if url.path == "/api/video":
             vid = (qs.get("id") or [""])[0]
             details = storage.get_details(vid)
@@ -696,6 +703,20 @@ class Handler(BaseHTTPRequestHandler):
                 if not llm.is_configured(llm.load_settings(), "rate"):
                     return self._error("Choose an AI for ratings in Settings → AI first")
                 return self._queued(JOB.start("rate", _label("Rate", ids), lambda: rater.run_rate(ids, should_stop=JOB.stop_requested), key=ids))
+
+            if path in ("/api/summarize", "/api/summarize/estimate"):
+                import summarizer
+                ids = body.get("ids")
+                if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+                    return self._error("ids must be a non-empty list of video IDs")
+                if len(ids) > 50:
+                    return self._error("Summarise at most 50 videos at a time")
+                if path == "/api/summarize/estimate":
+                    return self._json(summarizer.estimate(ids))
+                if not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                return self._queued(JOB.start("summarize", _label("Summarise", ids),
+                                              lambda: summarizer.run_summarize(ids, should_stop=JOB.stop_requested), key=ids))
 
             if path == "/api/details/settings":
                 settings = llm.load_settings()

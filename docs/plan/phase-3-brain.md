@@ -49,7 +49,7 @@
 
 ### T1: Summaries engine (backend)
 - **worker:** claude
-- **status:** todo
+- **status:** done (real check: 3 videos, ~100 s each locally with qwen3.5:4b; the UI should say ~1-2 min, not ~30 s)
 - **files:** `summarizer.py` (new), `storage.py`, `llm.py`, `dashboard.py`, `tests/test_summarizer.py` (new)
 - **steps:** table, save and get, search indexing; prompt with related candidates; validate; `related_moments`; job `summarize` with stop; `/api/summarize`, `/api/summarize/estimate`, `/api/summary`. Check on a **copy** of the real DB with the local model on 3 videos.
 - **acceptance:** [ ] summaries for 3 real videos look right; [ ] tests cover validate (bad times, unknown candidate ids, limits), save and get round trip, related_moments with fake vectors, the endpoint and stop.

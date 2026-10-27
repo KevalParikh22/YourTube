@@ -45,9 +45,9 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
 }
 
 # Jobs that can each use their own provider; unset ones use the default ("provider")
-TASKS = {"categorize": "Categories", "rate": "Ratings and summaries", "ask": "Questions and answers"}
+TASKS = {"categorize": "Categories", "rate": "Ratings", "summarize": "Summaries", "ask": "Questions and answers"}
 # Tasks that follow another task's choice when they have none of their own
-TASK_FOLLOWS = {"ask": "rate"}
+TASK_FOLLOWS = {"ask": "rate", "summarize": "rate"}
 
 # Approximate USD per 1M tokens (input, output), for cost estimates only
 PRICES = {

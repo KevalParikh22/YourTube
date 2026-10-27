@@ -222,6 +222,22 @@ def init_db(db_path: str = DB_PATH) -> None:
         cursor.execute("INSERT OR IGNORE INTO libraries (id, name) VALUES (1, ?)", (DEFAULT_LIBRARY_NAME,))
         if "library_id" not in _columns(cursor, "playlists"):
             cursor.execute("ALTER TABLE playlists ADD COLUMN library_id INTEGER NOT NULL DEFAULT 1")
+        # Summaries (Phase 3): made when the user clicks Summarise, independent of the personal rating
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS video_summaries (
+                video_id TEXT PRIMARY KEY,
+                tldr TEXT DEFAULT '',
+                minutes TEXT DEFAULT '[]',
+                claims TEXT DEFAULT '[]',
+                quiz TEXT DEFAULT '[]',
+                takeaways TEXT DEFAULT '[]',
+                learn_more TEXT DEFAULT '{}',
+                model TEXT,
+                language TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(video_id) REFERENCES videos(video_id)
+            )
+        """)
         # Explainable ratings: per-factor scores, meeting-style minutes and takeaways
         rating_cols = _columns(cursor, "video_ratings")
         for col, ddl in (("breakdown", "TEXT DEFAULT '{}'"), ("minutes", "TEXT DEFAULT '[]'"), ("takeaways", "TEXT DEFAULT '[]'")):
@@ -914,7 +930,7 @@ def _docs_for(cursor: sqlite3.Cursor, video_id: str, kind: str) -> List[tuple]:
         r = cursor.execute("SELECT reason, tldr, points, minutes, takeaways FROM video_ratings WHERE video_id = ?",
                            (video_id,)).fetchone()
         if not r:
-            return []
+            return _summary_rows(cursor, video_id, [])
         rows = [(None, " ".join(x for x in (r[1], r[0]) if x))]
         minutes = json.loads(r[3] or "[]")
         if minutes:   # newer ratings: one piece per minute topic, with its notes
@@ -922,8 +938,18 @@ def _docs_for(cursor: sqlite3.Cursor, video_id: str, kind: str) -> List[tuple]:
         else:
             rows += [(p.get("t"), p.get("text")) for p in json.loads(r[2] or "[]") if p.get("text")]
         rows += [(None, t) for t in json.loads(r[4] or "[]") if t]
-        return [x for x in rows if (x[1] or "").strip()]
+        return _summary_rows(cursor, video_id, rows)
     raise ValueError(kind)
+
+def _summary_rows(cursor: sqlite3.Cursor, video_id: str, rows: List[tuple]) -> List[tuple]:
+    """Adds a Phase 3 summary (TL;DR, minutes, claims, takeaways) to the 'summary' search pieces."""
+    s = cursor.execute("SELECT tldr, minutes, claims, takeaways FROM video_summaries WHERE video_id = ?", (video_id,)).fetchone()
+    if s:
+        rows = rows + [(None, s[0])]
+        rows += [(m.get("t"), ": ".join(x for x in (m.get("topic"), " ".join(m.get("notes") or [])) if x)) for m in json.loads(s[1] or "[]")]
+        rows += [(c.get("t"), c.get("text")) for c in json.loads(s[2] or "[]")]
+        rows += [(None, t) for t in json.loads(s[3] or "[]")]
+    return [x for x in rows if (x[1] or "").strip()]
 
 def _reindex(cursor: sqlite3.Cursor, video_ids: Iterable[str], kinds: Iterable[str] = SEARCH_KINDS) -> None:
     kinds = tuple(kinds)
@@ -1458,3 +1484,35 @@ def playlist_library(playlist_id: str, db_path: str = DB_PATH) -> Optional[int]:
 def video_libraries(db_path: str = DB_PATH) -> Dict[str, int]:
     """{video_id: library} for every video (see _video_library)."""
     return {v['video_id']: v['library'] for v in get_library(db_path)}
+
+
+# --- Summaries (Phase 3) ---------------------------------------------------------------------
+
+_SUMMARY_JSON = {"minutes": "[]", "claims": "[]", "quiz": "[]", "takeaways": "[]", "learn_more": "{}"}
+
+def save_summary(video_id: str, summary: Dict[str, Any], model: str = "", db_path: str = DB_PATH) -> None:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute(f"""
+            INSERT OR REPLACE INTO video_summaries (video_id, tldr, {", ".join(_SUMMARY_JSON)}, model, language, created_at)
+            VALUES (?, ?, {", ".join("?" * len(_SUMMARY_JSON))}, ?, ?, CURRENT_TIMESTAMP)""",
+            (video_id, summary.get("tldr", ""), *(json.dumps(summary.get(k) or json.loads(d), ensure_ascii=False) for k, d in _SUMMARY_JSON.items()),
+             model, summary.get("language")))
+        _reindex(conn.cursor(), [video_id], kinds=("summary",))
+        conn.commit()
+
+def get_summary(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        r = conn.execute("SELECT * FROM video_summaries WHERE video_id = ?", (video_id,)).fetchone()
+    if not r:
+        return None
+    d = dict(r)
+    for k, default in _SUMMARY_JSON.items():
+        d[k] = json.loads(d[k] or default)
+    return d
+
+def summarized_ids(db_path: str = DB_PATH) -> set:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return {r[0] for r in conn.execute("SELECT video_id FROM video_summaries")}
