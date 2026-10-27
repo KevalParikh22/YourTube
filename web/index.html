@@ -505,7 +505,7 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['', 'Library'], ['ask', 'Ask'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['settings', 'Settings']];
+const TABS = [['', 'Library'], ['ask', 'Ask'], ['knowledge', 'Knowledge'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['settings', 'Settings']];
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
 const JOB_TEXT = {
@@ -515,6 +515,7 @@ const JOB_TEXT = {
   details: ['Fetching video details, one video every few seconds…', 'Video details fetched', 'Details run stopped early. See the log.'],
   rate: ['Rating videos…', 'Videos rated', 'Rating stopped early. See the log.'],
   summarize: ['Summarising videos…', 'Video summaries ready', 'Summarising stopped early. See the log.'],
+  knowledge: ['Building the knowledge page…', 'Knowledge page ready', 'Knowledge page build stopped or failed. See the log.'],
   pull: ['Downloading the model into Ollama…', 'Model downloaded', 'Download stopped. See the log.'],
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
@@ -543,6 +544,7 @@ const S = {
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
   lib: Number.isInteger(+store.get('ytkb.lib')) && store.get('ytkb.lib') !== null ? +store.get('ytkb.lib') : 1,   // 0 = all libraries
   ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '' },
+  knowledge: { list: null, pages: {}, loadingList: false, loadingPage: null },
 };
 
 /* ---------------- helpers ---------------- */
@@ -698,6 +700,18 @@ function renderView() {
     v.innerHTML = viewAsk();
     if (!S.ask.hist) loadAskHistory();
     if (!S.ask.busy) $('#aq')?.focus({ preventScroll: true });
+  }
+  else if (r === 'knowledge') {
+    const cat = routeParam('category');
+    if (cat) {
+      v.innerHTML = viewKnowledgePage(cat);
+      if (!S.knowledge.pages[cat] && S.knowledge.loadingPage !== cat) loadKnowledgePage(cat);
+      if (!S.knowledge.list && !S.knowledge.loadingList) loadKnowledgeList();
+    } else {
+      v.innerHTML = viewKnowledgeList();
+      if (!S.knowledge.list && !S.knowledge.loadingList) loadKnowledgeList();
+    }
+    updateJob();
   }
   else if (r === 'search') {
     const q = routeParam('q');
@@ -1242,8 +1256,9 @@ function updateJob() {
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
     : route() === 'ai' ? ['pull', 'embed'].includes(job.kind)
+    : route() === 'knowledge' ? job.kind === 'knowledge'
     : ['sync', 'details', 'asr', 'visual'].includes(job.kind) || !job.kind;
-  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route() === 'ai' ? ['pull', 'embed'] : ['sync', 'details', 'asr', 'visual'];
+  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route() === 'ai' ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
   if (!mine || (!job.log && !job.running)) { box.innerHTML = waitLine; return; }
@@ -1276,6 +1291,7 @@ async function taskFinished(t) {
   const text = JOB_TEXT[t.kind] || JOB_TEXT.sync;
   if (['details', 'sync', 'asr', 'visual'].includes(t.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
   if (t.kind === 'summarize') S.summaryCache = {};
+  if (t.kind === 'summarize' || t.kind === 'knowledge') { S.knowledge.list = null; S.knowledge.pages = {}; }
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
   S.flash = { id: t.id, until: Date.now() + 15000 };
@@ -1580,6 +1596,227 @@ async function runAsk() {
   renderAsk();
   if (a.thread.length > 1) $$('.answer').pop()?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   loadAskHistory();
+}
+
+/* ---------------- knowledge ---------------- */
+async function buildKnowledge(category) {
+  try {
+    const lib = S.lib || 1;
+    const res = await api('/api/knowledge/build', { category, library: lib });
+    await queued(res, `Knowledge page: ${category}`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function loadKnowledgeList() {
+  if (S.knowledge.loadingList) return;
+  S.knowledge.loadingList = true;
+  try {
+    const lib = S.lib || 1;
+    const res = await api(`/api/knowledge?library=${lib}`);
+    S.knowledge.list = res.categories || [];
+  } catch (e) {
+    S.knowledge.list = { error: e.message };
+  } finally {
+    S.knowledge.loadingList = false;
+  }
+  if (route() === 'knowledge' && !routeParam('category')) refresh();
+}
+
+async function loadKnowledgePage(cat) {
+  if (S.knowledge.loadingPage === cat) return;
+  S.knowledge.loadingPage = cat;
+  try {
+    const lib = S.lib || 1;
+    const res = await api(`/api/knowledge/page?library=${lib}&category=${encodeURIComponent(cat)}`);
+    S.knowledge.pages[cat] = res;
+  } catch (e) {
+    S.knowledge.pages[cat] = { error: e.message };
+  } finally {
+    S.knowledge.loadingPage = null;
+  }
+  if (route() === 'knowledge' && routeParam('category') === cat) refresh();
+}
+
+function viewKnowledgeList() {
+  const lib = S.lib || 1;
+  const list = S.knowledge.list;
+  const ai = S.data.ai;
+  return `
+  <section>
+    <div class="eyebrow">Knowledge</div>
+    <h1 class="display">Knowledge base<em>Topic pages from your summaries</em></h1>
+    <p class="lede">Study pages combining notes, minutes, and quotes across your videos, citing every moment.</p>
+    ${!S.lib ? `<div class="banner"><span>Knowledge pages belong to a single library. Showing pages for <b>${esc(libName(1) || 'Library 1')}</b>. Pick a specific library above to switch.</span></div>` : ''}
+    ${!ai.ready_for.summarize ? `<div class="banner"><span>Set up an AI for summaries in Settings to build knowledge pages.</span><a class="btn btn-sm" href="#/ai">Set up AI</a></div>` : ''}
+    <div id="job"></div>
+  </section>
+
+  <section class="section">
+    ${list === null ? '<p class="note"><span class="spin" style="display:inline-block"></span> Loading topics…</p>'
+      : list.error ? `<p class="note warn-text">Could not load topics: ${esc(list.error)}</p>`
+      : !list.length ? '<p class="note faint">No categories found in this library.</p>'
+      : `<div class="tbl-wrap"><table class="tbl">
+          <thead>
+            <tr>
+              <th>Topic</th>
+              <th>Summaries</th>
+              <th>Status</th>
+              <th class="r">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${list.map(c => {
+              const hasPage = c.page && c.page !== 'none';
+              const isStale = c.page === 'stale';
+              const isReady = c.page === 'ready';
+              const sumText = `${c.summarised} of ${c.videos} summarised`;
+              const statusBadge = isReady
+                ? `<span class="tag" style="color:var(--watch);border-color:color-mix(in srgb, var(--watch) 40%, transparent)">Ready</span>`
+                : isStale
+                ? `<span class="tag" style="color:var(--accent);border-color:color-mix(in srgb, var(--accent) 40%, transparent)">Stale</span>`
+                : `<span class="faint" style="font-size:12.5px">No page</span>`;
+              const builtDate = c.built_at ? `<div class="faint" style="font-size:11.5px;margin-top:2px">${isStale ? 'Built ' : ''}${esc(fmtDate(c.built_at))}</div>` : '';
+              return `<tr>
+                <td>
+                  ${hasPage
+                    ? `<a href="#/knowledge?category=${encodeURIComponent(c.category)}" style="font-weight:600">${esc(c.category)}</a>`
+                    : `<span style="font-weight:600">${esc(c.category)}</span>`}
+                </td>
+                <td style="font-size:13.5px">${esc(sumText)}</td>
+                <td>${statusBadge}${builtDate}</td>
+                <td class="r">
+                  <div style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">
+                    ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}">Open</a>` : ''}
+                    ${isStale ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Update knowledge page'}">Update</button>`
+                      : isReady ? `<button class="btn btn-sm btn-text" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Rebuild knowledge page'}">Rebuild</button>`
+                      : `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Build knowledge page'}">Build</button>`}
+                  </div>
+                  ${!c.summarised && !hasPage ? `<div class="faint" style="font-size:11.5px;margin-top:4px">Summarise videos first</div>` : ''}
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table></div>`}
+  </section>`;
+}
+
+function viewKnowledgePage(cat) {
+  const lib = S.lib || 1;
+  const data = S.knowledge.pages[cat];
+  const ai = S.data.ai;
+  const exportUrl = `/api/export/knowledge?library=${encodeURIComponent(lib)}&category=${encodeURIComponent(cat)}`;
+
+  if (!data) {
+    return `
+    <section>
+      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div class="eyebrow">Knowledge page</div>
+      <h1 class="display">${esc(cat)}</h1>
+      <p class="note" style="margin-top:20px"><span class="spin" style="display:inline-block"></span> Loading page…</p>
+      <div id="job"></div>
+    </section>`;
+  }
+
+  if (data.error) {
+    return `
+    <section>
+      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div class="eyebrow">Knowledge page</div>
+      <h1 class="display">${esc(cat)}</h1>
+      <p class="note warn-text" style="margin-top:20px">Could not load knowledge page: ${esc(data.error)}</p>
+      <div id="job"></div>
+    </section>`;
+  }
+
+  if (!data.page) {
+    return `
+    <section>
+      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div class="eyebrow">Knowledge page</div>
+      <h1 class="display">${esc(cat)}</h1>
+      <p class="lede">No knowledge page has been built for this topic yet.</p>
+      <div class="actions" style="margin-top:16px">
+        <button class="btn btn-dark btn-sm" data-act="knowledge-build" data-cat="${esc(cat)}" ${!ai.ready_for.summarize ? 'disabled' : ''}>Build page</button>
+      </div>
+      <div id="job"></div>
+    </section>`;
+  }
+
+  const p = data.page;
+  const sources = data.sources || [];
+  const srcMap = Object.fromEntries(sources.map(s => [s.n, s]));
+  const catItem = (S.knowledge.list || []).find(c => c.category === cat);
+  const isStale = catItem?.page === 'stale';
+
+  const renderCite = n => {
+    const s = srcMap[n];
+    if (!s) return `<span class="cite" style="cursor:default" title="Source ${n}">${n}</span>`;
+    const at = s.t != null ? ` @ ${clock(s.t)}` : '';
+    const title = `${s.title}${at}`;
+    return `<button class="cite" data-act="play-at" data-id="${esc(s.video_id)}" data-t="${Math.floor(s.t || 0)}" title="${esc(title)}">${s.n}</button>`;
+  };
+
+  return `
+  <section>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a class="btn btn-sm" href="${esc(exportUrl)}" download>Export note</a>
+        <button class="btn btn-sm ${isStale ? 'btn-dark' : ''}" data-act="knowledge-build" data-cat="${esc(cat)}" ${!ai.ready_for.summarize ? 'disabled' : ''} title="${isStale ? 'Update page with newest summaries' : 'Rebuild page'}">${isStale ? 'Update' : 'Rebuild'}</button>
+      </div>
+    </div>
+    <div class="eyebrow">Knowledge page${!S.lib ? ` · ${esc(libName(1) || 'Library 1')}` : ''}</div>
+    <h1 class="display">${esc(cat)}</h1>
+    <p class="kv-line" style="margin-top:6px">
+      ${[p.created_at ? 'Built ' + fmtDate(p.created_at) : '', data.model ? 'Model: ' + data.model : '', isStale ? 'Update available (summaries changed)' : ''].filter(Boolean).map(esc).join(' · ')}
+    </p>
+    ${p.shortened ? `<p class="note faint" style="margin-top:8px">Older videos were shortened to fit the model.</p>` : ''}
+    <div id="job"></div>
+  </section>
+
+  <article class="knowledge-page" style="margin-top:28px">
+    ${p.overview ? `<div class="lede" style="font-size:16px;line-height:1.65;margin-bottom:28px;color:var(--ink)">${esc(p.overview)}</div>` : ''}
+
+    ${(p.sections || []).map(sec => `
+      <section style="margin-top:28px">
+        <h2 class="h" style="font-size:18px;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line)">${esc(sec.heading)}</h2>
+        <ul style="list-style:disc;padding-left:22px;margin:0 0 16px;font-size:15px;line-height:1.6">
+          ${(sec.points || []).map(pt => `
+            <li style="margin-bottom:8px">
+              <span>${esc(pt.text)}</span> ${(pt.cites || []).map(renderCite).join(' ')}
+            </li>
+          `).join('')}
+        </ul>
+      </section>
+    `).join('')}
+
+    ${p.open_questions?.length ? `
+      <section style="margin-top:32px">
+        <h3 class="h" style="font-size:17px;margin-bottom:8px;padding-top:16px;border-top:1px solid var(--line)">Open questions</h3>
+        <p class="note faint" style="margin-bottom:10px">Things the videos disagree on or leave unanswered:</p>
+        <ul style="list-style:disc;padding-left:22px;margin:0 0 16px;font-size:14.5px;line-height:1.6">
+          ${p.open_questions.map(q => `<li style="margin-bottom:6px">${esc(q)}</li>`).join('')}
+        </ul>
+      </section>
+    ` : ''}
+
+    ${sources.length ? `
+      <details class="srcs" style="margin-top:32px">
+        <summary class="field-label" style="cursor:pointer;font-weight:600">Sources (${sources.length} excerpts from ${new Set(sources.map(s => s.video_id)).size} videos)</summary>
+        ${sources.map(s => `
+          <button class="src" data-act="play-at" data-id="${esc(s.video_id)}" data-t="${Math.floor(s.t || 0)}">
+            <span class="n">${s.n}</span>
+            <span style="min-width:0">
+              <span class="t">${esc(s.title)}${s.t != null ? `<time>${clock(s.t)}</time>` : ''}</span>
+              <span class="x">${esc(s.text)}</span>
+            </span>
+          </button>
+        `).join('')}
+      </details>
+    ` : ''}
+  </article>`;
 }
 
 /* ---------------- setup guide ---------------- */
@@ -2186,6 +2423,7 @@ document.addEventListener('click', async e => {
     case 'summarize-sel': startSummary([...S.sel]); break;
     case 'summarize-triage': startSummary(triageList().map(v => v.video_id)); break;
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
+    case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
     case 'details-fetch': case 'details-one': {
       try {
         const res = await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : {});
@@ -2356,6 +2594,7 @@ document.addEventListener('change', async e => {
   if (ch === 'lib') {
     S.lib = +el.value; store.set('ytkb.lib', S.lib);
     Object.assign(S.view, { cat: '', src: '' }); S.sel.clear(); S.ask.video = null; S.search.res = null;
+    S.knowledge.list = null; S.knowledge.pages = {};
     await load(); if (route() === 'search' && S.search.q) runSearch();
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
   }

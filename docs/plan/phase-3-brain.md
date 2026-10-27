@@ -75,7 +75,7 @@
 
 ### T4: Knowledge tab
 - **worker:** codex
-- **status:** todo
+- **status:** done (built by agy, first full task it finished on its own)
 - **depends on:** T3, T2
 - **files:** `web/index.html`
 - **steps:** Design notes B "UI".
