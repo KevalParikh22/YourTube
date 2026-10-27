@@ -420,6 +420,19 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/local/status":
             import local_setup
             return self._json(local_setup.status())
+        if url.path in ("/api/knowledge", "/api/knowledge/page", "/api/export/knowledge"):
+            import knowledge
+            lib = _library((qs.get("library") or ["1"])[0]) or 1
+            if url.path == "/api/knowledge":
+                return self._json({"library": lib, "categories": knowledge.status(lib)})
+            category = (qs.get("category") or [""])[0]
+            found = storage.get_page(lib, category)
+            if url.path == "/api/knowledge/page":
+                return self._json(found or {"page": None})
+            if not found:
+                return self._error("No page for this category yet", 404)
+            return self._send(200, knowledge.page_markdown(category, found["page"], found["sources"]), "text/markdown; charset=utf-8",
+                              extra_headers={"Content-Disposition": _attachment(safe_filename(category) + ".md")})
         if url.path == "/api/summary":
             import summarizer
             vid = (qs.get("id") or [""])[0]
@@ -703,6 +716,17 @@ class Handler(BaseHTTPRequestHandler):
                 if not llm.is_configured(llm.load_settings(), "rate"):
                     return self._error("Choose an AI for ratings in Settings → AI first")
                 return self._queued(JOB.start("rate", _label("Rate", ids), lambda: rater.run_rate(ids, should_stop=JOB.stop_requested), key=ids))
+
+            if path == "/api/knowledge/build":
+                import knowledge
+                category = _clean(body.get("category"))
+                if not isinstance(category, str) or not category:
+                    return self._error("category is required")
+                target = lib or 1
+                if not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                return self._queued(JOB.start("knowledge", f"Knowledge page: {category}",
+                                              lambda: knowledge.run_build(target, category), key=[target, category]))
 
             if path in ("/api/summarize", "/api/summarize/estimate"):
                 import summarizer

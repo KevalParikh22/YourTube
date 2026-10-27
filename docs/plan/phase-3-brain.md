@@ -66,7 +66,7 @@
 
 ### T3: Knowledge pages (backend)
 - **worker:** claude
-- **status:** todo
+- **status:** done (real check: 3 summarised AI videos → page in 101 s locally, all citations valid; with an 8k local context older videos are shortened, so the page leans to the newest)
 - **depends on:** T1
 - **files:** `knowledge.py` (new), `storage.py`, `dashboard.py`, `exporter.py`, `tests/test_knowledge.py` (new)
 - **steps:** Design notes B (table, build, citation check, staleness, API, Markdown export). Check one real category on a DB copy.

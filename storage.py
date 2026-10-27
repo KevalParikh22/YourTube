@@ -238,6 +238,19 @@ def init_db(db_path: str = DB_PATH) -> None:
                 FOREIGN KEY(video_id) REFERENCES videos(video_id)
             )
         """)
+        # Knowledge pages (Phase 3): one per category of a library, built from its videos' summaries
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS topic_pages (
+                library_id INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '{}',
+                sources TEXT NOT NULL DEFAULT '[]',
+                video_ids_hash TEXT,
+                model TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (library_id, category)
+            )
+        """)
         # Explainable ratings: per-factor scores, meeting-style minutes and takeaways
         rating_cols = _columns(cursor, "video_ratings")
         for col, ddl in (("breakdown", "TEXT DEFAULT '{}'"), ("minutes", "TEXT DEFAULT '[]'"), ("takeaways", "TEXT DEFAULT '[]'")):
@@ -1513,6 +1526,38 @@ def get_summary(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
     return d
 
 def summarized_ids(db_path: str = DB_PATH) -> set:
+    return set(summary_times(db_path))
+
+def summary_times(db_path: str = DB_PATH) -> Dict[str, str]:
+    """{video_id: when its summary was made} for every summarised video."""
     init_db(db_path)
     with get_connection(db_path) as conn:
-        return {r[0] for r in conn.execute("SELECT video_id FROM video_summaries")}
+        return dict(conn.execute("SELECT video_id, created_at FROM video_summaries").fetchall())
+
+# --- Knowledge pages (Phase 3) -------------------------------------------------------------
+
+def save_page(library_id: int, category: str, page: Dict[str, Any], sources: List[Dict[str, Any]], video_ids_hash: str,
+              model: str = "", db_path: str = DB_PATH) -> None:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("INSERT OR REPLACE INTO topic_pages (library_id, category, content, sources, video_ids_hash, model, created_at) "
+                     "VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+                     (int(library_id), category, json.dumps(page, ensure_ascii=False), json.dumps(sources, ensure_ascii=False),
+                      video_ids_hash, model))
+        conn.commit()
+
+def get_page(library_id: int, category: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    """{'page', 'sources', 'video_ids_hash', 'model', 'created_at'} or None."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        r = conn.execute("SELECT * FROM topic_pages WHERE library_id = ? AND category = ?", (int(library_id), category)).fetchone()
+    if not r:
+        return None
+    return {"page": {**json.loads(r["content"] or "{}"), "created_at": r["created_at"]}, "sources": json.loads(r["sources"] or "[]"),
+            "video_ids_hash": r["video_ids_hash"], "model": r["model"], "created_at": r["created_at"]}
+
+def list_pages(library_id: int, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return [dict(r) for r in conn.execute("SELECT category, video_ids_hash, model, created_at FROM topic_pages WHERE library_id = ?",
+                                              (int(library_id),))]
