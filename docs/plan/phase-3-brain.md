@@ -57,7 +57,7 @@
 
 ### T2: Summary in the video panel, Summarise buttons, description toggle
 - **worker:** codex
-- **status:** todo
+- **status:** done (agy timed out at 20 min; codex built it; orchestrator fixed: loading state, empty-summary reply instead of 404, chips for related moments, threshold 0.6)
 - **depends on:** T1
 - **files:** `web/index.html`, `dashboard.py` (setting only), `exporter.py` (notes include the summary sections), `tests/test_extractor_exporter.py`
 - **steps:** Design notes A "Panel" and "Description"; exported notes gain Summary, Minutes, Key claims, Check yourself, Takeaways, Learn more.

@@ -353,7 +353,7 @@ class Handler(BaseHTTPRequestHandler):
             if v is None:
                 return self._error("Unknown video", 404)
             name = safe_filename(v["title"]) + ".md"
-            return self._send(200, video_markdown(v, storage.get_details(vid)), "text/markdown; charset=utf-8",
+            return self._send(200, video_markdown(v, storage.get_details(vid), storage.get_summary(vid)), "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/retrieve":
             import retrieval
@@ -423,10 +423,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/api/summary":
             import summarizer
             vid = (qs.get("id") or [""])[0]
-            summary = storage.get_summary(vid)
-            if summary is None:
-                return self._error("Not summarised yet", 404)
-            return self._json({"summary": summary, "moments": summarizer.related_moments(vid, summary)})
+            summary = storage.get_summary(vid)   # None: not summarised yet (not an error)
+            return self._json({"summary": summary, "moments": summarizer.related_moments(vid, summary) if summary else {}})
         if url.path == "/api/video":
             vid = (qs.get("id") or [""])[0]
             details = storage.get_details(vid)
@@ -582,7 +580,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("ids must be a non-empty list of video IDs")
                 wanted = set(ids)
                 videos = [v for v in storage.get_library() if v["video_id"] in wanted]
-                data = markdown_zip(videos, {v["video_id"]: storage.get_details(v["video_id"]) for v in videos})
+                data = markdown_zip(videos, {v["video_id"]: storage.get_details(v["video_id"]) for v in videos},
+                                    {v["video_id"]: summary for v in videos
+                                     if (summary := storage.get_summary(v["video_id"])) is not None})
                 stamp = datetime.now().strftime("%Y%m%d")
                 return self._send(200, data, "application/zip",
                                   extra_headers={"Content-Disposition": f'attachment; filename="yourtube_notes_{stamp}.zip"'})
@@ -776,6 +776,8 @@ class Handler(BaseHTTPRequestHandler):
                         settings["tasks"][task] = provider
             if "auto_after_sync" in body:
                 settings["auto_after_sync"] = bool(body["auto_after_sync"])
+            if "show_descriptions" in body:
+                settings["show_descriptions"] = bool(body["show_descriptions"])
             if "local_only" in body:
                 settings["local_only"] = bool(body["local_only"])
             if body.get("asr_model") in ("auto", "large-v3-turbo", "small", "medium", "distil-large-v3"):

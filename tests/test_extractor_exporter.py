@@ -60,6 +60,23 @@ class MarkdownTest(unittest.TestCase):
                                  "YourTube/AI & ML/_AI & ML.md"])
         self.assertIn("[[Graph RAG # [demo] (xyz)]]", z.read("YourTube/AI & ML/_AI & ML.md").decode())
 
+    def test_summary_sections_are_exported_and_escaped(self):
+        from exporter import video_markdown
+        summary = {
+            "tldr": "A <summary>",
+            "minutes": [{"t": 65, "topic": "Topic", "notes": ["minute note"]}],
+            "claims": [{"t": 70, "kind": "quote", "text": "Claim *text*"}],
+            "quiz": [{"t": 80, "q": "Question?", "a": "Answer"}],
+            "takeaways": ["Takeaway"],
+            "learn_more": {"related": [{"video_id": "xyz", "relation": "deeper", "why": "More"}],
+                            "searches": [{"query": "safe <query>", "why": "Gap"}]},
+        }
+        md = video_markdown({**self.V, "rating": None}, summary=summary)
+        for needle in ("## Summary", "A \\<summary\\>", "## Minutes", "## Key claims and quotes",
+                       "## Check yourself", "## Takeaways", "## Learn more", "Claim \\*text\\*",
+                       "https://www.youtube.com/watch?v=abc&t=65s", "safe \\<query\\>"):
+            self.assertIn(needle, md)
+
 
 class VideoLinkTest(unittest.TestCase):
     def test_video_link_or_playlist(self):

@@ -129,7 +129,7 @@ class EndpointTest(unittest.TestCase):
         with mock.patch("llm.is_configured", return_value=True), mock.patch("dashboard.JOB.start", return_value={"id": 9, "position": 0}) as start:
             code, r = self.call("/api/summarize", {"ids": ["s1"]})
         self.assertEqual((code, r["position"], start.call_args[0][0]), (200, 0, "summarize"))
-        self.assertEqual(self.call("/api/summary?id=nope")[0], 404)
+        self.assertEqual(self.call("/api/summary?id=nope"), (200, {"summary": None, "moments": {}}))
 
 
 if __name__ == "__main__":

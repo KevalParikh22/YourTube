@@ -70,7 +70,7 @@ def safe_filename(name: str, limit: int = 80) -> str:
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", name or "").strip(" .")
     return (" ".join(name.split())[:limit].rstrip(" .") or "untitled")
 
-def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
+def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None, summary: Dict[str, Any] = None) -> str:
     """One video's note. `v` is a library row (storage.get_library); `details` from storage.get_details."""
     details = details or {}
     r = v.get("rating") or {}
@@ -99,9 +99,9 @@ def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
                    f"[▶ Watch on YouTube]({url}) · {_md_text(v.get('channel'))} · {_length(v.get('duration_seconds'))}", ""]
     if r:
         out += ["## Verdict", "", f"**{r.get('score')} · {str(r.get('verdict', '')).capitalize()}**: {_md_text(r.get('reason'))}", ""]
-        if r.get("tldr"):
+        if r.get("tldr") and not summary:
             out += ["## Summary", "", _md_text(r["tldr"]), ""]
-        if r.get("minutes"):
+        if r.get("minutes") and not summary:
             out += ["## Minutes", ""]
             for minute in r["minutes"]:
                 t = minute.get("t")
@@ -109,7 +109,7 @@ def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
                 out.append(f"- {label}{_md_text(minute.get('topic'))}")
                 out.extend(f"  - {_md_text(note)}" for note in minute.get("notes") or [])
             out.append("")
-        if r.get("takeaways"):
+        if r.get("takeaways") and not summary:
             out += ["## Takeaways", ""]
             out += [f"- {_md_text(item)}" for item in r["takeaways"]]
             out.append("")
@@ -124,7 +124,7 @@ def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
                 f = calc.get("formula") or {}
                 out.append(f"- Score: {calc.get('score')} = quality {calc.get('quality')} (depth {f.get('depth', 0) * 100:g}% + value {f.get('value', 0) * 100:g}% + freshness {f.get('freshness', 0) * 100:g}%) + interest {calc.get('interest')}")
             out.append("")
-        if r.get("points"):
+        if r.get("points") and not summary:
             out += ["## Key points", ""]
             out += [f"- [{_clock(p['t'])}]({_at(vid, p['t'])}) {_md_text(p['text'])}" if p.get("t") is not None
                     else f"- {_md_text(p['text'])}" for p in r["points"]]
@@ -132,6 +132,45 @@ def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None) -> str:
         if r.get("skim"):
             out += ["## Worth skimming", ""]
             out += [f"- [{_clock(x['start'])}–{_clock(x['end'])}]({_at(vid, x['start'])}) {_md_text(x.get('why'))}" for x in r["skim"]]
+            out.append("")
+    if summary:
+        if summary.get("tldr"):
+            out += ["## Summary", "", _md_text(summary["tldr"]), ""]
+        if summary.get("minutes"):
+            out += ["## Minutes", ""]
+            for minute in summary["minutes"]:
+                t = minute.get("t")
+                label = f"[{_clock(t)}]({_at(vid, t)}) " if t is not None else ""
+                out.append(f"- {label}{_md_text(minute.get('topic'))}")
+                out.extend(f"  - {_md_text(note)}" for note in minute.get("notes") or [])
+            out.append("")
+        if summary.get("claims"):
+            out += ["## Key claims and quotes", ""]
+            out += [f"- **{_md_text(claim.get('kind'))}**" + (f" [{_clock(claim['t'])}]({_at(vid, claim['t'])})" if claim.get("t") is not None else "")
+                    + f": {_md_text(claim.get('text'))}" for claim in summary["claims"]]
+            out.append("")
+        if summary.get("quiz"):
+            out += ["## Check yourself", ""]
+            for item in summary["quiz"]:
+                t = item.get("t")
+                label = f" [{_clock(t)}]({_at(vid, t)})" if t is not None else ""
+                out += [f"- {_md_text(item.get('q'))}{label}", f"  - Answer: {_md_text(item.get('a'))}"]
+            out.append("")
+        if summary.get("takeaways"):
+            out += ["## Takeaways", ""]
+            out += [f"- {_md_text(item)}" for item in summary["takeaways"]]
+            out.append("")
+        learn = summary.get("learn_more") or {}
+        if learn.get("related") or learn.get("searches"):
+            from urllib.parse import quote_plus
+            out += ["## Learn more", ""]
+            for item in learn.get("related") or []:
+                related_id = str(item.get("video_id") or "")
+                related = f"[video]({_at(related_id, 0)})" if related_id else "video"
+                out.append(f"- {_md_text(item.get('relation'))}: {related} — {_md_text(item.get('why'))}")
+            for item in learn.get("searches") or []:
+                query = str(item.get("query") or "")
+                out.append(f"- [YouTube: {_md_text(query)}](https://www.youtube.com/results?search_query={quote_plus(query)}) — {_md_text(item.get('why'))}")
             out.append("")
     if details.get("chapters"):
         out += ["## Chapters", ""]
@@ -155,7 +194,7 @@ def category_markdown(category: str, names: List[str]) -> str:
     lines += [f"- [[{n}]]" for n in names]
     return "\n".join(lines) + "\n"
 
-def markdown_zip(videos: List[Dict[str, Any]], details: Dict[str, Dict[str, Any]]) -> bytes:
+def markdown_zip(videos: List[Dict[str, Any]], details: Dict[str, Dict[str, Any]], summaries: Dict[str, Dict[str, Any]] = None) -> bytes:
     """A zip of notes: YourTube/<Category>/<Title>.md plus one index note per category."""
     buf = io.BytesIO()
     by_cat: Dict[str, List[str]] = {}
@@ -167,7 +206,7 @@ def markdown_zip(videos: List[Dict[str, Any]], details: Dict[str, Dict[str, Any]
             if (cat, name.lower()) in used:          # two videos with the same title
                 name = f"{name} ({v['video_id']})"
             used.add((cat, name.lower()))
-            z.writestr(f"YourTube/{cat}/{name}.md", video_markdown(v, details.get(v["video_id"])))
+            z.writestr(f"YourTube/{cat}/{name}.md", video_markdown(v, details.get(v["video_id"]), (summaries or {}).get(v["video_id"])))
             by_cat.setdefault(v.get("category") or "Uncategorized", []).append(name)
         for cat, names in by_cat.items():
             z.writestr(f"YourTube/{safe_filename(cat)}/_{safe_filename(cat)}.md", category_markdown(cat, names))

@@ -12,7 +12,7 @@ from rater import CHAR_BUDGET_REMOTE, fit_transcript, parse_time, transcript_blo
 
 OUTPUT_TOKENS = 1600          # rough output per summary, for cost estimates
 CANDIDATES = 8                # related videos offered to the model for "learn more"
-MOMENT_MIN_SIM = 0.55         # cosine for "also explained in" (statement vs passage, qwen3-embedding)
+MOMENT_MIN_SIM = 0.6          # cosine (0.55 let loosely related news clips through) for "also explained in" (statement vs passage, qwen3-embedding)
 MOMENTS_PER_TOPIC = 2
 CLAIM_KINDS = ("claim", "quote", "number", "step")
 RELATIONS = ("prerequisite", "deeper", "other_view", "same_topic")

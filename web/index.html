@@ -374,6 +374,12 @@
   .hist a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
   .hist a small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
   #jobs { position: relative; }
+  #d-summary ul { list-style: none; padding-left: 0; margin: 6px 0 14px; }
+  #d-summary li { margin-bottom: 8px; }
+  .also { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; font-size: 11.5px; color: var(--ink-3); }
+  .also-chip { all: unset; cursor: pointer; max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px;
+    padding: 1px 7px; border-radius: 9px; background: var(--sunken); border: 1px solid var(--line); color: var(--ink-2); }
+  .also-chip:hover, .also-chip:focus-visible { border-color: var(--accent); color: var(--ink); }
   .libsel { max-width: 170px; margin-left: 12px; font-weight: 500; }
   .done-banner { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 10px 14px; border-radius: 8px; font-size: 13.5px; }
   .done-banner.ok { background: var(--watch-bg); color: var(--watch); }
@@ -508,6 +514,7 @@ const JOB_TEXT = {
   suggest: ['Asking the AI to sort videos…', 'Suggestions ready to review', 'AI run failed. See the log.'],
   details: ['Fetching video details, one video every few seconds…', 'Video details fetched', 'Details run stopped early. See the log.'],
   rate: ['Rating videos…', 'Videos rated', 'Rating stopped early. See the log.'],
+  summarize: ['Summarising videos…', 'Video summaries ready', 'Summarising stopped early. See the log.'],
   pull: ['Downloading the model into Ollama…', 'Model downloaded', 'Download stopped. See the log.'],
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
@@ -530,7 +537,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   triage: { verdict: 'all', cat: '', undo: [], limit: 50 },
-  drawer: null, polling: false, detailCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  drawer: null, polling: false, detailCache: {}, summaryCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
@@ -852,6 +859,7 @@ function selBar() {
     <select data-change="bulk-cat" aria-label="Move to category"><option value="">Move to…</option>
       ${categoryNames().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}<option value="__new">New category…</option></select>
     ${sel.some(v => v.suggestion) ? `<button class="btn-text" data-act="sug-accept-sel">Accept AI suggestions</button>` : ''}
+    ${S.data.ai.ready_for.summarize ? `<button class="btn-text" data-act="summarize-sel" data-job-btn>Summarise selected</button>` : ''}
     ${queueUrls(sel).map((u, i, a) => `<a class="btn-text" href="${esc(u)}" target="_blank" rel="noopener">Play${a.length > 1 ? ` ${i + 1}/${a.length}` : ''}</a>`).join('')}
     <span class="grow"></span>
     ${S.sel.size < S.visible.length ? `<button class="btn-text" data-act="sel-all">Select all ${S.visible.length}</button>` : ''}
@@ -962,6 +970,7 @@ function viewTriage() {
     </div>
     <div class="chips">
       ${t.undo.length ? `<button class="btn-text" data-act="tri-undo">Undo</button>` : ''}
+      ${S.data.ai.ready_for.summarize && list.length ? `<button class="btn-text" data-act="summarize-triage" data-job-btn>Summarise ${plural(list.length, 'video')}</button>` : ''}
       ${skippable.length ? `<button class="btn btn-sm" data-act="accept-skips" data-ids="${esc(skippable.map(v => v.video_id).join(','))}">Accept ${plural(skippable.length, 'skip')}</button>` : ''}
     </div>
   </div>
@@ -1015,6 +1024,24 @@ async function startRate(ids) {
       if (!confirm(`Rate ${plural(est.videos, 'video')} with ${est.uses}?\n\n${est.with_transcript} with transcripts, ${est.videos - est.with_transcript} from title only.\n≈ ${Math.round(est.tokens_in / 1000)}k tokens in, ${cost}.`)) return;
     }
     await queued(await api('/api/rate', ids ? { ids } : {}), ids?.length === 1 ? 'Rating' : 'Rating run');
+  } catch (e) { toast(e.message, true); }
+}
+async function startSummary(ids) {
+  if (!ids?.length) { toast('Select at least one video', true); return; }
+  try {
+    const batches = [];
+    for (let i = 0; i < ids.length; i += 50) batches.push(ids.slice(i, i + 50));
+    const estimates = await Promise.all(batches.map(batch => api('/api/summarize/estimate', { ids: batch })));
+    const count = estimates.reduce((n, e) => n + (e.videos || 0), 0);
+    if (!count) { toast('Nothing to summarise'); return; }
+    if (count > 1) {
+      const sum = estimates.reduce((n, e) => n + (e.cost || 0), 0);
+      const unknown = estimates.some(e => e.cost == null);
+      const cost = unknown ? 'cost unknown for this model' : sum === 0 ? 'free (local model)' : `about $${sum < 0.01 ? '0.01 or less' : sum.toFixed(2)}`;
+      const uses = [...new Set(estimates.map(e => e.uses).filter(Boolean))].join(', ');
+      if (!confirm(`Summarise ${plural(count, 'video')} with ${uses}?\n\n≈ ${cost}. Local models take about 1–2 minutes per video.`)) return;
+    }
+    for (const batch of batches) await queued(await api('/api/summarize', { ids: batch }), batch.length === 1 ? 'Summarising' : 'Summaries');
   } catch (e) { toast(e.message, true); }
 }
 function playAt(id, t) { openDrawer(id); if (t) seek(t); }
@@ -1248,6 +1275,7 @@ async function pollJob() {
 async function taskFinished(t) {
   const text = JOB_TEXT[t.kind] || JOB_TEXT.sync;
   if (['details', 'sync', 'asr', 'visual'].includes(t.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
+  if (t.kind === 'summarize') S.summaryCache = {};
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
   S.flash = { id: t.id, until: Date.now() + 15000 };
@@ -1674,6 +1702,9 @@ function viewGeneral() {
       <select data-change="speed" style="width:100%">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}${x === 1 ? ' (normal)' : ''}</option>`).join('')}</select></div>
     <div class="route"><label class="field-label" style="margin:0">Theme</label>
       <select data-change="theme" style="width:100%">${[['auto', 'Match this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<option value="${k}" ${S.theme === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+    <label class="check" style="margin-top:12px"><input type="checkbox" data-change="show-descriptions" ${ai.show_descriptions ? 'checked' : ''}>
+      <span>Show descriptions in the video panel</span></label>
+    <p class="hint">Descriptions are collapsed by default in each video panel.</p>
     <p class="hint">Display options ${tip('Watch times use this speed by default; the Plan page can change it too. Display settings are saved in this browser.')}</p>
   </section>
 
@@ -1870,6 +1901,7 @@ function renderDrawer() {
         referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>
       <div><h3>${esc(v.title)}</h3><div class="by">${esc(v.channel || 'Unknown channel')}</div></div>
       <div class="speeds">${d ? SPEEDS.map(s => `<span class="${s === S.speed ? 'on' : ''}">${sx(s)} <b>${fmt(d / s)}</b></span>`).join('') : 'No duration available'}</div>
+      <div id="d-summary">${drawerSummary(v)}</div>
       <div id="d-rating">${drawerRating(v)}</div>
       <div><span class="field-label">Status</span>
         <div class="seg" id="d-status">${Object.entries(STATUS_LABEL).map(([k, l]) => `<button data-act="set-status" data-id="${esc(v.video_id)}" data-status="${k}" class="${v.status === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
@@ -1885,13 +1917,14 @@ function renderDrawer() {
       <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
     </div>
   </aside>`;
+  loadSummary(v.video_id);
 }
 function drawerRating(v) {
   const r = v.rating;
+  const hasSummary = !!S.summaryCache[v.video_id]?.summary;
   if (!r) return S.data.ai.ready_for.rate
-    ? `<div class="kv-line">No AI summary yet: the summary, key points and a Watch / Skim / Skip verdict come together when a video is rated.
-        <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate and summarise this video</button></div>`
-    : `<div class="kv-line">No AI summary yet. <a href="#/ai">Choose an AI for ratings</a> to get summaries.</div>`;
+    ? `<div class="kv-line">Not rated yet. <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate this video</button></div>`
+    : '<div class="kv-line">Not rated yet.</div>';
   const factorLabels = { depth: 'Depth', fit: 'Fit', value: 'Time value', freshness: 'Freshness' };
   const calc = r.calc;
   const breakdown = r.breakdown || {};
@@ -1904,16 +1937,47 @@ function drawerRating(v) {
       <span class="muted" style="font-size:13px">${esc(r.reason)}</span></div>
     <div id="why-score" class="field-label">Why this score</div>
     ${Object.keys(breakdown).filter(k => factorLabels[k]).length ? `<div class="score-factors">${['depth','fit','value','freshness'].filter(k => breakdown[k]).map(k => `<div class="factor"><div><b>${factorLabels[k]}</b><span>${breakdown[k].score}/10</span></div><div class="factor-track"><i style="width:${Math.max(0,Math.min(10,+breakdown[k].score||0))*10}%"></i></div>${breakdown[k].why ? `<small>${esc(breakdown[k].why)}</small>` : ''}</div>`).join('')}</div>${calcLine ? `<div class="kv-line">${esc(calcLine)}</div>` : ''}` : `<div class="kv-line">Rate again for a score breakdown.</div>`}
-    ${r.tldr ? `<p class="tldr">${esc(r.tldr)}</p>` : ''}
-    ${r.minutes?.length ? `<div class="field-label">Minutes</div><ul>${r.minutes.map(m => `<li><button class="chap" data-act="seek" data-t="${m.t}"><time>${clock(m.t)}</time><span><b>${esc(m.topic)}</b>${(m.notes || []).map(n => `<small class="minute-note">${esc(n)}</small>`).join('')}</span></button></li>`).join('')}</ul>` : ''}
-    ${r.takeaways?.length ? `<div class="field-label">Takeaways</div><ul>${r.takeaways.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${!hasSummary && r.tldr ? `<p class="tldr">${esc(r.tldr)}</p>` : ''}
+    ${!hasSummary && r.minutes?.length ? `<div class="field-label">Minutes</div><ul>${r.minutes.map(m => `<li><button class="chap" data-act="seek" data-t="${m.t}"><time>${clock(m.t)}</time><span><b>${esc(m.topic)}</b>${(m.notes || []).map(n => `<small class="minute-note">${esc(n)}</small>`).join('')}</span></button></li>`).join('')}</ul>` : ''}
+    ${!hasSummary && r.takeaways?.length ? `<div class="field-label">Takeaways</div><ul>${r.takeaways.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${r.skim.length ? `<div class="ranges">${r.skim.map(x => `<button class="range" data-act="seek" data-t="${x.start}" title="${esc(x.why)}">${clock(x.start)}–${clock(x.end)} ${esc(x.why)}</button>`).join('')}</div>` : ''}
-    ${r.points.length && !(r.minutes || []).length ? `<ul>${r.points.map(p => p.t != null
+    ${!hasSummary && r.points.length && !(r.minutes || []).length ? `<ul>${r.points.map(p => p.t != null
       ? `<li><button class="chap" data-act="seek" data-t="${p.t}"><time>${clock(p.t)}</time><span>${esc(p.text)}</span></button></li>`
       : `<li class="chap" style="cursor:default"><time></time><span>${esc(p.text)}</span></li>`).join('')}</ul>` : ''}
     <div class="kv-line">${r.basis === 'metadata' ? 'Rated from title and description only' : 'Rated from the transcript'} · ${esc(r.model || '')}
       · <button class="btn-text" style="padding:0;height:auto;font-size:12.5px" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate again</button></div>
   </div>`;
+}
+function drawerSummary(v) {
+  const result = S.summaryCache[v.video_id];
+  if (result === 'loading' || result === undefined) return '<div class="kv-line">Loading summary…</div>';
+  if (result?.error) return `<div class="kv-line">Could not load summary: ${esc(result.error)}. <button class="btn-text" style="padding:0;height:auto" data-act="summary-retry" data-id="${esc(v.video_id)}">Retry</button></div>`;
+  if (!result?.summary) return S.data.ai.ready_for.summarize
+    ? `<div class="kv-line">No summary yet. <button class="btn-text" style="padding:0;height:auto" data-act="summarize-one" data-id="${esc(v.video_id)}" data-job-btn>Summarise</button> <span class="faint">(local models take about 1–2 minutes)</span></div>`
+    : '<div class="kv-line">No summary yet. <a href="#/ai">Choose an AI for summaries in Settings</a>.</div>';
+  const s = result.summary, moments = result.moments || {};
+  const at = t => Number.isFinite(+t) ? Math.max(0, Math.floor(+t)) : 0;
+  const time = t => `<button class="time-link" data-act="seek" data-t="${at(t)}">${clock(at(t))}</button>`;
+  const relationLabel = { prerequisite: 'Prerequisites', deeper: 'Go deeper', other_view: 'Other views', same_topic: 'Same topic' };
+  const grouped = {};
+  for (const item of s.learn_more?.related || []) (grouped[item.relation] ||= []).push(item);
+  return `<section class="section card" style="margin:0"><h4 class="h">AI summary</h4>
+    ${s.tldr ? `<p class="tldr">${esc(s.tldr)}</p>` : ''}
+    ${s.minutes?.length ? `<div class="field-label">Minutes</div><ul>${s.minutes.map((m, i) => `<li><div class="chap"><span>${time(m.t)}</span><span><b>${esc(m.topic)}</b>${(m.notes || []).map(n => `<small class="minute-note">${esc(n)}</small>`).join('')}${(moments[i] || []).length ? `<span class="also">Also in ${(moments[i] || []).map(x => `<button class="also-chip" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${at(x.t)}" title="${esc(x.title)} @ ${clock(at(x.t))}">${esc(x.title)} · ${clock(at(x.t))}</button>`).join('')}</span>` : ''}</span></div></li>`).join('')}</ul>` : ''}
+    ${s.claims?.length ? `<div class="field-label">Key claims and quotes</div><ul>${s.claims.map(c => `<li><div class="chap"><span>${time(c.t)}</span><span><b>${esc(c.kind)}</b> · ${esc(c.text)}</span></div></li>`).join('')}</ul>` : ''}
+    ${s.quiz?.length ? `<div class="field-label">Check yourself</div><ul>${s.quiz.map(q => `<li><div class="chap"><span>${time(q.t)}</span><span>${esc(q.q)} <details><summary>Show answer</summary><p>${esc(q.a)}</p></details></span></div></li>`).join('')}</ul>` : ''}
+    ${s.takeaways?.length ? `<div class="field-label">Takeaways</div><ul>${s.takeaways.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+    ${Object.entries(grouped).map(([kind, items]) => `<div class="field-label">${esc(relationLabel[kind] || kind)}</div><ul>${items.map(x => `<li><button class="btn-text" data-act="open" data-id="${esc(x.video_id)}">${esc(x.video_id)}</button> · ${esc(x.why)}</li>`).join('')}</ul>`).join('')}
+    ${(s.learn_more?.searches || []).length ? `<div class="field-label">YouTube searches</div><ul>${s.learn_more.searches.map(x => `<li><a href="https://www.youtube.com/results?search_query=${encodeURIComponent(x.query || '')}" target="_blank" rel="noopener">${esc(x.query)}</a> · ${esc(x.why)}</li>`).join('')}</ul>` : ''}
+    <div class="kv-line">${esc(s.model || '')}</div></section>`;
+}
+async function loadSummary(id) {
+  if (Object.hasOwn(S.summaryCache, id)) return;
+  S.summaryCache[id] = 'loading';
+  try { S.summaryCache[id] = await api(`/api/summary?id=${encodeURIComponent(id)}`); }
+  catch (e) { S.summaryCache[id] = { error: e.message }; }
+  if (S.drawer === id && $('#d-summary')) $('#d-summary').innerHTML = drawerSummary(byId(id));
+  if (S.drawer === id && $('#d-rating')) $('#d-rating').innerHTML = drawerRating(byId(id));
 }
 function ratingFormula(custom) {
   return { depth: .45, value: .40, freshness: .15, interest_penalty: 2, interest_bonus: .5, ...custom };
@@ -1971,7 +2035,7 @@ function drawerDetails(v) {
   return `<span class="field-label">Details</span><div class="kv-line">${head}${det.sources.includes('local-asr') && det.sources.length === 1 ? ' · local transcript' : ''} · ${fetchBtn('Refresh')}</div>
     ${asrLine}
     ${full.chapters.length ? `<div style="margin-top:10px">${full.chapters.map(c => `<button class="chap" data-act="seek" data-t="${Math.floor(c.start)}"><time>${clock(c.start)}</time><span>${esc(c.title)}</span></button>`).join('')}</div>` : ''}
-    ${full.description ? `<details style="margin-top:12px"><summary>Description</summary><p class="desc-text">${esc(full.description)}</p></details>` : ''}
+    ${full.description ? `<details style="margin-top:12px" ${S.data.ai.show_descriptions ? 'open' : ''}><summary>Show description</summary><p class="desc-text">${esc(full.description)}</p></details>` : ''}
     ${full.segments.length ? `<details style="margin-top:10px"><summary>Transcript · ${plural(full.segments.length, 'line')}</summary>
       <div class="transcript">${full.segments.map(g => `<button class="tline" data-act="seek" data-t="${Math.floor(g.start)}"><time>${clock(g.start)}</time><span>${esc(g.text)}</span></button>`).join('')}</div></details>` : ''}`;
 }
@@ -2118,6 +2182,10 @@ document.addEventListener('click', async e => {
     case 'play-at': playAt(id, +el.dataset.t); break;
     case 'rate-batch': startRate(null); break;
     case 'rate-one': startRate([id]); break;
+    case 'summarize-one': startSummary([id]); break;
+    case 'summarize-sel': startSummary([...S.sel]); break;
+    case 'summarize-triage': startSummary(triageList().map(v => v.video_id)); break;
+    case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'details-fetch': case 'details-one': {
       try {
         const res = await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : {});
@@ -2292,6 +2360,11 @@ document.addEventListener('change', async e => {
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
   }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
+  if (ch === 'show-descriptions') {
+    try { S.data.ai = await saveAi({ show_descriptions: el.checked }); renderView(); if (S.drawer) renderDrawer(); toast('Saved'); }
+    catch (err) { el.checked = !el.checked; toast(err.message, true); }
+    return;
+  }
   if (ch === 'speed') {
     S.speed = +el.value; store.set('ytkb.speed', S.speed);
     renderBar(); refresh(); if (S.drawer) renderDrawer();
