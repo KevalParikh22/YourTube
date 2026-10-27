@@ -2,9 +2,8 @@
 Export and playlist creation utilities.
 Provides:
 1. YouTube Multi-Video Queue URLs (watch_videos endpoint)
-2. JSON export per category and CSV export
+2. CSV export and Markdown notes
 """
-import os
 import io
 import csv
 import json
@@ -37,31 +36,6 @@ def videos_to_csv(videos: List[Dict[str, Any]]) -> str:
     for v in videos:
         writer.writerow({k: v.get(k, "") for k in EXPORT_FIELDS})
     return buf.getvalue()
-
-def export_categories_to_json(
-    categories: Dict[str, List[Dict[str, Any]]],
-    output_dir: str
-) -> Dict[str, str]:
-    """Exports each category to a distinct JSON file."""
-    os.makedirs(output_dir, exist_ok=True)
-    exported_files = {}
-    
-    for cat_name, videos in categories.items():
-        safe_name = "".join(c for c in cat_name if c.isalnum() or c in (' ', '_', '-')).strip()
-        filename = f"{safe_name}.json"
-        filepath = os.path.join(output_dir, filename)
-        
-        with open(filepath, "w", encoding="utf-8") as f:
-            json.dump({
-                "category": cat_name,
-                "video_count": len(videos),
-                "videos": videos
-            }, f, indent=2)
-            
-        exported_files[cat_name] = filepath
-        
-    return exported_files
-
 
 # --- Markdown notes (Phase 1, F7) -------------------------------------------------------
 # One note per video: front matter for Obsidian/Dataview, a link to the video, the AI verdict,

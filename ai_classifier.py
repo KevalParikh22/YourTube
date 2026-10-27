@@ -308,6 +308,9 @@ def run_discover(max_categories: int = 12, library: Optional[int] = None,
     except LLMError as e:
         print(f"Error: {e}")
         return False
+    if should_stop():   # the call itself can't be interrupted; don't save what the user stopped
+        print("Stopped. The proposal was discarded.")
+        return False
     settings = llm.load_settings()  # re-read: the user may have saved settings meanwhile
     llm.set_library_settings(settings, library, proposal={"categories": cats, "model": llm.describe(settings, "categorize")})
     llm.save_settings(settings)

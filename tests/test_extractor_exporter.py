@@ -59,3 +59,16 @@ class MarkdownTest(unittest.TestCase):
         self.assertEqual(names, ["YourTube/AI & ML/Graph RAG # [demo] (xyz).md", "YourTube/AI & ML/Graph RAG # [demo].md",
                                  "YourTube/AI & ML/_AI & ML.md"])
         self.assertIn("[[Graph RAG # [demo] (xyz)]]", z.read("YourTube/AI & ML/_AI & ML.md").decode())
+
+
+class VideoLinkTest(unittest.TestCase):
+    def test_video_link_or_playlist(self):
+        from extractor import video_id_from_url as vid
+        cases = {"https://www.youtube.com/watch?v=b6LDbTTqMj0": "b6LDbTTqMj0",
+                 "https://youtu.be/b6LDbTTqMj0?si=abc": "b6LDbTTqMj0",
+                 "https://youtube.com/shorts/b6LDbTTqMj0": "b6LDbTTqMj0",
+                 "https://m.youtube.com/watch?feature=share&v=b6LDbTTqMj0": "b6LDbTTqMj0",
+                 "https://www.youtube.com/watch?v=b6LDbTTqMj0&list=PLx": None,   # a playlist link syncs the playlist
+                 "PLui3EUkuMTPg": None, "WL": None, "": None}
+        for link, expected in cases.items():
+            self.assertEqual(vid(link), expected, link)

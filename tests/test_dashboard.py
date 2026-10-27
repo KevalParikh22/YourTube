@@ -125,6 +125,21 @@ class DashboardTest(unittest.TestCase):
     def test_fetch_rejects_bad_ids(self):
         self.assertEqual(self.call("/api/details/fetch", {"ids": "a"})[0], 400)
 
+    def test_body_must_be_a_json_object(self):
+        for raw in (b"[]", b"3", b'"x"'):
+            req = urllib.request.Request(self.base + "/api/reclassify", data=raw, method="POST",
+                                         headers={"X-YTKB": "1", "Content-Type": "application/json"})
+            with self.assertRaises(urllib.error.HTTPError) as e:
+                urllib.request.urlopen(req)
+            self.assertEqual(e.exception.code, 400)
+            e.exception.close()
+
+    def test_no_questions_while_transcribing(self):
+        from unittest import mock
+        with mock.patch.dict(dashboard.JOB.state, {"running": True, "kind": "asr"}):
+            code, r = self.call("/api/ask", {"question": "lora?"})
+        self.assertEqual((code, "Transcribing" in r["error"]), (409, True))
+
     def test_cancel_without_job(self):
         self.assertEqual(self.call("/api/job/cancel", {})[1], {"ok": False, "stopping": False})
 

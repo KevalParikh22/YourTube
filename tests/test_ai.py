@@ -79,6 +79,19 @@ class DiscoverTest(unittest.TestCase):
             self.assertFalse(ai_classifier.run_discover(library=1, should_stop=lambda: True))
             make_completer.assert_not_called()
 
+    def test_run_discover_stopped_during_model_call_discards_proposal(self):
+        import ai_classifier
+        answers = iter([False, True])                      # not stopped before the call, stopped by the time it returns
+        with mock.patch("llm.load_settings", return_value={"provider": "ollama"}), \
+             mock.patch("llm.for_library", return_value={}), \
+             mock.patch("llm.context_chars", return_value=20_000), \
+             mock.patch("storage.get_library", return_value=[{"library": 1, "status": "new"}]), \
+             mock.patch("llm.make_completer"), \
+             mock.patch("ai_classifier.discover_categories", return_value=[{"name": "Health"}]), \
+             mock.patch("llm.save_settings") as save:
+            self.assertFalse(ai_classifier.run_discover(library=1, should_stop=lambda: next(answers)))
+            save.assert_not_called()
+
 
 class AssignTest(unittest.TestCase):
     def test_stops_before_first_batch(self):

@@ -513,14 +513,6 @@ def update_videos(
         conn.commit()
         return updated
 
-def update_video_status(video_id: str, status: str, db_path: str = DB_PATH) -> None:
-    """Updates watch status: unwatched, in_progress, completed, skipped."""
-    update_videos([video_id], status=status, db_path=db_path)
-
-def update_video_category(video_id: str, category: str, db_path: str = DB_PATH) -> None:
-    """Reclassifies a video into a specific category (locked against auto-classification)."""
-    update_videos([video_id], category=category, db_path=db_path)
-
 def reclassify_videos(
     classify: Callable[[str, str], str],
     video_ids: Optional[Iterable[str]] = None,

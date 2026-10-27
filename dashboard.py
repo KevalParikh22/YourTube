@@ -306,9 +306,15 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"ok": True, "id": started["id"], "position": started["position"], "after": ahead})
 
     def _body(self):
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            raise json.JSONDecodeError("bad Content-Length", "", 0) from None
         raw = self.rfile.read(length) if length else b"{}"
-        return json.loads(raw or b"{}")
+        data = json.loads(raw or b"{}")
+        if not isinstance(data, dict):
+            raise json.JSONDecodeError("expected a JSON object", "", 0)
+        return data
 
     # --- GET -------------------------------------------------------------------
     def do_GET(self):
@@ -627,6 +633,8 @@ class Handler(BaseHTTPRequestHandler):
                 follow = body.get("follow_up_of")
                 if follow is not None and (not isinstance(follow, int) or isinstance(follow, bool)):
                     return self._error("follow_up_of must be a number")
+                if JOB.state["running"] and JOB.state["kind"] == "asr":   # Ollama would reload into the GPU whisper is using
+                    return self._error("Transcribing on the GPU right now. Ask again when it finishes.", 409)
                 if not llm.is_configured(llm.load_settings(), "ask"):
                     return self._error("Choose an AI for questions and answers in Settings → AI first")
                 return self._json(asker.ask(question.strip()[:1000], filters=filters, follow_up_of=follow))
