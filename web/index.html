@@ -1908,7 +1908,7 @@ function drawerRating(v) {
     ${r.minutes?.length ? `<div class="field-label">Minutes</div><ul>${r.minutes.map(m => `<li><button class="chap" data-act="seek" data-t="${m.t}"><time>${clock(m.t)}</time><span><b>${esc(m.topic)}</b>${(m.notes || []).map(n => `<small class="minute-note">${esc(n)}</small>`).join('')}</span></button></li>`).join('')}</ul>` : ''}
     ${r.takeaways?.length ? `<div class="field-label">Takeaways</div><ul>${r.takeaways.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${r.skim.length ? `<div class="ranges">${r.skim.map(x => `<button class="range" data-act="seek" data-t="${x.start}" title="${esc(x.why)}">${clock(x.start)}–${clock(x.end)} ${esc(x.why)}</button>`).join('')}</div>` : ''}
-    ${r.points.length ? `<ul>${r.points.map(p => p.t != null
+    ${r.points.length && !(r.minutes || []).length ? `<ul>${r.points.map(p => p.t != null
       ? `<li><button class="chap" data-act="seek" data-t="${p.t}"><time>${clock(p.t)}</time><span>${esc(p.text)}</span></button></li>`
       : `<li class="chap" style="cursor:default"><time></time><span>${esc(p.text)}</span></li>`).join('')}</ul>` : ''}
     <div class="kv-line">${r.basis === 'metadata' ? 'Rated from title and description only' : 'Rated from the transcript'} · ${esc(r.model || '')}

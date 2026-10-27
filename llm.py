@@ -119,7 +119,10 @@ def library_settings(settings: Dict[str, Any], library: Optional[int] = None) ->
     if not library or int(library) == 1:
         return {k: settings.get(k, make()) for k, make in LIBRARY_KEYS.items()}
     own = (settings.get("libraries") or {}).get(str(int(library))) or {}
-    return {k: own.get(k, make()) for k, make in LIBRARY_KEYS.items()}
+    out = {k: own.get(k, make()) for k, make in LIBRARY_KEYS.items()}
+    if not (out["interests"] or "").strip():   # a library without its own interests uses the first library's
+        out["interests"] = settings.get("interests", "")
+    return out
 
 def set_library_settings(settings: Dict[str, Any], library: Optional[int], **values: Any) -> None:
     values = {k: v for k, v in values.items() if k in LIBRARY_KEYS}
