@@ -93,7 +93,7 @@
 
 ### T3: Settings sidebar sections; separate Help page
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **depends on:** T1
 - **files:** `web/index.html`
 - **steps:** Design notes C (move cards, keep their handlers).

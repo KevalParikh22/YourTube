@@ -297,6 +297,13 @@
   .prov .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); margin-right: 8px; vertical-align: 1px; }
   .prov .dot.ok { background: var(--watch); }
   .route { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 0; }
+  .settings-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; margin-top: 24px; }
+  .settings-side { position: sticky; top: 20px; display: grid; gap: 4px; }
+  .settings-side a { color: var(--ink-2); text-decoration: none; border-radius: 6px; padding: 9px 11px; font-size: 13.5px; }
+  .settings-side a:hover { background: var(--sunken); color: var(--ink); }
+  .settings-side a.on { background: var(--sunken); color: var(--ink); font-weight: 600; }
+  .settings-content { min-width: 0; }
+  .settings-content > .section:first-child { margin-top: 0; }
 
   /* ---------- video details ---------- */
   .det-counts { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--ink-2); }
@@ -464,6 +471,9 @@
 
   /* ---------- responsive ---------- */
   @media (max-width: 760px) {
+    .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .settings-side { position: static; display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
+    .settings-side a { flex: 0 0 auto; border: 1px solid var(--line); }
     .s-row { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
     .hit { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .bar-in { padding: 0 16px; gap: 8px; }
@@ -706,7 +716,7 @@ function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); ren
 function refresh() { const y = scrollY; renderView(); scrollTo(0, y); }
 function renderBar() {
   const r = route();
-  const tab = SETTINGS_PAGES.some(([k]) => k === r) ? 'settings' : r;
+  const tab = r === 'settings' || r.startsWith('settings/') ? 'settings' : r;
   $('#libpick').innerHTML = S.data.libraries.length > 1 || S.lib !== 1
     ? `<select data-change="lib" aria-label="Library" class="libsel">${S.data.libraries.map(l => `<option value="${l.id}" ${S.lib === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         <option value="0" ${S.lib === 0 ? 'selected' : ''}>All libraries</option></select>` : '';
@@ -718,13 +728,20 @@ function renderBar() {
 function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
 function renderView() {
   const r = route(), v = $('#view');
+  if (r === 'ai') { location.replace('#/settings/cloud'); return; }
+  if (r === 'setup') { location.replace('#/help'); return; }
   if (r === 'plan') v.innerHTML = videos().length ? viewPlan() : emptyState();
   else if (r === 'triage') { v.innerHTML = videos().length ? viewTriage() : emptyState(); updateJob(); }
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
-  else if (r === 'settings') v.innerHTML = settingsNav(r) + viewGeneral();
-  else if (r === 'ai') { v.innerHTML = settingsNav(r) + viewAI(); updateJob(); if (!S.local) loadLocal(); }
-  else if (r === 'setup') { v.innerHTML = settingsNav(r) + viewSetup(); if (!S.guide) loadGuide(); }
+  else if (r === 'settings' || r.startsWith('settings/')) {
+    const section = r.split('/')[1] || 'general';
+    const valid = SETTINGS_PAGES.some(([key]) => key === section) ? section : 'general';
+    v.innerHTML = settingsNav(valid) + settingsContent(valid);
+    if (['cloud', 'local', 'routing'].includes(valid)) updateJob();
+    if (['local', 'cloud', 'routing'].includes(valid) && !S.local) loadLocal();
+  }
+  else if (r === 'help') { v.innerHTML = '<div class="eyebrow">Help</div><h1 class="display">Help<em>setup, downloads and guide</em></h1>' + viewSetup(); if (!S.guide) loadGuide(); }
   else if (r === 'ask') {
     const id = +routeParam('id') || null;
     if (id && !S.ask.thread.some(t => t.id === id) && !S.ask.busy) openAsk(id);
@@ -1003,7 +1020,7 @@ function viewTriage() {
     <div class="eyebrow">Triage${t.cat ? ` · ${esc(t.cat)}` : ''}</div>
     <h1 class="display num">${fmt(follow / S.speed)}<em>if you follow the ratings, instead of ${fmt(all / S.speed)} for everything at ${sx(S.speed)}</em></h1>
     <p class="lede">${open.length - unrated} of ${plural(open.length, 'unwatched video')} rated. Nothing changes until you act. ${tip('Ratings weigh depth, fit with your interests, time against value and freshness.')}</p>
-    ${!ai.ready_for.rate ? `<div class="banner"><span>Choose an AI for ratings to get a Watch / Skim / Skip verdict for every video.</span><a class="btn btn-sm" href="#/ai">Set up AI</a></div>`
+    ${!ai.ready_for.rate ? `<div class="banner"><span>Choose an AI for ratings to get a Watch / Skim / Skip verdict for every video.</span><a class="btn btn-sm" href="#/settings/routing">Set up AI</a></div>`
       : unrated ? `<div class="banner"><span>${plural(unrated, 'video')} not rated yet${open.filter(v => !v.rating && v.details?.status !== 'done').length ? '. Videos without transcripts are rated from title and description only' : ''}.</span>
         <button class="btn btn-dark btn-sm" data-act="rate-batch" data-job-btn>Rate ${plural(unrated, 'video')}</button></div>` : ''}
     <div id="job"></div>
@@ -1182,11 +1199,8 @@ function viewDetailsCard() {
       <button class="btn btn-dark btn-sm" data-act="details-fetch" data-job-btn ${!need ? 'disabled' : ''}>${need ? `Fetch details for ${plural(Math.min(need, 200), 'video')}` : 'All fetched'}</button>
       ${need > 200 ? `<span class="faint" style="font-size:12.5px">200 per run (about ${Math.round(200 * 5 / 60)} min). Run again for the rest.</span>`
         : need ? `<span class="faint" style="font-size:12.5px">About ${Math.max(1, Math.round(need * 5 / 60))} min</span>` : ''}
+      <a class="btn-text" href="#/settings/sync">Sync settings →</a>
     </div>
-    <label class="check" style="margin-top:14px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
-      <span>Fetch details for new videos after each sync ${tip('Up to 50 new videos per sync: descriptions, chapters and captions. Transcripts, search inside videos and good ratings need them.')}</span></label>
-    <label class="check" style="margin-top:10px"><input type="checkbox" data-change="use-descriptions" ${S.data.use_descriptions ? 'checked' : ''}>
-      <span>Use descriptions in search and AI ${tip('Descriptions come with the captions at no extra cost. Turn this off if they are mostly links and sponsor text.')}</span></label>
     ${viewAsr()}
     ${viewVisuals()}
   </section>`;
@@ -1202,7 +1216,7 @@ function viewVisuals() {
       Only the video picture is downloaded (no audio), anonymously; it is deleted after reading, and small thumbnails are kept for a slide strip.
       Mark videos in their panel, switch on <b>Slides</b> for a category, or accept the suggestions below.</p>
     ${!P.available ? `<div class="banner"><span>Needs Pillow and ffmpeg: <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
-      : !P.model_ok ? `<div class="banner"><span>The vision model (${esc(P.model || 'none')}) isn't ready in Ollama or can't read images. <a href="#/ai">Choose one on the AI page</a>.</span></div>` : ''}
+      : !P.model_ok ? `<div class="banner"><span>The vision model (${esc(P.model || 'none')}) isn't ready in Ollama or can't read images. <a href="#/settings/local">Choose one in Local AI settings</a>.</span></div>` : ''}
     <div class="actions">
       ${P.videos ? `<button class="btn btn-dark btn-sm" data-act="vis-run" data-job-btn ${!P.available || !P.model_ok ? 'disabled' : ''}>Read slides for ${plural(P.videos, 'video')}</button>
         <span class="faint" style="font-size:12.5px">${fmt(P.seconds)} of video · about ${Math.max(1, Math.round(P.minutes))} min with ${esc(P.model)}</span>`
@@ -1287,10 +1301,10 @@ function updateJob() {
   if (!box) return;
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
-    : route() === 'ai' ? ['pull', 'embed'].includes(job.kind)
+    : route().startsWith('settings') ? ['pull', 'embed'].includes(job.kind)
     : route() === 'knowledge' ? job.kind === 'knowledge'
     : ['sync', 'details', 'asr', 'visual'].includes(job.kind) || !job.kind;
-  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route() === 'ai' ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
+  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
   if (!mine || (!job.log && !job.running)) { box.innerHTML = waitLine; return; }
@@ -1379,7 +1393,7 @@ function viewCategories() {
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
       ${ai.ready_for.categorize ? `<button class="btn btn-sm" data-act="ai-discover" data-job-btn>Propose categories with AI</button>
         <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort || ''} unsorted with AI</button>`
-        : `<a class="btn-text" href="#/ai">Set up AI sorting →</a>`}
+        : `<a class="btn-text" href="#/settings/routing">Set up AI sorting →</a>`}
       ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>`
         : fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
     </div>
@@ -1716,7 +1730,7 @@ function viewKnowledgeList() {
     <h1 class="display">Knowledge base<em>Topic pages from your summaries</em></h1>
     <p class="lede">Study pages combining notes, minutes, and quotes across your videos, citing every moment.</p>
     ${!S.lib ? `<div class="banner"><span>Knowledge pages belong to a single library. Showing pages for <b>${esc(libName(1) || 'Library 1')}</b>. Pick a specific library above to switch.</span></div>` : ''}
-    ${!ai.ready_for.summarize ? `<div class="banner"><span>Set up an AI for summaries in Settings to build knowledge pages.</span><a class="btn btn-sm" href="#/ai">Set up AI</a></div>` : ''}
+    ${!ai.ready_for.summarize ? `<div class="banner"><span>Set up an AI for summaries in Settings to build knowledge pages.</span><a class="btn btn-sm" href="#/settings/routing">Set up AI</a></div>` : ''}
     <div id="job"></div>
   </section>
 
@@ -1892,7 +1906,7 @@ async function loadGuide() {
     const r = await fetch('/docs/setup');
     S.guide = r.ok ? await r.text() : `Could not load the guide (${r.status}).`;
   } catch (e) { S.guide = 'Could not load the guide: ' + e.message; }
-  if (route() === 'setup') refresh();
+  if (route() === 'help') refresh();
 }
 function viewSetup() {
   const win = S.data.platform === 'win32';
@@ -1961,7 +1975,7 @@ function md(src) {
 const LANGUAGES = ['English', 'Hindi', 'Gujarati', 'Marathi', 'Bengali', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Punjabi', 'Urdu',
   'Spanish', 'French', 'German', 'Portuguese', 'Japanese', 'Korean', 'Chinese', 'Arabic'];
 function viewAI() {
-  const ai = S.data.ai, edit = S.ai.provider, ready = Object.entries(ai.providers).filter(([, p]) => p.ready);
+  const ai = S.data.ai;
   const sameAs = name => {
     const f = ai.task_follows?.[name], p = f ? ai.tasks[f] || ai.provider : ai.provider;
     return `Same as ${f ? esc(ai.task_labels[f].split(' ')[0].toLowerCase()) : 'default'}${p !== 'none' && ai.providers[p] ? ` (${esc(ai.providers[p].label)})` : ''}`;
@@ -1971,22 +1985,8 @@ function viewAI() {
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
-  return `
-  <section>
-    <p class="lede"><b style="font-weight:600">${ready.length ? plural(ready.length, 'AI') + ' ready' : 'No AI set up yet'}${ai.ready ? ' · default: ' + esc(ai.providers[ai.provider].label) : ''}.</b> Choose AI providers for each task. ${tip('AI only suggests and rates; nothing changes until you accept. Cloud AI receives titles, descriptions and transcripts, never cookies. Local models keep data on this computer.')}</p>
-  </section>
-
-  ${viewLocal()}
-
-  <section class="section card">
-    <h2 class="h">Your AIs</h2>
-    ${Object.entries(ai.providers).map(([k, p]) => `<div class="prov">
-      <div><span class="dot ${p.ready ? 'ok' : ''}"></span><b style="font-weight:500">${esc(p.label)}</b>
-        <span class="faint" style="font-size:12.5px">${p.ready ? ' · ' + esc(p.model) : p.local ? ' · runs on this computer, free' : ' · needs an API key'}</span></div>
-      <button class="btn btn-sm" data-act="ai-edit" data-p="${k}">${edit === k ? 'Close' : p.ready ? 'Edit' : 'Set up'}</button>
-    </div>${edit === k ? aiEditor(k, p) : ''}`).join('')}
-  </section>
-
+  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local));
+  const routing = `
   <section class="section card">
     <h2 class="h">Which AI does what</h2>
     <div style="margin-top:12px">
@@ -1996,9 +1996,17 @@ function viewAI() {
     <p class="hint">AI choices ${tip('A smaller or local model often works well for categories. Ratings read whole transcripts, so a larger context window can help. Questions use the ratings choice unless you choose another model.')}</p>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
   </section>`;
+  return { cloud, routing };
+}
+function providerCards(providers) {
+  const edit = S.ai.provider;
+  return `<section class="section card"><h2 class="h">${providers.some(([, p]) => p.local) ? 'Local AI providers' : 'Cloud AI providers'}</h2>
+    ${providers.map(([k, p]) => `<div class="prov"><div><span class="dot ${p.ready ? 'ok' : ''}"></span><b style="font-weight:500">${esc(p.label)}</b>
+      <span class="faint" style="font-size:12.5px">${p.ready ? ' · ' + esc(p.model) : p.local ? ' · runs on this computer, free' : ' · needs an API key'}</span></div>
+      <button class="btn btn-sm" data-act="ai-edit" data-p="${k}">${edit === k ? 'Close' : p.ready ? 'Edit' : 'Set up'}</button></div>${edit === k ? aiEditor(k, p) : ''}`).join('')}</section>`;
 }
 function viewGeneral() {
-  const ai = S.data.ai, formula = ratingFormula(ai.rating_formula || {});
+  const ai = S.data.ai;
   return `
   <section class="section card">
     <h2 class="h">Display</h2>
@@ -2010,9 +2018,11 @@ function viewGeneral() {
       <span>Show descriptions in the video panel</span></label>
     <p class="hint">Descriptions are collapsed by default in each video panel.</p>
     <p class="hint">Display options ${tip('Watch times use this speed by default; the Plan page can change it too. Display settings are saved in this browser.')}</p>
-  </section>
-
-  <section class="section card">
+  </section>`;
+}
+function viewScoring() {
+  const ai = S.data.ai, formula = ratingFormula(ai.rating_formula || {});
+  return `<section class="section card">
     <h2 class="h">How scores are calculated</h2>
     <p class="hint">Score formula ${tip('Quality combines depth, time value and freshness. Fit adjusts the result with an interest penalty or bonus.')}</p>
     <div class="ai-grid">
@@ -2022,9 +2032,11 @@ function viewGeneral() {
     </div>
     <div class="kv-line" id="formula-example">Example: ${formulaExample(formula)}</div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="formula-save">Save</button><button class="btn btn-sm" data-act="formula-reset">Reset to default</button></div>
-  </section>
-
-  <section class="section card">
+  </section>`;
+}
+function viewAbout() {
+  const ai = S.data.ai;
+  return `<section class="section card">
     <h2 class="h">About you${S.data.libraries.length > 1 ? ` · ${esc(S.lib ? libName(S.lib) : libName(1))}` : ''}</h2>
     ${S.data.libraries.length > 1 ? `<p class="note">Library-specific interests ${tip(`Ratings judge each video against its library's goals.${S.lib ? '' : ` “All libraries” is selected: this edits ${libName(1)}.`}`)}</p>` : ''}
     <div class="ai-grid">
@@ -2033,23 +2045,38 @@ function viewGeneral() {
       <div><label class="field-label" for="ai-lang">Response language</label>
         <input id="ai-lang" type="text" list="ai-langs" value="${esc(ai.language)}"><datalist id="ai-langs">${LANGUAGES.map(l => `<option value="${l}">`).join('')}</datalist></div>
       <div></div>
-      <label class="check full"><input type="checkbox" id="ai-auto" ${ai.auto_after_sync ? 'checked' : ''}>
-        <span>Suggest after sync</span> ${tip('After each playlist sync, suggest categories for new unsorted videos.')}</label>
     </div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
   </section>`;
 }
-const SETTINGS_PAGES = [['settings', 'General'], ['ai', 'AI'], ['setup', 'Setup and help']];
+const SETTINGS_PAGES = [['general', 'General'], ['about', 'About you'], ['routing', 'AI by task'], ['cloud', 'Cloud AI'], ['local', 'Local AI'], ['sync', 'Sync and details'], ['scoring', 'Scoring']];
 function settingsNav(cur) {
-  return `<section>
-    <div class="eyebrow">Settings</div>
-    <h1 class="display">Settings<em>${{ settings: 'speed, theme and about you', ai: 'AI providers, local AI and search', setup: 'install, scripts and the guide' }[cur]}</em></h1>
-    <div class="chips" style="margin-top:16px">${SETTINGS_PAGES.map(([k, l]) => `<a class="chip ${cur === k ? 'on' : ''}" href="#/${k}" style="text-decoration:none">${l}</a>`).join('')}</div>
+  return `<div class="eyebrow">Settings</div><h1 class="display">Settings<em>${SETTINGS_PAGES.find(([k]) => k === cur)?.[1] || 'General'}</em></h1>
+    <div class="settings-layout"><nav class="settings-side" aria-label="Settings sections">${SETTINGS_PAGES.map(([k, label]) => `<a class="${cur === k ? 'on' : ''}" href="#/settings/${k}"${cur === k ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav><div class="settings-content">`;
+}
+function settingsContent(section) {
+  if (section === 'general') return viewGeneral() + '</div></div>';
+  if (section === 'about') return viewAbout() + '</div></div>';
+  if (section === 'scoring') return viewScoring() + '</div></div>';
+  if (section === 'sync') return viewSyncSettings() + '</div></div>';
+  const ai = viewAI();
+  return (section === 'cloud' ? ai.cloud : section === 'local' ? viewLocal() + providerCards(Object.entries(S.data.ai.providers).filter(([, p]) => p.local)) : ai.routing) + '</div></div>';
+}
+function viewSyncSettings() {
+  const ai = S.data.ai;
+  return `<section class="section card"><h2 class="h">Sync and details</h2>
+    <label class="check" style="margin-top:12px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
+      <span>Fetch details for new videos after each sync ${tip('Fetch descriptions, chapters and captions for up to 50 new videos per sync.')}</span></label>
+    <label class="check" style="margin-top:10px"><input type="checkbox" data-change="use-descriptions" ${S.data.use_descriptions ? 'checked' : ''}>
+      <span>Use descriptions in search and AI ${tip('Descriptions are included with captions. Turn this off if they are mostly links and sponsor text.')}</span></label>
+    <label class="check" style="margin-top:10px"><input type="checkbox" id="ai-auto" ${ai.auto_after_sync ? 'checked' : ''}>
+      <span>Suggest categories for new videos after each sync ${tip('After each playlist sync, suggest categories for new unsorted videos.')}</span></label>
+    <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
   </section>`;
 }
 async function loadLocal() {
   try { S.local = await api('/api/local/status'); } catch (e) { S.local = { error: e.message }; }
-  if (route() === 'ai') refresh();
+  if (route().startsWith('settings/')) refresh();
 }
 function viewLocal() {
   const L = S.local, ai = S.data.ai, running = !!S.data.job.running;
@@ -2065,7 +2092,7 @@ function viewLocal() {
   return `
   <section class="section card">
     <h2 class="h">Local AI on this computer</h2>
-    <p class="note">Local AI ${tip('Run models on your own machine with Ollama: free, private and works offline. Run bash scripts/setup.sh --local-ai (Windows: scripts/setup.ps1 -LocalAI) to set up Ollama and a suitable model.')} <a href="#/setup">Setup guide and downloads →</a></p>
+    <p class="note">Local AI ${tip('Run models on your own machine with Ollama: free, private and works offline. Run bash scripts/setup.sh --local-ai (Windows: scripts/setup.ps1 -LocalAI) to set up Ollama and a suitable model.')} <a href="#/help">Setup guide and downloads →</a></p>
     <div style="margin-top:8px">
       ${row(L.gpu.ok, 'GPU', L.gpu.detail)}
       ${row(L.memory.ok, 'Memory', L.memory.detail)}
@@ -2160,7 +2187,8 @@ function aiEditorBody(k) {
   return body;
 }
 function aiPrefsBody() {
-  return { interests: $('#ai-interests').value, language: $('#ai-lang').value, auto_after_sync: $('#ai-auto').checked };
+  return { interests: $('#ai-interests')?.value ?? S.data.ai.interests, language: $('#ai-lang')?.value ?? S.data.ai.language,
+    auto_after_sync: $('#ai-auto')?.checked ?? S.data.ai.auto_after_sync };
 }
 function aiRoutesBody() {
   const tasks = {};
@@ -2258,7 +2286,7 @@ function drawerSummary(v) {
   if (result?.error) return `<div class="kv-line">Could not load summary: ${esc(result.error)}. <button class="btn-text" style="padding:0;height:auto" data-act="summary-retry" data-id="${esc(v.video_id)}">Retry</button></div>`;
   if (!result?.summary) return S.data.ai.ready_for.summarize
     ? `<div class="kv-line">No summary yet. <button class="btn-text" style="padding:0;height:auto" data-act="summarize-one" data-id="${esc(v.video_id)}" data-job-btn>Summarise</button> <span class="faint">(local models take about 1–2 minutes)</span></div>`
-    : '<div class="kv-line">No summary yet. <a href="#/ai">Choose an AI for summaries in Settings</a>.</div>';
+    : '<div class="kv-line">No summary yet. <a href="#/settings/routing">Choose an AI for summaries in Settings</a>.</div>';
   const s = result.summary, moments = result.moments || {};
   const at = t => Number.isFinite(+t) ? Math.max(0, Math.floor(+t)) : 0;
   const time = t => t == null || !Number.isFinite(+t) ? '' : `<button class="time-link" data-act="seek" data-t="${at(t)}">${clock(at(t))}</button>`;   // no time: no fake 0:00 link
