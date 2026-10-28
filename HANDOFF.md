@@ -3,8 +3,8 @@
 Read this first in every new session, whatever the tool. The orchestrator keeps it updated.
 
 **Last updated:** 2026-10-28 by claude
-**Branch:** master (feature branches are deleted once merged)
-**Active plan:** none (docs/plan/public-release.md done)
+**Branch:** feat/nav-redesign
+**Active plan:** docs/plan/nav-redesign.md (planned, not started)
 
 ## Done
 - Public release readiness: MIT licence, disclaimer, SECURITY.md, per-OS notes, always-on dashboard access token, GitHub Actions CI (passing). The repo is still private; the user decides when to make it public.
@@ -14,7 +14,7 @@ Read this first in every new session, whatever the tool. The orchestrator keeps 
 - Manual tests §1 (library at real size) passed on 2026-10-24.
 
 ## In progress
-- Nothing.
+- Planned: sidebar navigation + settings gear, floating Ask panel, inline protected Add category (T1-T4).
 
 ## Next up
 - User: manual test sessions (S7 first), list of UI/layout issues, pick the next feature, decide on write-back.
