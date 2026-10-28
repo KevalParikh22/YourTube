@@ -16,5 +16,19 @@ bash scripts/setup.sh --local-ai     # Windows: scripts\setup.ps1 -LocalAI
 ```
 
 - Setup and configuration: [docs/SETUP.md](docs/SETUP.md) (also in the app: Settings → Setup and help)
+- Security: [SECURITY.md](SECURITY.md)
 - Checks that need a person: [docs/MANUAL-TESTS.md](docs/MANUAL-TESTS.md)
 - Plans: `docs/PRD-*.md`
+
+## Disclaimer
+
+YourTube is unofficial and is not affiliated with or endorsed by YouTube or Google.
+
+- It uses yt-dlp, which YouTube changes can break.
+- It reads your own account with your own browser sign-in, at your own risk.
+- It never changes anything on YouTube (read-only).
+
+## License
+
+This project is licensed under the [MIT License](LICENSE). For security practices and reporting, see [SECURITY.md](SECURITY.md).
+

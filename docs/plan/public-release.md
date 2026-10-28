@@ -49,7 +49,7 @@
 
 ### T1: Licence, README disclaimer, SECURITY.md
 - **worker:** agy
-- **status:** todo
+- **status:** done
 - **files:** `LICENSE` (new), `README.md`, `SECURITY.md` (new)
 - **acceptance:** [ ] the three files say what Design notes T1 lists; [ ] no claim the code doesn't back up.
 - **verify:** `.venv/bin/python -m unittest`
