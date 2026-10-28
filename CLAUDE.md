@@ -35,7 +35,7 @@ Dependencies: `yt-dlp`, `anthropic` (only for the Claude provider), `secretstora
 
 Every stage passes around a list of plain video dicts with the keys `video_id, title, channel, duration_seconds, url, position, category, status`. The pipeline in `main.py` `run_pipeline()` runs these stages:
 
-1. **`extractor.py`**: yt-dlp flat extraction with `skip_download`. It uses no Google API quota and needs no OAuth. Private access comes from browser cookies or a cookies.txt file. The YouTube Data API cannot read Watch Later, which is why yt-dlp is used. `browser="auto"` (`detect_browser()`) picks the first browser with YouTube login cookies. On this Linux machine that is Chrome, because Firefox is not signed in. On Windows, Chromium cookies usually fail because of app-bound encryption, so Firefox or a cookies.txt file is recommended there.
+1. **`extractor.py`**: yt-dlp flat extraction with `skip_download`. It uses no Google API quota and needs no OAuth. Private access comes from browser cookies or a cookies.txt file. The YouTube Data API cannot read Watch Later, which is why yt-dlp is used. `browser="auto"` (`detect_browser()`) picks the first browser with YouTube login cookies. On Windows, Chromium cookies usually fail because of app-bound encryption, so Firefox or a cookies.txt file is recommended there.
 2. **`classifier.py`**: keyword scoring over title + channel (single word scores 1, multi-word phrase scores 2). The taxonomy comes from `taxonomy.json`, written by the dashboard, or `DEFAULT_TAXONOMY` if that file is absent. A video with no match goes to `FALLBACK_CATEGORY` ("General / Other").
 3. **`storage.py`**: SQLite. `init_db()` creates the tables and migrates older DBs in place. Tables:
    - `playlists`

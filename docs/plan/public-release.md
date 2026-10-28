@@ -56,7 +56,7 @@
 
 ### T2: Per-OS notes; remove notes about the author's machine
 - **worker:** agy
-- **status:** todo
+- **status:** done (orchestrator removed a duplicated OS section)
 - **files:** `docs/SETUP.md`, `CLAUDE.md`, `AGENTS.md`, `docs/architecture.md`, `README.md`
 - **acceptance:** [ ] the per-OS section exists; [ ] `grep -rniE "this (linux )?machine|my (laptop|machine)|keval" CLAUDE.md AGENTS.md docs/SETUP.md docs/architecture.md README.md` finds nothing personal (the LICENSE copyright line is expected).
 - **verify:** `.venv/bin/python -m unittest`

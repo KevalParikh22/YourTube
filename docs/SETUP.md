@@ -112,9 +112,9 @@ On the command line:
 
 **Notes by system**
 
-- **Linux:** Chrome cookies need the `secretstorage` package (installed by the setup script) and an unlocked keyring.
-- **Windows:** Chrome and Edge encrypt cookies in a way other programs can't read. Use Firefox, or export a `cookies.txt`.
-- **macOS:** the first read of Chrome cookies shows a Keychain prompt; allow it.
+- **Linux:** Chrome cookies need the `secretstorage` package (in requirements.txt) and an unlocked keyring; Firefox works without.
+- **Windows:** Chrome, Edge and Brave use app-bound encryption, so their cookies usually can't be read; use Firefox or a cookies.txt export. The setup script is `scripts\setup.ps1` (not yet tested on Windows).
+- **macOS:** reading Chrome cookies triggers a Keychain prompt; allow it, or use Firefox.
 - **Several Google accounts:** "Detect" uses the first browser signed in to YouTube. For another account, choose that browser, or export a `cookies.txt` while that account is active.
 - **Keep `cookies.txt` private.** It works like your password.
 
