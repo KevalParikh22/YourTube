@@ -75,6 +75,14 @@
   .bar-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .bar-icon.on { color: var(--ink); background: var(--sunken); }
 
+  .skip-link { position: fixed; z-index: 100; top: 8px; left: 8px; padding: 8px 12px; background: var(--raised); border: 2px solid var(--accent); border-radius: 6px; transform: translateY(-160%); }
+  .skip-link:focus { transform: translateY(0); }
+  .shortcut-scrim { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 20px; background: #0008; }
+  .shortcut-dialog { width: min(520px, 100%); max-height: min(80vh, 640px); overflow: auto; padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); box-shadow: 0 16px 48px #0004; }
+  .shortcut-dialog h2 { margin: 0 0 14px; }
+  .shortcut-table { width: 100%; border-collapse: collapse; }
+  .shortcut-table th, .shortcut-table td { padding: 7px 9px; text-align: left; border-bottom: 1px solid var(--line); }
+
   /* ---------- controls ---------- */
   select, input[type="text"], input[type="search"], input[type="number"], input[type="password"], textarea {
     font: inherit; color: var(--ink); background: var(--raised); border: 1px solid var(--line-strong);
@@ -521,6 +529,7 @@
 </style>
 </head>
 <body>
+<a class="skip-link" href="#view">Skip to content</a>
 <header class="bar">
   <div class="bar-in">
     <a class="logo" href="#/">YourTube</a>
@@ -534,10 +543,11 @@
     </div>
   </div>
 </header>
-<main class="page" id="view"><div class="empty">Loading…</div></main>
+<main class="page" id="view" tabindex="-1"><div class="empty">Loading…</div></main>
 <div id="drawer"></div>
 <button class="ask-fab" id="ask-fab" data-act="ask-open" aria-label="Ask your library (A)" title="Ask your library (A)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 2v-5.5A7.5 7.5 0 1 1 20 11.5Z"></path><path d="M8 10h8M8 14h5"></path></svg></button>
 <div id="ask-pop-root"></div>
+<div id="shortcut-root"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -548,6 +558,8 @@ const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'u
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
 const TABS = [['', 'Library'], ['knowledge', 'Knowledge'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories']];
+const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then P', 'Plan'], ['G then T', 'Triage'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then H', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
+const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
 const JOB_TEXT = {
@@ -717,6 +729,12 @@ async function load() {
   if (S.data.job.running || S.data.job.queue?.length) pollJob();
 }
 function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); renderAskPop(); }
+function renderShortcutHelp() {
+  const root = $('#shortcut-root');
+  if (!S.shortcutsOpen) { root.innerHTML = ''; return; }
+  root.innerHTML = `<div class="shortcut-scrim" data-act="shortcut-dismiss"><section class="shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-title"><h2 id="shortcut-title">Keyboard shortcuts</h2>${shortcutTable()}<div class="actions" style="margin-top:16px"><button class="btn" data-act="shortcut-close">Close</button></div></section></div>`;
+  root.querySelector('[data-act="shortcut-close"]')?.focus();
+}
 function refresh() { const y = scrollY; renderView(); scrollTo(0, y); }
 function renderBar() {
   const r = route();
@@ -728,6 +746,8 @@ function renderBar() {
   $('#gsearch-btn').classList.toggle('on', r === 'search');
   $('#settings-btn').classList.toggle('on', tab === 'settings');
   $('#help-btn').classList.toggle('on', r === 'help');
+  $('#settings-btn').toggleAttribute('aria-current', tab === 'settings');
+  $('#help-btn').toggleAttribute('aria-current', r === 'help');
 }
 function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
 function renderView() {
@@ -745,7 +765,7 @@ function renderView() {
     if (['cloud', 'local', 'routing'].includes(valid)) updateJob();
     if (['local', 'cloud', 'routing'].includes(valid) && !S.local) loadLocal();
   }
-  else if (r === 'help') { v.innerHTML = '<div class="eyebrow">Help</div><h1 class="display">Help<em>setup, downloads and guide</em></h1>' + viewSetup(); if (!S.guide) loadGuide(); }
+  else if (r === 'help') { v.innerHTML = '<div class="eyebrow">Help</div><h1 class="display">Help<em>setup, downloads and guide</em></h1>' + viewSetup() + `<section class="section"><h2 class="h">Keyboard shortcuts</h2>${shortcutTable()}</section>`; if (!S.guide) loadGuide(); }
   else if (r === 'ask') {
     const id = +routeParam('id') || null;
     if (id && !S.ask.thread.some(t => t.id === id) && !S.ask.busy) openAsk(id);
@@ -2956,19 +2976,43 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('focusout', e => { if (e.target.id === 'd-notes') saveNotes(); });
 document.addEventListener('keydown', e => {
+  const typing = e.target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName);
+  if (S.shortcutsOpen) {
+    if (e.key === 'Escape') { e.preventDefault(); S.shortcutsOpen = false; renderShortcutHelp(); (S.shortcutReturnFocus || $('#help-btn'))?.focus(); return; }
+    if (e.key === 'Tab') {
+      const nodes = [...$('#shortcut-root').querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"])')];
+      if (nodes.length) { const first = nodes[0], last = nodes[nodes.length - 1]; if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); } }
+    }
+    return;
+  }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'g') { S.goAt = Date.now(); return; }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && S.goAt && Date.now() - S.goAt < 1500) {
+    const routes = { l: '#/', k: '#/knowledge', p: '#/plan', t: '#/triage', y: '#/sources', c: '#/categories', s: '#/settings', h: '#/help' };
+    const dest = routes[e.key.toLowerCase()]; S.goAt = 0;
+    if (dest) { e.preventDefault(); location.hash = dest; return; }
+  }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === '?') { e.preventDefault(); S.shortcutsOpen = true; S.shortcutReturnFocus = document.activeElement; renderShortcutHelp(); return; }
   if (e.key === 'Escape' && S.ask.open && route() !== 'ask') { S.ask.open = false; renderAskPop(); (S.ask.returnFocus || $('#ask-fab'))?.focus(); return; }
   if (e.key === 'Escape' && S.addingCat && route() === 'categories') {
     e.preventDefault(); S.addingCat = false; refresh(); $('[data-act="add-cat"]')?.focus(); return;
   }
-  if (!e.ctrlKey && !e.metaKey && !e.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName) && e.key.toLowerCase() === 'a' && route() !== 'ask') {
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a' && route() !== 'ask') {
     e.preventDefault(); S.ask.returnFocus = $('#ask-fab'); S.ask.open = true; renderAskPop(); $('#aq')?.focus({ preventScroll: true }); return;
   }
   if (e.key === 'Escape' && S.drawer) { closeDrawer(); return; }
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
   if (e.key === '/') { e.preventDefault(); if (route() !== 'search') location.hash = '#/search'; setTimeout(() => $('#sq')?.focus(), 50); }
-  if (S.drawer && (e.key === 'j' || e.key === 'k')) $(`[data-act="step"][data-dir="${e.key === 'j' ? 1 : -1}"]`)?.click();
+  if (S.drawer && (e.key.toLowerCase() === 'j' || e.key.toLowerCase() === 'k')) $(`[data-act="step"][data-dir="${e.key.toLowerCase() === 'j' ? 1 : -1}"]`)?.click();
 
 });
+document.addEventListener('click', e => {
+  if (!S.shortcutsOpen) return;
+  if (e.target.closest('[data-act="shortcut-close"]') || (e.target.classList.contains('shortcut-scrim') && !e.target.closest('.shortcut-dialog'))) {
+    S.shortcutsOpen = false; renderShortcutHelp(); (S.shortcutReturnFocus || $('#help-btn'))?.focus();
+  }
+});
+// href would change the hash route, so only move focus
+document.querySelector('.skip-link').addEventListener('click', e => { e.preventDefault(); $('#view')?.focus(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); }
   if (e.key === 'Enter' && e.target.id === 'new-cat-name' && !e.isComposing) { e.preventDefault(); saveNewCategory(); }

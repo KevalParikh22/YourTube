@@ -111,7 +111,7 @@
 
 ### T5: Keyboard shortcuts and accessibility
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **depends on:** T2, T3
 - **files:** `web/index.html`
 - **steps:** Design notes E.
