@@ -1972,8 +1972,6 @@ function md(src) {
 }
 
 /* ---------------- AI settings ---------------- */
-const LANGUAGES = ['English', 'Hindi', 'Gujarati', 'Marathi', 'Bengali', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Punjabi', 'Urdu',
-  'Spanish', 'French', 'German', 'Portuguese', 'Japanese', 'Korean', 'Chinese', 'Arabic'];
 function viewAI() {
   const ai = S.data.ai;
   const sameAs = name => {
@@ -2036,14 +2034,28 @@ function viewScoring() {
 }
 function viewAbout() {
   const ai = S.data.ai;
+  const langs = ai.languages || [];
+  const curLang = ai.language || 'English';
+  const customLang = (curLang && !langs.includes(curLang)) ? curLang : null;
+  const langOptions = [
+    ...(customLang ? [`<option value="${esc(customLang)}" selected>${esc(customLang)} (custom)</option>`] : []),
+    ...langs.map(l => `<option value="${esc(l)}" ${curLang === l ? 'selected' : ''}>${esc(l)}</option>`)
+  ].join('');
+  const interests = ai.interests || '';
   return `<section class="section card">
     <h2 class="h">About you${S.data.libraries.length > 1 ? ` · ${esc(S.lib ? libName(S.lib) : libName(1))}` : ''}</h2>
     ${S.data.libraries.length > 1 ? `<p class="note">Library-specific interests ${tip(`Ratings judge each video against its library's goals.${S.lib ? '' : ` “All libraries” is selected: this edits ${libName(1)}.`}`)}</p>` : ''}
     <div class="ai-grid">
-      <div class="full"><label class="field-label" for="ai-interests">Learning interests ${tip('Ratings favour videos that fit these interests.')}</label>
-        <textarea id="ai-interests" rows="3" placeholder="e.g. Building AI agents and RAG in Python, system design for interviews. Not interested in crypto or AI news hype.">${esc(ai.interests)}</textarea></div>
+      <div class="full">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <label class="field-label" for="ai-interests">Learning interests ${tip('Ratings favour videos that fit these interests.')}</label>
+          <span id="ai-interests-count" class="hint" style="font-size:12px">${interests.length} / 2000</span>
+        </div>
+        <textarea id="ai-interests" rows="3" placeholder="e.g. Building AI agents and RAG in Python, system design for interviews. Not interested in crypto or AI news hype.">${esc(interests)}</textarea>
+        <div id="ai-interests-err" class="hint warn-text" style="margin-top:4px;display:none"></div>
+      </div>
       <div><label class="field-label" for="ai-lang">Response language</label>
-        <input id="ai-lang" type="text" list="ai-langs" value="${esc(ai.language)}"><datalist id="ai-langs">${LANGUAGES.map(l => `<option value="${l}">`).join('')}</datalist></div>
+        <select id="ai-lang">${langOptions}</select></div>
       <div></div>
     </div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
@@ -2187,8 +2199,11 @@ function aiEditorBody(k) {
   return body;
 }
 function aiPrefsBody() {
-  return { interests: $('#ai-interests')?.value ?? S.data.ai.interests, language: $('#ai-lang')?.value ?? S.data.ai.language,
-    auto_after_sync: $('#ai-auto')?.checked ?? S.data.ai.auto_after_sync };
+  const body = {};
+  if ($('#ai-interests')) body.interests = $('#ai-interests').value;
+  if ($('#ai-lang')) body.language = $('#ai-lang').value;
+  if ($('#ai-auto')) body.auto_after_sync = $('#ai-auto').checked;
+  return body;
 }
 function aiRoutesBody() {
   const tasks = {};
@@ -2632,7 +2647,39 @@ document.addEventListener('click', async e => {
       break;
     case 'ai-edit': S.ai.provider = S.ai.provider === el.dataset.p ? null : el.dataset.p; S.ai.key = ''; refresh(); break;
     case 'ai-save': try { await saveAi(aiEditorBody(el.dataset.p)); refresh(); renderBar(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
-    case 'ai-save-prefs': try { await saveAi(aiPrefsBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
+    case 'ai-save-prefs': {
+      const interestsEl = $('#ai-interests');
+      if (interestsEl) {
+        const val = interestsEl.value;
+        const trimmed = val.trim();
+        const errEl = $('#ai-interests-err');
+        let errMsg = '';
+        if (val.length > 2000) {
+          errMsg = 'Interests must be 2,000 characters or fewer';
+        } else if (trimmed && trimmed.split(/\s+/).filter(Boolean).length < 3) {
+          errMsg = 'Describe your interests in at least 3 words, or leave blank';
+        }
+        if (errMsg) {
+          if (errEl) { errEl.textContent = errMsg; errEl.style.display = 'block'; }
+          toast(errMsg, true);
+          break;
+        }
+        if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+      }
+      try {
+        await saveAi(aiPrefsBody());
+        refresh();
+        toast('Saved');
+      } catch (err) {
+        const errEl = $('#ai-interests-err');
+        if (errEl && err.message.toLowerCase().includes('interests')) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+        }
+        toast(err.message, true);
+      }
+      break;
+    }
     case 'formula-save': {
       const values = Object.fromEntries($$('[data-formula]').map(input => [input.dataset.formula, +input.value]));
       values.depth /= 100; values.value /= 100; values.freshness /= 100;
@@ -2794,6 +2841,19 @@ document.addEventListener('input', e => {
   if (el.dataset.formula) {
     const f = ratingFormula(Object.fromEntries($$('[data-formula]').map(input => [input.dataset.formula, +input.value / (['depth','value','freshness'].includes(input.dataset.formula) ? 100 : 1)])));
     const example = $('#formula-example'); if (example) example.textContent = `Example: ${formulaExample(f)}`;
+    return;
+  }
+  if (el.id === 'ai-interests') {
+    const cnt = $('#ai-interests-count');
+    if (cnt) {
+      cnt.textContent = `${el.value.length} / 2000`;
+      cnt.classList.toggle('warn-text', el.value.length > 2000);
+    }
+    const errEl = $('#ai-interests-err');
+    if (errEl && errEl.style.display !== 'none') {
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
     return;
   }
   if (el.id === 'sq') {

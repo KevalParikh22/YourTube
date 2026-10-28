@@ -75,6 +75,44 @@ class DashboardTest(unittest.TestCase):
         self.call("/api/ai/settings", {"provider": "none", "tasks": {"rate": None}, "edit": "anthropic",
                                        "config": {"api_key": "__clear__"}, "language": "English", "interests": ""})
 
+    def test_about_you_validation_and_language(self):
+        # Invalid language -> 400
+        code, r = self.call("/api/ai/settings", {"language": "Klingon"})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Choose a supported language")
+
+        # Empty language -> 400
+        code, r = self.call("/api/ai/settings", {"language": ""})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Choose a supported language")
+
+        # A valid language saves
+        code, r = self.call("/api/ai/settings", {"language": "Spanish"})
+        self.assertEqual(code, 200)
+        self.assertEqual(r["ai"]["language"], "Spanish")
+        self.assertEqual(llm.load_settings()["language"], "Spanish")
+        self.assertEqual(r["ai"]["languages"], llm.LANGUAGES)
+
+        # An older free-text language can be re-sent unchanged, but not switched to
+        s = llm.load_settings(); s["language"] = "Hinglish"; llm.save_settings(s)
+        self.assertEqual(self.call("/api/ai/settings", {"language": "Hinglish"})[0], 200)
+        self.assertEqual(self.call("/api/ai/settings", {"language": "English"})[0], 200)
+        self.assertEqual(self.call("/api/ai/settings", {"language": "Hinglish"})[0], 400)
+
+        # Interests length over 2,000 characters -> 400
+        code, r = self.call("/api/ai/settings", {"interests": "a" * 2001})
+        self.assertEqual(code, 400)
+        self.assertIn("2,000", r.get("error", ""))
+
+        # Interests length up to 2,000 characters -> 200
+        long_interests = "word " * 400  # 2000 chars exactly
+        code, r = self.call("/api/ai/settings", {"interests": long_interests})
+        self.assertEqual(code, 200)
+        self.assertEqual(r["ai"]["interests"], long_interests.strip())
+
+        # Cleanup: reset language and interests back to default
+        self.call("/api/ai/settings", {"language": "English", "interests": ""})
+
     def test_ai_requires_provider(self):
         self.call("/api/ai/settings", {"provider": "none"})
         code, r = self.call("/api/ai/suggest", {"scope": "unsorted"})

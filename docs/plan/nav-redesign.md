@@ -102,7 +102,7 @@
 
 ### T4: About you validation and language dropdown
 - **worker:** agy
-- **status:** todo
+- **status:** done
 - **depends on:** T3
 - **files:** `llm.py`, `dashboard.py`, `web/index.html`, `tests/test_dashboard.py`
 - **steps:** Design notes D.

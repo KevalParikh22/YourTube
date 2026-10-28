@@ -864,10 +864,19 @@ class Handler(BaseHTTPRequestHandler):
                                               if k in custom} if custom else {}
             if body.get("visual_height") in (480, 720):
                 settings["visual_height"] = body["visual_height"]
-            if isinstance(body.get("interests"), str):
-                llm.set_library_settings(settings, lib or 1, interests=body["interests"].strip()[:2000])
-            if isinstance(body.get("language"), str) and body["language"].strip():
-                settings["language"] = body["language"].strip()[:40]
+            if "interests" in body:
+                interests = body["interests"]
+                if not isinstance(interests, str):
+                    return self._error("Interests must be text")
+                if len(interests) > 2000:
+                    return self._error("Interests must be 2,000 characters or fewer")
+                llm.set_library_settings(settings, lib or 1, interests=interests.strip())
+            if "language" in body:
+                lang = body["language"]
+                # an older free-text language may be re-sent unchanged
+                if not isinstance(lang, str) or (lang not in llm.LANGUAGES and lang != settings["language"]):
+                    return self._error("Choose a supported language")
+                settings["language"] = lang
             llm.save_settings(settings)
             return self._json({"ok": True, "ai": llm.public_settings(settings, lib or 1)})
 
