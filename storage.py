@@ -12,6 +12,7 @@ Manual category assignments are protected by `videos.category_locked` and surviv
 import sqlite3
 import os
 import json
+import functools
 from typing import List, Dict, Any, Optional, Callable, Iterable
 
 DB_PATH = os.environ.get("YTKB_DB") or os.path.join(os.path.dirname(__file__), "yt_kb.db")
@@ -1127,6 +1128,7 @@ def _script_share(text: str) -> float:
     latin = sum(1 for c in letters if "LATIN" in unicodedata.name(c, ""))
     return latin / len(letters)
 
+@functools.lru_cache(maxsize=8192)   # pure function of its text; get_library calls it for every video on every load
 def captions_look_wrong(caption_text: str, title: str, description: str = "", caption_kind: str = "") -> bool:
     """
     Auto-captions in a non-Latin script for a video whose title and description are in Latin script:
