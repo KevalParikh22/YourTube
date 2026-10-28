@@ -14,7 +14,7 @@ Read this first in every new session, whatever the tool. The orchestrator keeps 
 - Manual tests §1 (library at real size) passed on 2026-10-24.
 
 ## In progress
-- Planned: sidebar navigation + settings gear, floating Ask panel, inline protected Add category (T1-T4).
+- Planned (not started): top-bar nav with Search/Settings/Help icons, floating Ask pop-up, Settings sidebar sections + separate Help page, About-you validation + language dropdown, keyboard shortcuts, inline protected Add category (T1-T7).
 
 ## Next up
 - User: manual test sessions (S7 first), list of UI/layout issues, pick the next feature, decide on write-back.
