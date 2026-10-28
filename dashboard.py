@@ -11,7 +11,10 @@ import re
 import sys
 import json
 import argparse
+import hmac
+import secrets
 import threading
+from http.cookies import SimpleCookie
 import webbrowser
 import contextlib
 from datetime import datetime
@@ -35,6 +38,27 @@ FRAMES_DIR = os.path.join(ROOT_DIR, "frames")
 _FRAME_PATH = re.compile(r"^/frames/([\w-]{1,32})/(\d{1,6})\.jpg$")   # only frames/<video id>/<second>.jpg
 ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
+
+# Access token (always on, decided 2026-10-28): protects the dashboard from other users of a shared computer.
+# main() sets TOKEN; None turns the check off (tests that build a server directly).
+TOKEN = None
+TOKEN_COOKIE = "ytkb_token"
+TOKEN_HELP = ("<!doctype html><meta charset=utf-8><title>YourTube</title><body style='font:15px system-ui;margin:48px;max-width:560px'>"
+              "<h1 style='font-size:20px'>Open your dashboard link</h1><p>For your privacy, this dashboard opens only with its access link. "
+              "Use the link printed in the terminal where you started it, or run:</p>"
+              "<pre style='background:#eee;padding:10px'>.venv/bin/python dashboard.py --print-url</pre>"
+              "<p>After that, this browser remembers it.</p></body>")
+
+def load_token():
+    """The dashboard's access token, created on first use and kept in settings.json (readable only by you)."""
+    settings = llm.load_settings()
+    if not settings.get("dashboard_token"):
+        settings["dashboard_token"] = secrets.token_urlsafe(24)
+        llm.save_settings(settings)
+    return settings["dashboard_token"]
+
+def _same(a, b):
+    return hmac.compare_digest(str(a).encode("utf-8"), str(b).encode("utf-8"))
 
 class Job:
     """
@@ -275,6 +299,12 @@ class Handler(BaseHTTPRequestHandler):
         pass  # keep the console quiet; errors are returned to the UI
 
     # --- helpers -------------------------------------------------------------
+    def _token_ok(self):
+        if TOKEN is None:
+            return True
+        morsel = SimpleCookie(self.headers.get("Cookie") or "").get(TOKEN_COOKIE)
+        return morsel is not None and _same(morsel.value, TOKEN)
+
     def _host_ok(self):
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
         return host in ALLOWED_HOSTS
@@ -323,6 +353,17 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         qs = parse_qs(url.query)
         playlist = (qs.get("playlist") or ["all"])[0]
+
+        if TOKEN is not None and url.path in ("/", "/index.html") and "t" in qs:
+            if not _same(qs["t"][0], TOKEN):
+                return self._send(200, TOKEN_HELP, "text/html; charset=utf-8")
+            # Swap the link's token for a cookie, then drop it from the address bar
+            cookie = f"{TOKEN_COOKIE}={TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000"
+            return self._send(303, b"", "text/plain", extra_headers={"Location": "/", "Set-Cookie": cookie})
+        if not self._token_ok():
+            if url.path in ("/", "/index.html"):
+                return self._send(200, TOKEN_HELP, "text/html; charset=utf-8")
+            return self._error("Open the dashboard link with its access token", 401)
 
         if url.path in ("/", "/index.html"):
             with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
@@ -459,6 +500,8 @@ class Handler(BaseHTTPRequestHandler):
         # so other websites open in the browser cannot drive this API.
         if not self._host_ok() or self.headers.get("X-YTKB") != "1":
             return self._error("Forbidden", 403)
+        if not self._token_ok():
+            return self._error("Open the dashboard link with its access token", 401)
         if "application/json" not in (self.headers.get("Content-Type") or ""):
             return self._error("Expected JSON", 415)
         try:
@@ -923,12 +966,18 @@ def main():
     parser = argparse.ArgumentParser(description="YourTube local dashboard")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-open", action="store_true", help="Do not open the dashboard in a browser")
+    parser.add_argument("--print-url", action="store_true", help="Print the dashboard link (with its access token) and exit")
     args = parser.parse_args()
 
+    global TOKEN
+    TOKEN = load_token()
+    url = f"http://127.0.0.1:{args.port}/?t={TOKEN}"
+    if args.print_url:
+        print(url)
+        return
     storage.init_db()
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    url = f"http://127.0.0.1:{args.port}/"
-    print(f"YourTube dashboard running at {url}  (Ctrl+C to stop)")
+    print(f"YourTube dashboard running. Open: {url}  (Ctrl+C to stop)")
     if not args.no_open:
         webbrowser.open(url)
     try:

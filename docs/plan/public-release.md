@@ -63,7 +63,7 @@
 
 ### T3: Dashboard access token
 - **worker:** claude
-- **status:** todo
+- **status:** done
 - **files:** `dashboard.py`, `llm.py` (keep the token out of public settings), `tests/test_dashboard.py`, `docs/SETUP.md`
 - **acceptance:** [ ] Design notes T3 behaviour; [ ] tests listed there; [ ] the real dashboard works after following the printed link.
 - **verify:** `.venv/bin/python -m unittest`

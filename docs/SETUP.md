@@ -35,7 +35,7 @@ powershell -ExecutionPolicy Bypass -File scripts\setup.ps1            # the app 
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -LocalAI   # the app plus local AI
 ```
 
-Then start the dashboard and open http://127.0.0.1:8765:
+Then start the dashboard. It opens in your browser through its **access link** (`http://127.0.0.1:8765/?t=…`, also printed in the terminal). The link carries a private token, so other people using the same computer can't open your dashboard. After the first visit your browser remembers it, and plain http://127.0.0.1:8765 works.
 
 ```bash
 .venv/bin/python dashboard.py              # Windows: .venv\Scripts\python.exe dashboard.py
@@ -245,6 +245,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `providers.<name>.api_key` | `""` | API key (or use the environment variable) |
 | `providers.ollama.num_ctx` | `8192` | Ollama context size in tokens |
 | `tasks.categorize`, `tasks.rate`, `tasks.summarize`, `tasks.ask` | unset | Provider for that job; unset means the default (`summarize` and `ask` follow `rate`) |
+| `dashboard_token` | created on first start | The dashboard's access token. Delete it to make a new one (old links stop working) |
 | `show_descriptions` | `false` | Show video descriptions open in the video panel (they are collapsed by default) |
 | `local_only` | `false` | Block every cloud AI |
 | `visuals.<category>` | off | Read slides for videos in this category |
@@ -274,7 +275,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 ### Command-line reference
 
 ```text
-dashboard.py   [--port 8765] [--no-open]
+dashboard.py   [--port 8765] [--no-open] [--print-url]   # --print-url: show the access link and exit
 main.py        [URL|ID|WL] [--browser auto|firefox|chrome|chromium|brave|edge] [--cookies FILE]
                [--ai] [--list] [--details [N]]
 local_setup.py [--pull MODEL] [--use MODEL] [--recommended] [--embed-model] [--use-embed MODEL]
@@ -309,6 +310,7 @@ Your database is upgraded automatically when the dashboard starts. Back up `yt_k
 | Local transcription very slow | It runs on the CPU: check Settings → AI's GPU line; with an NVIDIA GPU, reinstall `requirements-local.txt` for the CUDA libraries. |
 | Answers say "keywords only" | The meaning index is off: download the embedding model (`ollama pull qwen3-embedding:0.6b`), then run `.venv/bin/python main.py --embed`. |
 | An answer misses something you know is in a video | Fetch details (or transcribe) for that video first. Try other words: the small local model links meanings well but not always (it misses "offline" for "running locally"). |
+| The dashboard says "Open your dashboard link" | Open the link printed when it started, or get it with `.venv/bin/python dashboard.py --print-url`. Each browser needs the link once. |
 | Dashboard won't start: port in use | `.venv/bin/python dashboard.py --port 8770` |
 | Windows script blocked | Run it with `powershell -ExecutionPolicy Bypass -File scripts\setup.ps1` |
 

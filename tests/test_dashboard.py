@@ -240,3 +240,58 @@ class AddVideoTest(unittest.TestCase):
         self.assertEqual([s["id"] for s in v["sources"]], ["_single"])
         with mock.patch("extractor.extract_video", side_effect=ValueError("private")):
             self.assertFalse(dashboard._add_video("zzzzzzzzzzz"))
+
+
+class AccessTokenTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), dashboard.Handler)
+        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        self.addCleanup(setattr, dashboard, "TOKEN", None)
+        dashboard.TOKEN = "s3cret-token"
+
+    def get(self, path, cookie=None):
+        import http.client
+        conn = http.client.HTTPConnection(self.base.split("//")[1])
+        conn.request("GET", path, headers={"Cookie": cookie} if cookie else {})
+        r = conn.getresponse()
+        body = r.read()
+        conn.close()
+        return r.status, r.getheader("Set-Cookie"), r.getheader("Location"), body
+
+    def test_token_link_cookie_and_refusals(self):
+        status, _, _, body = self.get("/api/state")
+        self.assertEqual(status, 401)
+        status, cookie, _, body = self.get("/")
+        self.assertEqual((status, cookie), (200, None))
+        self.assertIn(b"--print-url", body)                                     # help page, not the app
+        self.assertIsNone(self.get("/?t=wrong")[1])                              # a wrong token sets nothing
+        status, cookie, location, _ = self.get("/?t=s3cret-token")
+        self.assertEqual((status, location), (303, "/"))
+        self.assertIn("ytkb_token=s3cret-token", cookie)
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        status, _, _, body = self.get("/api/state", cookie="ytkb_token=s3cret-token")
+        self.assertEqual(status, 200)
+        self.assertNotIn(b"s3cret-token", body)                                  # never sent back to the page
+        self.assertEqual(self.get("/api/state", cookie="ytkb_token=nope")[0], 401)
+        req = urllib.request.Request(self.base + "/api/reclassify", data=b"{}", method="POST",
+                                     headers={"X-YTKB": "1", "Content-Type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            urllib.request.urlopen(req)
+        self.assertEqual(e.exception.code, 401)
+        e.exception.close()
+
+    def test_token_created_once_and_kept_out_of_public_settings(self):
+        first = dashboard.load_token()
+        self.assertEqual(dashboard.load_token(), first)
+        self.assertGreaterEqual(len(first), 30)
+        self.assertNotIn(first, json.dumps(llm.public_settings(llm.load_settings())))
