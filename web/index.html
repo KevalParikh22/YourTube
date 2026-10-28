@@ -63,7 +63,7 @@
   }
   .bar-in { max-width: 1160px; margin: 0 auto; padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 28px; }
   .logo { font-size: 17px; font-weight: 700; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
-  .tabs { display: flex; gap: 22px; height: 100%; }
+  .tabs { display: flex; gap: 22px; height: 100%; min-width: 0; }
   .tabs a {
     display: flex; align-items: center; height: 100%; text-decoration: none; color: var(--ink-3); font-weight: 500;
     border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
@@ -71,6 +71,9 @@
   .tabs a:hover { color: var(--ink); }
   .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); }
   .bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .bar-icon { width: 36px; height: 36px; flex: 0 0 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+  .bar-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .bar-icon.on { color: var(--ink); background: var(--sunken); }
 
   /* ---------- controls ---------- */
   select, input[type="text"], input[type="search"], input[type="number"], input[type="password"], textarea {
@@ -447,9 +450,9 @@
   @media (max-width: 760px) {
     .s-row { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
     .hit { grid-template-columns: minmax(0, 1fr); gap: 0; }
-    .bar-in { padding: 0 16px; gap: 14px; }
+    .bar-in { padding: 0 16px; gap: 8px; }
     .logo { display: none; }
-    .tabs { gap: 14px; overflow-x: auto; scrollbar-width: none; }
+    .tabs { flex: 1 1 auto; gap: 14px; overflow-x: auto; scrollbar-width: none; }
     .tabs a { font-size: 13.5px; }
   }
   @media (max-width: 900px) {
@@ -475,9 +478,10 @@
     .form-grid { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 640px) {
-    .bar-in { padding: 0 16px; gap: 16px; }
+    .bar-in { padding: 0 16px; gap: 8px; }
     .logo { display: none; }
-    .tabs { gap: 16px; overflow-x: auto; }
+    .tabs { flex: 1 1 auto; gap: 16px; overflow-x: auto; scrollbar-width: none; }
+    .bar-right { gap: 2px; }
     .page { padding: 28px 16px 72px; }
     .display { font-size: 32px; }
     .display em { display: block; margin: 4px 0 0; font-size: 18px; }
@@ -494,8 +498,10 @@
     <span id="libpick"></span>
     <nav class="tabs" id="tabs"></nav>
     <div class="bar-right">
-      <a class="btn icon-btn" id="gsearch-btn" href="#/search" aria-label="Search" title="Search (/)">⌕</a>
       <span id="jobs"></span>
+      <a class="btn icon-btn bar-icon" id="gsearch-btn" href="#/search" aria-label="Search (/)" title="Search  /"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5"></circle><path d="m16 16 4.2 4.2"></path></svg></a>
+      <a class="btn icon-btn bar-icon" id="settings-btn" href="#/settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path><path d="M19 12a7 7 0 0 1-.2 1.6l1.2.9-1.1 1.9-1.4-.5a7.8 7.8 0 0 1-1.4.8l-.2 1.5h-2.2l-.3-1.5a7.8 7.8 0 0 1-1.6 0L11 18l-2-1.1.5-1.4a7.8 7.8 0 0 1-1-1.3L7 14.3l-.5-2.1 1.4-.7a7.8 7.8 0 0 1 .1-1.6l-1.2-.9 1.1-1.9 1.4.5a7.8 7.8 0 0 1 1.4-.8l.2-1.5h2.2l.3 1.5a7.8 7.8 0 0 1 1.6 0l.8-1.3 2 1.1-.5 1.4a7.8 7.8 0 0 1 1 1.3l1.5-.1.5 2.1-1.4.7"></path></svg></a>
+      <a class="btn icon-btn bar-icon" id="help-btn" href="#/help" aria-label="Help" title="Help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.6 9a2.5 2.5 0 1 1 4.6 1.3c-.8 1.1-2.2 1.4-2.2 3"></path><path d="M12 17h.01"></path></svg></a>
     </div>
   </div>
 </header>
@@ -510,7 +516,7 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['', 'Library'], ['ask', 'Ask'], ['knowledge', 'Knowledge'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['settings', 'Settings']];
+const TABS = [['', 'Library'], ['knowledge', 'Knowledge'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories']];
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
 const JOB_TEXT = {
@@ -686,7 +692,10 @@ function renderBar() {
   $('#libpick').innerHTML = S.data.libraries.length > 1 || S.lib !== 1
     ? `<select data-change="lib" aria-label="Library" class="libsel">${S.data.libraries.map(l => `<option value="${l.id}" ${S.lib === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         <option value="0" ${S.lib === 0 ? 'selected' : ''}>All libraries</option></select>` : '';
-  $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('');
+  $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}"${tab === k ? ' aria-current="page"' : ''}>${l}</a>`).join('');
+  $('#gsearch-btn').classList.toggle('on', r === 'search');
+  $('#settings-btn').classList.toggle('on', tab === 'settings');
+  $('#help-btn').classList.toggle('on', r === 'help');
 }
 function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
 function renderView() {

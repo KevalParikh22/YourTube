@@ -76,7 +76,7 @@
 
 ### T1: Top bar: main pages only; Search, Settings and Help icons
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **files:** `web/index.html`
 - **steps:** Design notes A.
 - **acceptance:** [ ] nav shows the six pages; [ ] icons in order, search larger, with labels; [ ] active states; [ ] no horizontal page scroll at 375 px.
