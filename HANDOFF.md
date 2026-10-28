@@ -3,10 +3,11 @@
 Read this first in every new session, whatever the tool. The orchestrator keeps it updated.
 
 **Last updated:** 2026-10-28 by claude
-**Branch:** feat/page-load
-**Active plan:** docs/plan/page-load.md (done, reviewed)
+**Branch:** master (feature branches are deleted once merged)
+**Active plan:** none (docs/plan/public-release.md done)
 
 ## Done
+- Public release readiness: MIT licence, disclaimer, SECURITY.md, per-OS notes, always-on dashboard access token, GitHub Actions CI (passing). The repo is still private; the user decides when to make it public.
 - page-load: old static report deleted (-364 lines); visual_hints phrase scan cached (library load 0.195 s -> 0.07 s); index_version now uses a change counter (meta table), fixing stale caches when transcript text is replaced with the same number of pieces.
 - Phase 3 (the brain): summaries on click, related moments, learn more, knowledge pages (feat/phase-3-brain, reviewed, not merged or pushed yet).
 - Phases 0, 1, 2, 2.5 and Libraries are complete (see CLAUDE.md, docs/PRD-*.md).
@@ -16,9 +17,8 @@ Read this first in every new session, whatever the tool. The orchestrator keeps 
 - Nothing.
 
 ## Next up
-- User: manual test session S7 (Phase 3), then S1-S6.
-- Merge feat/phase-3-brain into master and push, when the user agrees.
-- User's list of UI/layout issues -> a small plan.
+- User: manual test sessions (S7 first), list of UI/layout issues, pick the next feature, decide on write-back.
+- The dashboard needs its access link: `.venv/bin/python dashboard.py --print-url` (open it once per browser).
 
 ## Problems / blockers
 - None.
