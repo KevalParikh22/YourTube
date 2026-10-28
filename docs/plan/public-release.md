@@ -70,7 +70,7 @@
 
 ### T4: CI workflow
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **files:** `.github/workflows/tests.yml` (new), test files only if a skip is needed
 - **acceptance:** [ ] the workflow is valid YAML that runs the suite; [ ] it passes on GitHub after the push.
 - **verify:** `.venv/bin/python -m unittest`
