@@ -120,7 +120,7 @@
 
 ### T6: Inline Add category, protected by default
 - **worker:** agy
-- **status:** todo
+- **status:** done
 - **depends on:** T1
 - **files:** `web/index.html`
 - **steps:** Design notes F.

@@ -230,10 +230,11 @@
   .policy p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
 
   /* ---------- categories ---------- */
-  .cat-row { display: grid; grid-template-columns: 240px minmax(0, 1fr) 120px; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .cat-row { display: grid; grid-template-columns: 240px minmax(0, 1fr) 130px; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .cat-row input[type="text"] { width: 100%; font-weight: 500; }
+  .cat-row-add { background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; padding: 16px 14px; margin-bottom: 14px; }
   /* Keyword lists grow with their text instead of clipping it (field-sizing where supported, rows as fallback) */
-  textarea.kw, textarea.p-kw { field-sizing: content; min-height: 5.2em; max-height: 14em; line-height: 1.5; }
+  textarea.kw, textarea.p-kw, textarea.cat-add-kw { field-sizing: content; min-height: 5.2em; max-height: 14em; line-height: 1.5; }
   .cat-row .meta { font-size: 12.5px; color: var(--ink-3); margin-top: 6px; }
   .cat-row .meta a { color: var(--ink-2); }
   .cat-row > div:last-child { text-align: right; }
@@ -244,6 +245,7 @@
   .tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
   .tag.new { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   .cat-opts { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .cat-add-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; padding-top: 22px; }
   .prop-add { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; font-weight: 500; padding-top: 6px; }
   .prop-add input { margin: 0 !important; }
   .prop-changed { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start; }
@@ -493,6 +495,7 @@
     .policy { grid-template-columns: 1fr; gap: 16px; }
     .cat-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
     .cat-row > div:last-child { text-align: left; }
+    .cat-add-actions { justify-content: flex-start; padding-top: 4px; }
     .prop-row { grid-template-columns: 24px minmax(0, 1fr); }
     .prop-row > :last-child { grid-column: 2; }
     .ai-grid { grid-template-columns: minmax(0, 1fr); }
@@ -584,6 +587,7 @@ const S = {
   lib: Number.isInteger(+store.get('ytkb.lib')) && store.get('ytkb.lib') !== null ? +store.get('ytkb.lib') : 1,   // 0 = all libraries
   ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '', open: false, returnFocus: null },
   knowledge: { list: null, pages: {}, loadingList: false, loadingPage: null },
+  addingCat: false,
 };
 
 /* ---------------- helpers ---------------- */
@@ -1402,6 +1406,7 @@ function viewCategories() {
   ${ai.proposal ? viewProposal(ai.proposal, tax, counts) : ''}
   <section class="section">
     ${ai.proposal ? '<h2 class="h">Current categories</h2>' : ''}
+    ${S.addingCat ? viewAddCategoryRow() : ''}
     ${Object.keys(tax).map(n => `<div class="cat-row">
       <div><label class="field-label">Category name</label><input type="text" value="${esc(n)}" title="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
         <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div>
@@ -1420,6 +1425,24 @@ function viewCategories() {
       <div><button class="btn-text" data-act="adopt-cat" data-name="${esc(n)}">Add keywords</button><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
   </section>`;
+}
+function viewAddCategoryRow() {
+  return `
+  <div class="cat-row cat-row-add" id="cat-add-row">
+    <div>
+      <label class="field-label" for="new-cat-name">Category name</label>
+      <input type="text" id="new-cat-name" placeholder="Category name" aria-label="Category name" autofocus>
+      <div id="new-cat-err" class="hint warn-text" role="alert" style="margin-top:4px;display:none"></div>
+    </div>
+    <div>
+      <label class="field-label" for="new-cat-kw">Keywords</label>
+      <textarea id="new-cat-kw" class="cat-add-kw" rows="4" placeholder="Separate keywords with commas (optional)" aria-label="Keywords for new category"></textarea>
+    </div>
+    <div class="cat-add-actions">
+      <button class="btn btn-dark btn-sm" data-act="save-add-cat">Save</button>
+      <button class="btn-text" data-act="cancel-add-cat">Cancel</button>
+    </div>
+  </div>`;
 }
 function viewProposal(p, tax, counts) {
   const proposed = new Set(p.categories.map(c => c.name));
@@ -2222,6 +2245,46 @@ function collectTax() {
   return t;
 }
 async function saveTax(t) { S.data.taxonomy = (await api('/api/taxonomy', { taxonomy: t })).taxonomy; }
+async function saveNewCategory() {
+  const nameInput = $('#new-cat-name');
+  const name = (nameInput?.value || '').trim();
+  const errEl = $('#new-cat-err');
+  if (!name) {
+    if (errEl) { errEl.textContent = 'Category name is required'; errEl.style.display = 'block'; }
+    nameInput?.focus();
+    return;
+  }
+  const t = collectTax();
+  const lower = name.toLowerCase();
+  const existing = new Set([
+    ...Object.keys(t).map(k => k.toLowerCase()),
+    ...videos().map(v => (v.category || '').toLowerCase()),
+    (FALLBACK() || '').toLowerCase(),
+    'uncategorized'
+  ]);
+  if (existing.has(lower)) {
+    if (errEl) { errEl.textContent = 'That category already exists'; errEl.style.display = 'block'; }
+    nameInput?.focus();
+    return;
+  }
+  if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+  const kw = ($('#new-cat-kw')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+  t[name] = kw;
+  const saveBtn = $('[data-act="save-add-cat"]');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  try {
+    await saveTax(t);
+    const r = await api('/api/presets', { name, preset: true });
+    S.data.ai.presets = r.presets;
+    S.addingCat = false;
+    refresh();
+    toast(`Added "${name}"`);
+  } catch (err) {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+    if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+    toast(err.message, true);
+  }
+}
 
 /* ---------------- drawer ---------------- */
 function renderDrawer() {
@@ -2714,14 +2777,28 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'add-cat': {
-      const n = askName();
-      if (!n) break;
-      const t = collectTax();
-      if (n in t) { toast('That category already exists', true); break; }
-      t[n] = [];
-      try { await saveTax(t); refresh(); toast(`Added "${n}". Now give it some keywords.`); } catch (err) { toast(err.message, true); }
+      if (S.addingCat) {
+        const input = $('#new-cat-name');
+        input?.focus();
+        input?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        break;
+      }
+      if (S.data?.taxonomy) Object.assign(S.data.taxonomy, collectTax());
+      S.addingCat = true;
+      refresh();
+      const input = $('#new-cat-name');
+      input?.focus();
+      input?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       break;
     }
+    case 'save-add-cat':
+      await saveNewCategory();
+      break;
+    case 'cancel-add-cat':
+      S.addingCat = false;
+      refresh();
+      $('[data-act="add-cat"]')?.focus();
+      break;
     case 'adopt-cat': { const t = collectTax(); t[el.dataset.name] = []; try { await saveTax(t); refresh(); } catch (err) { toast(err.message, true); } break; }
     case 'reclassify':
       try { await saveTax(collectTax()); const r = await api('/api/reclassify', {}); await load(); toast(`Saved. ${plural(r.changed, 'video')} moved.`); } catch (err) { toast(err.message, true); }
@@ -2738,6 +2815,7 @@ document.addEventListener('change', async e => {
   const el = e.target, ch = el.dataset.change;
   if (ch === 'lib') {
     S.lib = +el.value; store.set('ytkb.lib', S.lib);
+    S.addingCat = false;
     Object.assign(S.view, { cat: '', src: '' }); S.sel.clear(); S.ask.video = null; S.search.res = null;
     S.knowledge.list = null; S.knowledge.pages = {};
     await load(); if (route() === 'search' && S.search.q) runSearch();
@@ -2856,6 +2934,14 @@ document.addEventListener('input', e => {
     }
     return;
   }
+  if (el.id === 'new-cat-name') {
+    const errEl = $('#new-cat-err');
+    if (errEl && errEl.style.display !== 'none') {
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
+    return;
+  }
   if (el.id === 'sq') {
     S.search.q = el.value; S.search.limit = 50; clearTimeout(sT);
     sT = setTimeout(() => { history.replaceState(null, '', `#/search?q=${encodeURIComponent(S.search.q)}`); runSearch(); }, 250);
@@ -2871,6 +2957,9 @@ document.addEventListener('input', e => {
 document.addEventListener('focusout', e => { if (e.target.id === 'd-notes') saveNotes(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && S.ask.open && route() !== 'ask') { S.ask.open = false; renderAskPop(); (S.ask.returnFocus || $('#ask-fab'))?.focus(); return; }
+  if (e.key === 'Escape' && S.addingCat && route() === 'categories') {
+    e.preventDefault(); S.addingCat = false; refresh(); $('[data-act="add-cat"]')?.focus(); return;
+  }
   if (!e.ctrlKey && !e.metaKey && !e.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName) && e.key.toLowerCase() === 'a' && route() !== 'ask') {
     e.preventDefault(); S.ask.returnFocus = $('#ask-fab'); S.ask.open = true; renderAskPop(); $('#aq')?.focus({ preventScroll: true }); return;
   }
@@ -2880,8 +2969,11 @@ document.addEventListener('keydown', e => {
   if (S.drawer && (e.key === 'j' || e.key === 'k')) $(`[data-act="step"][data-dir="${e.key === 'j' ? 1 : -1}"]`)?.click();
 
 });
-document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); } });
-addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); }
+  if (e.key === 'Enter' && e.target.id === 'new-cat-name' && !e.isComposing) { e.preventDefault(); saveNewCategory(); }
+});
+addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); S.addingCat = false; renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
 
 applyTheme();
 load();
