@@ -82,6 +82,48 @@ class VisualStorageTest(unittest.TestCase):
         self.assertNotIn("m", hints)        # the user already decided
         self.assertNotIn("gone", hints)     # unavailable
 
+    def test_hint_phrase_scan_is_cached_until_transcript_changes(self):
+        original_get_connection = storage.get_connection
+        scans = []
+
+        class ConnectionSpy:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def __enter__(self):
+                self.conn.__enter__()
+                return self
+
+            def __exit__(self, *args):
+                return self.conn.__exit__(*args)
+
+            def __getattr__(self, name):
+                return getattr(self.conn, name)
+
+            def execute(self, sql, *args):
+                if "transcript_segments" in sql and "LIKE" in sql:
+                    scans.append(sql)
+                return self.conn.execute(sql, *args)
+
+        def get_connection_spy(db_path=storage.DB_PATH):
+            return ConnectionSpy(original_get_connection(db_path))
+
+        with mock.patch.object(storage, "get_connection", side_effect=get_connection_spy):
+            self.assertNotIn("c", storage.visual_hints(db_path=self.db))
+            self.assertNotIn("c", storage.visual_hints(db_path=self.db))
+            self.assertEqual(len(scans), 1)
+
+        storage.save_details("c", {"status": "done", "segments": [
+            {"start": 0, "text": "this slide is important"},
+            {"start": 9, "text": "this slide shows the result"},
+        ]}, db_path=self.db)
+        self.assertIn("refers to the screen 2 times", storage.visual_hints(db_path=self.db)["c"])
+
+        storage.set_has_visuals(["c"], True, db_path=self.db)
+        self.assertNotIn("c", storage.visual_hints(db_path=self.db))
+        storage.set_has_visuals(["c"], None, db_path=self.db)
+        self.assertIn("c", storage.visual_hints(db_path=self.db))
+
 
 class RunVisualTest(unittest.TestCase):
     def setUp(self):

@@ -31,7 +31,7 @@ Measured on 2026-10-28 (313 videos): `/api/state` 0.195 s, of which `storage.vis
 
 ### T2: Cache the transcript phrase scan in visual_hints
 - **worker:** codex
-- **status:** todo
+- **status:** done (build_state 0.195 s → 0.07 s)
 - **files:** `storage.py`, `tests/test_visual.py`
 - **steps:** Design notes T2.
 - **acceptance:** [ ] the second call doesn't run the scan; [ ] new transcript text and `has_visuals` changes still take effect; [ ] `/api/state` takes less time than before (measure it).

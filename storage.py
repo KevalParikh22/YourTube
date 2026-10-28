@@ -13,6 +13,7 @@ import sqlite3
 import os
 import json
 import functools
+import threading
 from typing import List, Dict, Any, Optional, Callable, Iterable
 
 DB_PATH = os.environ.get("YTKB_DB") or os.path.join(os.path.dirname(__file__), "yt_kb.db")
@@ -1213,16 +1214,24 @@ _VISUAL_TITLE = _re.compile(r"\b(lecture|slides?|presentation|whiteboard|walk-?t
                             r"system design|course|crash course|explained|deep dive|tutorial|live coding|step by step)\b", _re.I)
 _VISUAL_PHRASES = ("this slide", "next slide", "as you can see", "on the screen", "on my screen", "on the whiteboard",
                    "this diagram", "let me draw", "if you look at")
+_visual_phrase_cache_lock = threading.Lock()
+_visual_phrase_cache: Dict[str, Any] = {"key": None, "phrases": {}}
 
 def visual_hints(db_path: str = DB_PATH) -> Dict[str, str]:
     """Why a video probably has slides/whiteboard/code worth reading: {video_id: reason}. Only a suggestion."""
     init_db(db_path)
     out: Dict[str, str] = {}
+    cache_key = (db_path, index_version(db_path))
+    with _visual_phrase_cache_lock:
+        if _visual_phrase_cache["key"] != cache_key:
+            with get_connection(db_path) as conn:
+                like = " OR ".join("lower(text) LIKE ?" for _ in _VISUAL_PHRASES)
+                phrases = dict(conn.execute(
+                    f"SELECT video_id, COUNT(*) FROM transcript_segments WHERE {like} GROUP BY video_id",
+                    [f"%{p}%" for p in _VISUAL_PHRASES]).fetchall())
+            _visual_phrase_cache.update(key=cache_key, phrases=phrases)
+        phrases = _visual_phrase_cache["phrases"]
     with get_connection(db_path) as conn:
-        like = " OR ".join("lower(text) LIKE ?" for _ in _VISUAL_PHRASES)
-        phrases = dict(conn.execute(
-            f"SELECT video_id, COUNT(*) FROM transcript_segments WHERE {like} GROUP BY video_id",
-            [f"%{p}%" for p in _VISUAL_PHRASES]).fetchall())
         for vid, title, has, status in conn.execute(
                 "SELECT v.video_id, v.title, v.has_visuals, d.status FROM videos v "
                 "LEFT JOIN video_details d ON d.video_id = v.video_id"):
