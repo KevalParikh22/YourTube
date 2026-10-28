@@ -746,8 +746,9 @@ function renderBar() {
   $('#gsearch-btn').classList.toggle('on', r === 'search');
   $('#settings-btn').classList.toggle('on', tab === 'settings');
   $('#help-btn').classList.toggle('on', r === 'help');
-  $('#settings-btn').toggleAttribute('aria-current', tab === 'settings');
-  $('#help-btn').toggleAttribute('aria-current', r === 'help');
+  for (const [btn, on] of [['#settings-btn', tab === 'settings'], ['#help-btn', r === 'help']]) {
+    if (on) $(btn).setAttribute('aria-current', 'page'); else $(btn).removeAttribute('aria-current');
+  }
 }
 function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
 function renderView() {
@@ -2292,14 +2293,17 @@ async function saveNewCategory() {
   t[name] = kw;
   const saveBtn = $('[data-act="save-add-cat"]');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  let saved = false;
   try {
-    await saveTax(t);
+    await saveTax(t); saved = true;
     const r = await api('/api/presets', { name, preset: true });
     S.data.ai.presets = r.presets;
     S.addingCat = false;
     refresh();
     toast(`Added "${name}"`);
   } catch (err) {
+    // undo the half-done add so Save can be retried without the duplicate check blocking it
+    if (saved) { delete t[name]; try { await saveTax(t); } catch {} }
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
     if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
     toast(err.message, true);
