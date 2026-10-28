@@ -46,7 +46,7 @@ TOKEN_COOKIE = "ytkb_token"
 TOKEN_HELP = ("<!doctype html><meta charset=utf-8><title>YourTube</title><body style='font:15px system-ui;margin:48px;max-width:560px'>"
               "<h1 style='font-size:20px'>Open your dashboard link</h1><p>For your privacy, this dashboard opens only with its access link. "
               "Use the link printed in the terminal where you started it, or run:</p>"
-              "<pre style='background:#eee;padding:10px'>.venv/bin/python dashboard.py --print-url</pre>"
+              "<pre style='background:#eee;padding:10px'>.venv/bin/python dashboard.py --print-url{port}</pre>"
               "<p>After that, this browser remembers it.</p></body>")
 
 def load_token():
@@ -299,6 +299,10 @@ class Handler(BaseHTTPRequestHandler):
         pass  # keep the console quiet; errors are returned to the UI
 
     # --- helpers -------------------------------------------------------------
+    def _token_help(self):
+        port = self.server.server_address[1]
+        return TOKEN_HELP.replace("{port}", "" if port == 8765 else f" --port {port}")   # the link must name this server's port
+
     def _token_ok(self):
         if TOKEN is None:
             return True
@@ -356,13 +360,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if TOKEN is not None and url.path in ("/", "/index.html") and "t" in qs:
             if not _same(qs["t"][0], TOKEN):
-                return self._send(200, TOKEN_HELP, "text/html; charset=utf-8")
+                return self._send(200, self._token_help(), "text/html; charset=utf-8")
             # Swap the link's token for a cookie, then drop it from the address bar
             cookie = f"{TOKEN_COOKIE}={TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000"
             return self._send(303, b"", "text/plain", extra_headers={"Location": "/", "Set-Cookie": cookie})
         if not self._token_ok():
             if url.path in ("/", "/index.html"):
-                return self._send(200, TOKEN_HELP, "text/html; charset=utf-8")
+                return self._send(200, self._token_help(), "text/html; charset=utf-8")
             return self._error("Open the dashboard link with its access token", 401)
 
         if url.path in ("/", "/index.html"):

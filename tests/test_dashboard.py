@@ -272,7 +272,7 @@ class AccessTokenTest(unittest.TestCase):
         self.assertEqual(status, 401)
         status, cookie, _, body = self.get("/")
         self.assertEqual((status, cookie), (200, None))
-        self.assertIn(b"--print-url", body)                                     # help page, not the app
+        self.assertIn(b"--print-url --port", body)                              # help page naming this (non-default) port
         self.assertIsNone(self.get("/?t=wrong")[1])                              # a wrong token sets nothing
         status, cookie, location, _ = self.get("/?t=s3cret-token")
         self.assertEqual((status, location), (303, "/"))
