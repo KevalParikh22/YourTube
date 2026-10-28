@@ -886,6 +886,7 @@ def _create_search_tables(cursor: sqlite3.Cursor) -> bool:
     cursor.executescript("""
         CREATE TABLE IF NOT EXISTS search_docs (
             id INTEGER PRIMARY KEY, video_id TEXT NOT NULL, kind TEXT NOT NULL, t REAL, text TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER NOT NULL DEFAULT 0);
         CREATE INDEX IF NOT EXISTS idx_search_docs_video ON search_docs(video_id, kind);
         CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
             text, content='search_docs', content_rowid='id', tokenize='trigram');
@@ -969,6 +970,8 @@ def _summary_rows(cursor: sqlite3.Cursor, video_id: str, rows: List[tuple]) -> L
 def _reindex(cursor: sqlite3.Cursor, video_ids: Iterable[str], kinds: Iterable[str] = SEARCH_KINDS) -> None:
     kinds = tuple(kinds)
     marks = ",".join("?" * len(kinds))
+    # Row ids are reused after deletes, so counts and max id can't tell that text changed; this counter can
+    cursor.execute("INSERT INTO meta (key, value) VALUES ('index', 1) ON CONFLICT(key) DO UPDATE SET value = value + 1")
     for vid in video_ids:
         cursor.execute(f"DELETE FROM search_docs WHERE video_id = ? AND kind IN ({marks})", (vid, *kinds))
         for kind in kinds:
@@ -1367,7 +1370,7 @@ def embedded_docs(model: str, db_path: str = DB_PATH) -> tuple:
 def index_version(db_path: str = DB_PATH) -> tuple:
     """Changes whenever search pieces or vectors change; used to refresh in-memory caches."""
     with get_connection(db_path) as conn:
-        return conn.execute("SELECT (SELECT COUNT(*) FROM search_docs), (SELECT MAX(id) FROM search_docs), "
+        return conn.execute("SELECT (SELECT value FROM meta WHERE key = 'index'), (SELECT COUNT(*) FROM search_docs), "
                             "(SELECT COUNT(*) FROM embedding_cache)").fetchone()[:]
 
 

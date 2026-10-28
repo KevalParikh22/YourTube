@@ -270,3 +270,15 @@ class SingleVideoTest(unittest.TestCase):
         self.assertTrue(lib["s1"]["in_source"] and lib["s2"]["in_source"])
         pl = next(p for p in storage.get_playlists(db_path=db) if p["id"] == "_single")
         self.assertEqual((pl["active_videos"], pl["duration_seconds"], pl["removed_videos"]), (2, 150, 0))
+
+
+class IndexVersionTest(unittest.TestCase):
+    def test_changes_when_text_is_replaced_with_the_same_number_of_pieces(self):
+        db = temp_db()
+        storage.save_playlist(playlist(), [video("iv", "Plain talk")], db_path=db)
+        storage.save_details("iv", {"status": "done", "segments": [{"start": 0, "text": "this slide shows"}, {"start": 40, "text": "this slide again"}]}, db_path=db)
+        before = storage.index_version(db)
+        self.assertIn("iv", storage.visual_hints(db_path=db))
+        storage.save_details("iv", {"status": "done", "segments": [{"start": 0, "text": "plain talk"}, {"start": 40, "text": "more plain talk"}]}, db_path=db)
+        self.assertNotEqual(storage.index_version(db), before)            # row ids were reused; the counter still moved
+        self.assertNotIn("iv", storage.visual_hints(db_path=db))          # so the cached phrase scan was refreshed
