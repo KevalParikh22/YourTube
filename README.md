@@ -15,7 +15,7 @@ bash scripts/setup.sh --local-ai     # Windows: scripts\setup.ps1 -LocalAI
 .venv/bin/python dashboard.py        # opens http://127.0.0.1:8765
 ```
 
-- Setup and configuration: [docs/SETUP.md](docs/SETUP.md) (also in the app: Settings → Setup and help)
+- Setup and configuration: [docs/SETUP.md](docs/SETUP.md) (also in the app: the Help page, ? icon)
 - Security: [SECURITY.md](SECURITY.md)
 - Checks that need a person: [docs/MANUAL-TESTS.md](docs/MANUAL-TESTS.md)
 - Plans: `docs/PRD-*.md`

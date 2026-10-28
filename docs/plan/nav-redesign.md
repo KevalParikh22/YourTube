@@ -129,7 +129,7 @@
 
 ### T7: Check, docs, manual tests
 - **worker:** claude
-- **status:** todo
+- **status:** done
 - **depends on:** T1–T6
 - **files:** `docs/SETUP.md` (navigation wording, shortcuts), `docs/MANUAL-TESTS.md` (session S8), `CLAUDE.md` (routes)
 - **verify:** dashboard check at desktop and phone width; read-through

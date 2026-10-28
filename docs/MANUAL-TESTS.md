@@ -8,13 +8,14 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 
 | Session | Covers | Time | Before you start |
 |---|---|---|---|
-| **S1 · Ratings you can trust** | §2 (2.1–2.4), §7.6, §7.7, and S1 below | ~30 min | Settings → General → About you: write your interests. Ratings changed on 2026-10-24 (score breakdown, minutes), so re-rate 10–20 videos first: Triage → Rate |
+| **S1 · Ratings you can trust** | §2 (2.1–2.4), §7.6, §7.7, and S1 below | ~30 min | Settings → About you: write your interests. Ratings changed on 2026-10-24 (score breakdown, minutes), so re-rate 10–20 videos first: Triage → Rate |
 | **S2 · Libraries and the task queue** | §7.1–7.5, §2.5–2.6 | ~20 min | Nothing |
-| **S3 · Ask your library** | §6 | ~20 min | Ollama running (Settings → AI shows it) |
+| **S3 · Ask your library** | §6 | ~20 min | Ollama running (Settings → Local AI shows it) |
 | **S4 · Local media** | §3 | ~30 min + waiting | Pick 3–5 videos without captions and 3–5 with slides; keep the laptop on power |
 | **S5 · Cloud AI** | §5 | ~20 min | An API key (Claude or Gemini). Optional; skip if you only use local AI |
 | **S6 · Setup and decisions** | §4 | ~15 min | Nothing |
 | **S7 · Summaries and knowledge (Phase 3)** | S7 below | ~40 min + waiting | Ollama running; pick 4–5 videos of one category you know well |
+| **S8 · Navigation, Settings and shortcuts** | S8 below | ~15 min | Nothing |
 
 ### S1 extra checks (new ratings, 2026-10-24)
 
@@ -23,7 +24,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S1.1 | Why this score | Open a rated video → "Why this score" | Four factors with reasons you agree with; the formula line adds up to the score | |
 | S1.2 | Minutes | Read the Minutes of 3 videos you have watched | You could decide watch / skip from them alone; timestamps jump to the right part | |
 | S1.3 | Off-interest video | Find a good video outside your interests | It still scores well (interest only subtracts up to 2) | |
-| S1.4 | Your formula | Settings → General → How scores are calculated: change the interest penalty, save, re-rate one video | The new number follows the formula; Reset to default works | |
+| S1.4 | Your formula | Settings → Scoring: change the interest penalty, save, re-rate one video | The new number follows the formula; Reset to default works | |
 | S1.5 | Stop | Start Sort unsorted with AI, then Stop during batch 2 | It says Stopping…, ends before the next batch, and keeps the suggestions made so far | |
 | S1.6 | Look and feel | Browse every page in light and dark | Clean fonts, styled dropdowns, tooltips (ⓘ) instead of paragraphs, readable categories; note anything still rough | |
 
@@ -40,6 +41,19 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S7.7 | Stale page | Summarise one more video of that category | The page shows Update; Update includes it | |
 | S7.8 | Description | Open a video; then Settings → General → Show descriptions | Collapsed by default; open when the setting is on | |
 
+### S8 checks (navigation, Settings and shortcuts, 2026-10-28)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S8.1 | Top bar | Visit each page from the top bar; then Search, Settings and Help icons | Six pages in the bar; the active one is marked; icons are easy to hit; nothing scrolls sideways on a phone-width window | |
+| S8.2 | Ask pop-up | From Library, click the chat button → ask a question → a follow-up → click a cited moment → Open full page | Answer with chips; the moment plays; the full page continues the same conversation | |
+| S8.3 | Ask about a video | Open a video → Ask about this video | The panel opens limited to that video; ✕ removes the limit | |
+| S8.4 | Settings menu | Go through all seven sections in Settings | Each is clear on its own; Cloud AI and Local AI are separate, and AI by task can still mix them | |
+| S8.5 | About you | Type 2 words in Interests → Save; then pick a language → Save | An error under the field and nothing saved; the language saves and new summaries use it | |
+| S8.6 | Add category | Categories → Add category → name + keywords → Save; then Propose with AI | Inline row, no pop-up; the new category is protected, editable, and never offered for removal | |
+| S8.7 | Keyboard only | Press `?`, then try every shortcut; Tab from the top of the page | All work, none fire while typing; "Skip to content" appears first; focus is always visible | |
+| S8.8 | Old links | Open `#/ai` and `#/setup` | They land on Settings → Cloud AI and Help | |
+
 ## 1. Library at real size ✓ done 2026-10-24
 
 | # | Test | Steps | Expect | Result |
@@ -53,7 +67,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
-| 2.1 | Interests | Settings → General → About you → write what you want to learn and what you don't → Save | Saved | |
+| 2.1 | Interests | Settings → About you → write what you want to learn and what you don't → Save | Saved | |
 | 2.2 | Ratings spread | Triage → Rate (on a mixed playlist, after Fetch details) | A mix of Watch / Skim / Skip, not everything 8–9 | |
 | 2.3 | Skip verdicts | Read 5–10 Skip reasons, and open a couple of the videos | You agree they're skippable; note any you disagree with | |
 | 2.4 | Skim ranges | Click a Skim range on a few videos | It lands on the part the reason describes | |
@@ -73,7 +87,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
-| 4.1 | Setup guide | Read the Settings → Setup and help as if you were a new user | Clear; note anything missing or confusing | |
+| 4.1 | Setup guide | Read the Help page (? icon) as if you were a new user | Clear; note anything missing or confusing | |
 | 4.2 | Windows script | On a Windows PC (if available): `scripts\setup.ps1 -LocalAI` | It sets up the app; report any error | |
 | 4.3 | Test data (done 2026-10-25: removed) | Decide: remove the "Test Engineering Playlist" (`v1`–`v5`)? | Your call (removing it needs a one-off cleanup that you approve) | |
 | 4.4 | Write-back | Decide: create real `[YourTube]` playlists on your YouTube account, or keep queue links? | Your call | |
@@ -104,7 +118,7 @@ YTKB_LIVE=1 ANTHROPIC_API_KEY=... GEMINI_API_KEY=... .venv/bin/python -m unittes
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
 | 7.1 | Create a library | Playlists → Libraries → type "Health" → Create; move one or two playlists to it with the Library column | The header switcher shows Health; Library, Plan, Triage, Search and Ask show only its videos | |
-| 7.2 | Its own categories | In Health: Categories → Propose categories with AI → Apply; set Health interests in Settings → General | Health categories don't appear in My library; ratings in Health judge against Health interests | |
+| 7.2 | Its own categories | In Health: Categories → Propose categories with AI → Apply; set Health interests in Settings → About you | Health categories don't appear in My library; ratings in Health judge against Health interests | |
 | 7.3 | Queue | Start a transcription, then click Rate | Rate says "queued"; the header shows the running task and "+1 waiting"; Rate runs after | |
 | 7.4 | Finished state | Let a sync finish | The header turns green "Finished: …" and the page shows a Finished banner; a failure shows red with the error | |
 | 7.5 | Single video | Playlists → paste one video link → Sync | It appears in *Added one by one*, with details fetched | |
