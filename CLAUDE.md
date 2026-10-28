@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 python3 -m venv --without-pip .venv && python3 -m pip --python .venv/bin/python install -r requirements.txt
 .venv/bin/python dashboard.py            # local dashboard at http://127.0.0.1:8765 (--port, --no-open)
-.venv/bin/python main.py "<playlist URL | ID | WL>" [--browser auto|firefox|chrome | --cookies cookies.txt] [--ai] [--no-open]
+.venv/bin/python main.py "<playlist URL | ID | WL>" [--browser auto|firefox|chrome | --cookies cookies.txt] [--ai]
 .venv/bin/python main.py --list [--browser auto]   # list the signed-in account's playlists and IDs
 .venv/bin/python main.py --details [N]             # fetch details/captions for up to N videos (default 200)
 .venv/bin/python main.py --embed                   # update the meaning-based search index (Ollama embedding model)
@@ -47,7 +47,7 @@ Every stage passes around a list of plain video dicts with the keys `video_id, t
 
    `save_playlist()` keeps status and notes, and keeps the category when `category_locked = 1`. It marks videos missing from the latest extraction as removed, and never does so from an empty extraction. After saving, `main.py` reloads from the DB so reports reflect manual edits.
 4. **`metrics.py`**: counts and durations at 1.0/1.25/1.5/1.75/2.0x. The remaining time leaves out done videos (`completed` and `skipped`).
-5. **`reporter.py`**: writes static snapshots to `reports/`. User content must be HTML-escaped.
+5. **Summary**: `main.py` prints the watch-time summary from `metrics.py` (the old static `reporter.py` report was removed on 2026-10-28; the dashboard replaces it).
 **AI layer (optional)**: `llm.py` holds the provider registry and `settings.json` (git-ignored; API keys, presets, category notes, a pending proposal). Every provider reduces to `complete(system, prompt) -> text`. Claude goes through the `anthropic` SDK. Gemini uses REST. OpenAI-compatible endpoints cover open-weight hosts and local Ollama/LM Studio. `public_settings()` is the only form sent to the browser and never includes keys. `ai_classifier.py` has `discover_categories` (proposes a category set that keeps the user's presets verbatim) and `assign_categories` (indexed lines, batches of at most 50 videos packed to the model's context, unknown answers go to the fallback). `run_discover`/`run_suggest` are the job entry points. AI output is always a proposal or suggestion that the user accepts in the dashboard.
 
 6. **`exporter.py`**: builds `watch_videos?video_ids=` queue URLs. The endpoint is undocumented and capped at 50 IDs, so use the chunked `generate_youtube_watch_queue_urls`. Also handles CSV and JSON export.

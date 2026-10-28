@@ -228,7 +228,7 @@ Settings → **General**:
 | `yt_kb.db` | Your library: playlists, videos, statuses, notes, transcripts, ratings, questions and answers | **No**. This is your data; back it up |
 | `settings.json` | AI settings and API keys, interests, language, transcript switches | Yes (you lose AI settings and keys) |
 | `taxonomy.json` | Your categories and their keywords | Yes (built-in categories come back) |
-| `reports/` | Static HTML and Markdown snapshots written by `main.py` | Yes |
+| `reports/` | Old static reports from earlier versions (no longer written) | Yes |
 | `frames/` | Slide thumbnails for the slide strip | Yes (the strip disappears; read slides again to restore it) |
 | `media_cache/` | Temporary audio and video while processing; emptied after each job | Yes |
 | `.venv/` | The Python environment | Yes (run the setup again) |
@@ -276,7 +276,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 ```text
 dashboard.py   [--port 8765] [--no-open]
 main.py        [URL|ID|WL] [--browser auto|firefox|chrome|chromium|brave|edge] [--cookies FILE]
-               [--ai] [--no-open] [--list] [--details [N]]
+               [--ai] [--list] [--details [N]]
 local_setup.py [--pull MODEL] [--use MODEL] [--recommended] [--embed-model] [--use-embed MODEL]
 main.py        --embed          # update the meaning-based search index
 ```

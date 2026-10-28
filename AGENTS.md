@@ -22,7 +22,7 @@ It is the single source of truth. Follow it exactly, whichever model you are.
 - DB access: always `with storage.get_connection() as conn:` (the connection closes at block end). Schema changes go in `storage.init_db()` as in-place migrations. Call `storage._reindex` whenever searchable text changes.
 - Transcript readers go through `_active_source`. Per-video yt-dlp reads are anonymous (no cookies); cookies are only for listing playlists.
 - Dashboard: POSTs require the `X-YTKB: 1` header, JSON body and a localhost Host header; keep these checks. Long work goes through the `dashboard.Job` queue. Job output is plain text, no emojis; errors start with "Error:", warnings with "Warning:".
-- Escape user and AI content in HTML (`reporter.py`, `web/index.html`) and Markdown (`exporter._md_text`). `public_settings()` is the only settings shape sent to the browser; never expose keys.
+- Escape user and AI content in HTML (`web/index.html`) and Markdown (`exporter._md_text`). `public_settings()` is the only settings shape sent to the browser; never expose keys.
 - AI output is always a proposal or suggestion the user accepts; never apply it automatically. Use `llm.make_completer(settings, task)` with the task name.
 - Tests: `unittest` in `tests/test_<module>.py`; they run against temp files (`tests/__init__.py`) with API keys stripped. Live cloud tests are opt-in (`YTKB_LIVE=1`).
 - Keep `docs/SETUP.md` in step with CLI flags, `settings.json` keys and env vars.

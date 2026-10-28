@@ -1,23 +1,18 @@
 """
-Main Command Line Interface for YourTube - Phase 0.
-Safely extracts private or unlisted playlist metadata, classifies videos into categories,
-computes watch durations (1x vs 2x), and generates visual reports.
+Command line for YourTube: syncs a playlist (read-only), sorts its videos into categories,
+prints watch time at 1x vs 2x, and runs maintenance jobs. The dashboard (dashboard.py) is the main interface.
 """
 import sys
-import os
 import argparse
-import webbrowser
 from extractor import extract_playlist_metadata
 from classifier import classify_playlist_videos, load_taxonomy
 from storage import save_playlist, get_all_videos, init_db
-from reporter import generate_markdown_report, generate_html_dashboard
 from metrics import calculate_category_metrics
 
 def run_pipeline(
     playlist_url: str,
     browser_cookies: str = None,
     cookies_file: str = None,
-    open_browser: bool = True,
     ai_suggest: bool = False,
     library: int = None
 ):
@@ -76,7 +71,7 @@ def run_pipeline(
         print()
         from ai_classifier import run_suggest
         run_suggest("unsorted")  # suggestions only; a failure here doesn't fail the sync
-    # Reload so manual categories and existing watch statuses are reflected in the reports
+    # Reload so manual categories and existing watch statuses are reflected in the summary
     classified_videos = get_all_videos(data['id'])
     
     print("\nStep 4: Computing watch time metrics (1.0x vs 2.0x speeds)...")
@@ -98,17 +93,7 @@ def run_pipeline(
     print(f"Time saved at 2.0x speed: {overall['time_saved_2x']['formatted']}")
     print("-"*70 + "\n")
     
-    print("Step 5: Generating reports...")
-    md_path = generate_markdown_report(data, classified_videos)
-    html_path = generate_html_dashboard(data, classified_videos)
-    print(f"   Markdown Knowledge Base: {md_path}")
-    print(f"   Interactive HTML Dashboard: {html_path}")
-    
-    if open_browser:
-        print("\nOpening interactive dashboard in your default browser...")
-        webbrowser.open(f"file:///{os.path.abspath(html_path)}")
-        
-    print("\nSync finished.")
+    print("Sync finished. Open the dashboard to see it: .venv/bin/python dashboard.py")
     print("   Your source playlist was NOT modified or deleted (100% non-destructive).")
     print("   Browse, track progress and re-categorize with: python dashboard.py")
     return True
@@ -137,11 +122,10 @@ def interactive_mode():
     run_pipeline(playlist_url=playlist_url, browser_cookies=browser)
 
 def main():
-    parser = argparse.ArgumentParser(description="YourTube - Phase 0")
+    parser = argparse.ArgumentParser(description="YourTube command line")
     parser.add_argument("url", nargs="?", help="YouTube playlist URL or ID")
     parser.add_argument("--browser", "-b", help="Browser to read session cookies from: auto (detect), firefox, chrome, brave, edge")
     parser.add_argument("--cookies", "-c", help="Path to cookies.txt file")
-    parser.add_argument("--no-open", action="store_true", help="Do not open HTML report in browser automatically")
     parser.add_argument("--list", action="store_true", help="List the playlists on your signed-in account, with their IDs")
     parser.add_argument("--embed", action="store_true", help="Update the meaning-based search index (needs the Ollama embedding model)")
     parser.add_argument("--details", type=int, nargs="?", const=200, metavar="N",
@@ -178,7 +162,6 @@ def main():
             playlist_url=args.url,
             browser_cookies=args.browser,
             cookies_file=args.cookies,
-            open_browser=not args.no_open,
             ai_suggest=args.ai
         )
     else:

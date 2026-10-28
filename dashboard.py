@@ -139,7 +139,7 @@ def _library_name(library):
 def _sync(url, browser, cookies_file, library=1):
     from main import run_pipeline  # deferred so the dashboard starts even if yt-dlp is missing
     settings = llm.load_settings()
-    ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, open_browser=False, library=library)
+    ok = run_pipeline(url, browser_cookies=browser, cookies_file=cookies_file, library=library)
     if ok and settings["auto_after_sync"] and llm.is_configured(settings, "categorize") and not JOB.stop_requested():
         from ai_classifier import run_suggest
         print()

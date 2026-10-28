@@ -17,7 +17,7 @@ Map of the codebase for people and AI workers. Details per phase live in `CLAUDE
 2. **Classify and persist:** `classifier.py` applies taxonomy rules; `storage.py` saves playlist/video state to SQLite. Missing source videos are flagged as removed and kept locally ([main.py:65-74](main.py), [AGENTS.md:15-16](AGENTS.md)).
 3. **Enrich and analyze:** `enrich.py` fetches descriptions, chapters, and captions; `local_asr.py` optionally transcribes locally. `ai_classifier.py` proposes category suggestions, while `rater.py` rates videos. `llm.py` provides configurable AI providers ([enrich.py:149](enrich.py), [local_asr.py:159-165](local_asr.py), [ai_classifier.py:221-232](ai_classifier.py), [rater.py:242-245](rater.py), [llm.py:1-12](llm.py)).
 4. **Search and ask:** `storage.py` maintains text search and transcript sources; `embedder.py` builds meaning-based indexes; `retrieval.py` retrieves matching material; `asker.py` answers with cited moments ([storage.py:916-925](storage.py), [storage.py:1019-1027](storage.py), [embedder.py:54-62](embedder.py), [retrieval.py:73-84](retrieval.py), [asker.py:146-159](asker.py)).
-5. **Present and export:** `dashboard.py` serves the local API and `web/index.html`; `metrics.py`, `reporter.py`, and `exporter.py` provide watch-time calculations and report/export formats ([dashboard.py:1-4](dashboard.py), [metrics.py:39-47](metrics.py), [reporter.py:16-23](reporter.py), [exporter.py:32-41](exporter.py)).
+5. **Present and export:** `dashboard.py` serves the local API and `web/index.html`; `metrics.py` and `exporter.py` provide watch-time calculations and export formats ([dashboard.py:1-4](dashboard.py), [metrics.py:39-47](metrics.py), [exporter.py:32-41](exporter.py)).
 
 ## Key modules
 
@@ -26,7 +26,7 @@ Map of the codebase for people and AI workers. Details per phase live in `CLAUDE
 - **`storage.py`:** SQLite schema/migrations and persistence for playlists, video details, transcripts, search, embeddings, Q&A, and libraries ([storage.py:31-36](storage.py), [storage.py:71-75](storage.py), [storage.py:259-268](storage.py)).
 - **`classifier.py`, `enrich.py`, `local_asr.py`, `local_visual.py`, `ai_classifier.py`, `rater.py`:** Categorization, metadata/caption fetching, optional local transcription and visual analysis, AI category proposals, and ratings.
 - **`llm.py`, `embedder.py`, `retrieval.py`, `asker.py`:** AI provider configuration, embedding, retrieval, and question answering.
-- **`metrics.py`, `reporter.py`, `exporter.py`:** Watch-time metrics, generated reports, and exports.
+- **`metrics.py`, `exporter.py`:** Watch-time metrics (the CLI summary; the dashboard mirrors it) and exports.
 
 ## Run and test
 

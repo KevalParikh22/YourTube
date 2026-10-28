@@ -23,7 +23,7 @@ Measured on 2026-10-28 (313 videos): `/api/state` 0.195 s, of which `storage.vis
 
 ### T1: Delete the old static report
 - **worker:** agy
-- **status:** todo
+- **status:** done (by claude: agy's allow-list doesn't permit deleting files)
 - **files:** `reporter.py` (delete), `main.py`, `dashboard.py`, `CLAUDE.md`, `docs/architecture.md`, `README.md` and `docs/SETUP.md` only if they mention it
 - **steps:** Design notes T1.
 - **acceptance:** [ ] `grep -rn "reporter\|open_browser\|generate_html_dashboard" --include=*.py .` (excluding .venv) finds nothing; [ ] `main.py --help` has no `--no-open`; [ ] tests pass.
