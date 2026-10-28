@@ -84,7 +84,7 @@
 
 ### T2: Floating Ask pop-up
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **depends on:** T1
 - **files:** `web/index.html`
 - **steps:** Design notes B.

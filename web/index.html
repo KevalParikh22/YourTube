@@ -381,6 +381,22 @@
   .hist a:hover { background: var(--sunken); color: var(--ink); }
   .hist a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
   .hist a small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
+  .ask-fab { position: fixed; right: 20px; bottom: 20px; z-index: 39; width: 56px; height: 56px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--bg); box-shadow: 0 5px 18px #0003; cursor: pointer; }
+  .ask-fab svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .ask-pop { position: fixed; right: 20px; bottom: 88px; z-index: 39; width: 400px; height: 600px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; overflow: hidden; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 10px 36px #0003; }
+  .ask-pop-head { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .ask-pop-head strong { font-size: 14px; white-space: nowrap; }
+  .ask-pop-scope { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 11.5px; }
+  .ask-pop-head .btn { height: 30px; padding: 0 8px; font-size: 12px; }
+  .ask-pop-body { min-height: 0; flex: 1; overflow: auto; padding: 0 16px 16px; }
+  .ask-pop-body .answer { margin-top: 18px; }
+  .ask-pop-body .answer h2 { font-size: 15px; }
+  .ask-pop-body .answer .body { font-size: 14px; }
+  .ask-pop-body .srcs { display: none; }
+  .ask-pop-input { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+  .ask-pop-input input { flex: 1; height: 40px; }
+  .ask-pop-input .btn { height: 40px; }
+  @media (max-width: 640px) { .ask-pop { inset: 0; width: auto; height: auto; max-height: none; border-radius: 0; } }
   #jobs { position: relative; }
   #d-summary ul { list-style: none; padding-left: 0; margin: 6px 0 14px; }
   #d-summary li { margin-bottom: 8px; }
@@ -507,6 +523,8 @@
 </header>
 <main class="page" id="view"><div class="empty">Loading…</div></main>
 <div id="drawer"></div>
+<button class="ask-fab" id="ask-fab" data-act="ask-open" aria-label="Ask your library (A)" title="Ask your library (A)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 2v-5.5A7.5 7.5 0 1 1 20 11.5Z"></path><path d="M8 10h8M8 14h5"></path></svg></button>
+<div id="ask-pop-root"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -554,7 +572,7 @@ const S = {
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
   lib: Number.isInteger(+store.get('ytkb.lib')) && store.get('ytkb.lib') !== null ? +store.get('ytkb.lib') : 1,   // 0 = all libraries
-  ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '' },
+  ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '', open: false, returnFocus: null },
   knowledge: { list: null, pages: {}, loadingList: false, loadingPage: null },
 };
 
@@ -684,7 +702,7 @@ async function load() {
   render();
   if (S.data.job.running || S.data.job.queue?.length) pollJob();
 }
-function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); }
+function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); renderAskPop(); }
 function refresh() { const y = scrollY; renderView(); scrollTo(0, y); }
 function renderBar() {
   const r = route();
@@ -1577,6 +1595,26 @@ function askResult() {
       <button class="btn btn-sm" data-act="ask-del" data-ask="${th[0].id}">Delete${th.length > 1 ? ' conversation' : ''}</button>
     </div>`;
 }
+function renderAskPop() {
+  const a = S.ask, root = $('#ask-pop-root'), fab = $('#ask-fab'), full = route() === 'ask';
+  fab.hidden = full;
+  if (!a.open || full) { root.innerHTML = ''; return; }
+  const vid = a.video && byId(a.video), title = vid?.title;
+  const th = a.thread, busy = a.busy;
+  const latest = th[th.length - 1];
+  const turns = th.map(r => askTurn(r, false)).join('<hr class="ask-sep">');
+  root.innerHTML = `<section class="ask-pop" role="dialog" aria-label="Ask your library" aria-modal="true">
+    <header class="ask-pop-head"><strong>Ask your library</strong><span class="ask-pop-scope">${vid ? `Only: ${esc(title)}` : 'This library'}</span>
+      ${vid ? '<button class="btn" data-act="ask-unscope" aria-label="Remove video scope">✕</button>' : ''}
+      <button class="btn" data-act="ask-new">New</button>
+      <a class="btn" href="#/ask${latest ? `?id=${latest.id}` : ''}" data-act="ask-full">Open full page</a>
+      <button class="btn" data-act="ask-close" aria-label="Close Ask">Close</button></header>
+    <div class="ask-pop-body" id="ask-pop-body">${turns || (!busy ? '<p class="ask-pop-empty">Ask a question about your videos.</p>' : '')}${busy ? '<p class="note" style="margin-top:18px"><span class="spin" style="display:inline-block"></span> Reading your videos and writing an answer…</p>' : ''}</div>
+    <div class="ask-pop-input"><input id="aq" type="text" value="${esc(a.q)}" maxlength="1000" ${busy ? 'disabled' : ''} aria-label="Question" placeholder="${th.length ? 'Ask a follow-up' : vid ? 'Ask about this video' : 'Ask your library'}">
+      <button class="btn btn-dark" data-act="ask-go" ${busy || !S.data.ai.ready_for.ask ? 'disabled' : ''}>${busy ? 'Working…' : 'Ask'}</button></div>
+  </section>`;
+  if (!busy) $('#aq')?.focus({ preventScroll: true });
+}
 function askHistory() {
   const a = S.ask, items = a.hist || [], open = a.thread[0]?.thread_id;
   return `<h4>Earlier questions</h4>
@@ -1585,7 +1623,7 @@ function askHistory() {
       : items.map(h => `<a href="#/ask?id=${h.id}" class="${open === h.id ? 'on' : ''}">${esc(h.question)}<small>${esc((h.created_at || '').slice(0, 16))}${h.follow_ups ? ` · ${plural(h.follow_ups, 'follow-up')}` : ''}${h.filters?.video_ids?.length === 1 ? ` · ${esc(askScope(h.filters))}` : ''}</small></a>`).join('')}`;
 }
 function renderAsk() {
-  if (route() !== 'ask') return;
+  if (route() !== 'ask') { renderAskPop(); return; }
   const y = scrollY; renderView(); scrollTo(0, y);
 }
 async function loadAskHistory() {
@@ -1602,9 +1640,10 @@ async function openAsk(id) {
   renderAsk();
 }
 function askAbout(id) {
-  Object.assign(S.ask, { video: id, thread: [], q: '' });
+  Object.assign(S.ask, { video: id, thread: [], q: '', open: true });
   closeDrawer();
-  if (location.hash !== '#/ask') location.hash = '#/ask'; else renderAsk();
+  renderAskPop();
+  $('#aq')?.focus({ preventScroll: true });
 }
 async function runAsk() {
   const a = S.ask, q = ($('#aq')?.value || a.q).trim(), last = a.thread[a.thread.length - 1];
@@ -1618,7 +1657,7 @@ async function runAsk() {
       : { categories: a.cat ? [a.cat] : [], playlists: a.src ? [a.src] : inLib, include_done: a.done };
     const r = await api('/api/ask', last ? { question: q, follow_up_of: last.id } : { question: q, filters });
     a.thread = [...a.thread, r]; a.q = '';
-    history.replaceState(null, '', `#/ask?id=${r.id}`);
+    if (route() === 'ask') history.replaceState(null, '', `#/ask?id=${r.id}`);
   } catch (e) { toast(e.message, true); }
   a.busy = false;
   renderAsk();
@@ -2392,7 +2431,10 @@ document.addEventListener('click', async e => {
     case 'search-more': S.search.limit += 50; renderSearchResults(); break;
     case 'seek': seek(+el.dataset.t); break;
     case 'ask-go': runAsk(); break;
-    case 'ask-new': S.ask.thread = []; S.ask.q = ''; location.hash = '#/ask'; break;
+    case 'ask-open': S.ask.returnFocus = el; S.ask.open = true; renderAskPop(); $('#aq')?.focus({ preventScroll: true }); break;
+    case 'ask-close': S.ask.open = false; renderAskPop(); (S.ask.returnFocus || $('#ask-fab'))?.focus(); break;
+    case 'ask-full': S.ask.open = false; break;
+    case 'ask-new': S.ask.thread = []; S.ask.q = ''; if (route() === 'ask') location.hash = '#/ask'; else renderAskPop(); break;
     case 'ask-unscope': S.ask.video = null; renderAsk(); break;
     case 'ask-video': askAbout(id); break;
     case 'ask-copy': {
@@ -2740,6 +2782,10 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('focusout', e => { if (e.target.id === 'd-notes') saveNotes(); });
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.ask.open && route() !== 'ask') { S.ask.open = false; renderAskPop(); (S.ask.returnFocus || $('#ask-fab'))?.focus(); return; }
+  if (!e.ctrlKey && !e.metaKey && !e.altKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName) && e.key.toLowerCase() === 'a' && route() !== 'ask') {
+    e.preventDefault(); S.ask.returnFocus = $('#ask-fab'); S.ask.open = true; renderAskPop(); $('#aq')?.focus({ preventScroll: true }); return;
+  }
   if (e.key === 'Escape' && S.drawer) { closeDrawer(); return; }
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
   if (e.key === '/') { e.preventDefault(); if (route() !== 'search') location.hash = '#/search'; setTimeout(() => $('#sq')?.focus(), 50); }
@@ -2747,7 +2793,7 @@ document.addEventListener('keydown', e => {
 
 });
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); } });
-addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); renderBar(); renderView(); scrollTo(0, 0); } });
+addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
 
 applyTheme();
 load();
