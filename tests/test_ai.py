@@ -62,6 +62,18 @@ class DiscoverTest(unittest.TestCase):
         self.assertTrue(20 < len(shown) < 317 and sum(len(x) for x in shown) <= 5000 + len(shown) * 20)
         self.assertEqual([c["name"] for c in cats], ["Health"])
 
+    def test_near_copies_merge_into_existing_categories(self):
+        reply = json.dumps({"categories": [{"name": "Finance & Business Strategy", "keywords": ["mutual funds", "stocks"]},
+                                           {"name": "AI & Automation Tools", "keywords": ["agents"]},
+                                           {"name": "Productivity & Career Growth", "keywords": ["habits"]}]})
+        cats = discover_categories(self.VIDEOS, fake(reply), presets=["Finance & Business"],
+                                   taxonomy={"Finance & Business": ["stocks"], "Productivity & Career": ["career"]})
+        by = {c["name"]: c for c in cats}
+        self.assertEqual(set(by), {"Finance & Business", "AI & Automation Tools", "Productivity & Career"})
+        self.assertEqual(by["Finance & Business"]["added"], ["mutual funds"])        # merged as new keywords only
+        self.assertEqual(by["Productivity & Career"]["keywords"], ["career", "habits"])
+        self.assertEqual(by["AI & Automation Tools"]["added"], [])                   # a genuinely new category
+
     def test_cut_off_reply_is_explained(self):
         with self.assertRaisesRegex(LLMError, "cut off"):
             discover_categories(self.VIDEOS, fake('{"categories": [{"name": "Health", "descr'))

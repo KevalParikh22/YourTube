@@ -240,7 +240,12 @@
   .keep input { margin: 0; accent-color: var(--accent); }
   .tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
   .tag.new { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
-  .prop-row { display: grid; grid-template-columns: 24px 240px minmax(0, 1fr); gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .cat-opts { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .prop-add { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; font-weight: 500; padding-top: 6px; }
+  .prop-add input { margin: 0 !important; }
+  .prop-changed { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .kw-chip { display: inline-block; font-size: 12px; padding: 1px 7px; margin: 3px 4px 0 0; border-radius: 9px; background: var(--watch-bg); color: var(--watch); }
+  .prop-row { display: grid; grid-template-columns: auto 240px minmax(0, 1fr); gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .prop-row input[type="checkbox"] { margin: 10px 0 0; accent-color: var(--ink); }
   .prop-row.off > :not(:first-child) { opacity: .45; }
 
@@ -1359,9 +1364,11 @@ function viewCategories() {
     ${Object.keys(tax).map(n => `<div class="cat-row">
       <div><label class="field-label">Category name</label><input type="text" value="${esc(n)}" title="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
         <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div>
-        <label class="keep"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Keep ${tip('AI proposals leave this category unchanged.')}</label>
-        <label class="keep" style="margin-left:12px"><input type="checkbox" data-change="transcripts" data-name="${esc(n)}" ${S.data.transcripts[n] !== false ? 'checked' : ''}> Transcripts ${tip('Fetch captions for videos in this category.')}</label>
-        <label class="keep" style="margin-left:12px"><input type="checkbox" data-change="visual-cat" data-name="${esc(n)}" ${S.data.visual_categories[n] ? 'checked' : ''}> Slides ${tip('Read slides, whiteboards and on-screen code.')}</label></div>
+        <div class="cat-opts">
+          <label class="keep"><input type="checkbox" data-change="preset" data-name="${esc(n)}" ${presets.has(n) ? 'checked' : ''}> Protect from AI ${tip('When you ask the AI to propose categories, this one stays exactly as it is (name and keywords). Untick to let the AI merge or rename it.')}</label>
+          <label class="keep"><input type="checkbox" data-change="transcripts" data-name="${esc(n)}" ${S.data.transcripts[n] !== false ? 'checked' : ''}> Fetch transcripts ${tip('Download captions for videos in this category, for search, summaries and ratings. Turn off for music or other videos where words do not matter.')}</label>
+          <label class="keep"><input type="checkbox" data-change="visual-cat" data-name="${esc(n)}" ${S.data.visual_categories[n] ? 'checked' : ''}> Read slides ${tip('Also read slides, whiteboards and code shown on screen (local AI, downloads the video briefly). For lectures and tutorials.')}</label>
+        </div></div>
       <div><label class="field-label" for="kw-${n.replace(/[^\w-]/g, '_')}">Keywords</label><textarea id="kw-${n.replace(/[^\w-]/g, '_')}" class="kw" data-name="${esc(n)}" rows="4" placeholder="Separate keywords with commas">${esc(tax[n].join(', '))}</textarea>
         ${notes[n] ? `<div class="field-label">Category note ${tip(notes[n])}</div>` : ''}</div>
       <div><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
@@ -1375,37 +1382,49 @@ function viewCategories() {
 }
 function viewProposal(p, tax, counts) {
   const proposed = new Set(p.categories.map(c => c.name));
-  const dropped = Object.keys(tax).filter(n => !proposed.has(n));
+  const dropped = Object.keys(tax).filter(n => !proposed.has(n) && !(S.data.ai.presets || []).includes(n));
+  const rows = p.categories.map((c, i) => ({ ...c, i }));
+  const fresh = rows.filter(c => !c.existing), changed = rows.filter(c => c.existing && (c.added || []).length),
+    same = rows.filter(c => c.existing && !(c.added || []).length);
   return `
   <section class="section card">
-    <h2 class="h">Proposed categories</h2>
-    <p class="note">Review proposed categories ${tip(`Suggested by ${p.model || 'the AI'}. Untick categories to leave them out, then edit names or keywords. Applying saves the categories and re-sorts by keywords. Use AI sorting for videos keywords miss.`)}</p>
+    <h2 class="h">Proposed changes</h2>
+    <p class="note">${p.model ? esc(p.model) + ' suggests ' : ''}${plural(fresh.length, 'new category')}${changed.length ? ` and new keywords for ${plural(changed.length, 'category')}` : ''}.
+      ${tip('Nothing changes until you apply. Untick anything you do not want. Categories you protect stay exactly as they are; near-copies of existing categories were merged into them as keywords.')}</p>
     <div id="proposal" style="margin-top:8px">
-      ${p.categories.map((c, i) => `<div class="prop-row" data-i="${i}">
-        <label class="check"><input type="checkbox" class="p-on" checked ${c.preset ? 'disabled title="Kept: you ticked Keep"' : ''}> Use</label>
-        <div><input type="text" class="p-name" value="${esc(c.name)}" title="${esc(c.name)}" style="width:100%;font-weight:500" ${c.preset ? 'readonly' : ''} aria-label="Name">
-          <div class="meta" style="font-size:12.5px;color:var(--ink-3);margin-top:6px">${c.preset ? '<span class="tag">kept</span>' : c.existing ? `<span class="tag">current</span> ${plural(counts[c.name] || 0, 'video')}` : '<span class="tag new">new</span>'}</div></div>
-        <div><label class="field-label">Keywords</label><textarea class="p-kw" rows="4" aria-label="Keywords">${esc(c.keywords.join(', '))}</textarea>
-          ${c.description ? `<div class="field-label">Description ${tip(c.description)}</div>` : ''}</div>
-      </div>`).join('')}
-      ${dropped.length ? `<div style="margin-top:20px"><span class="field-label">Current categories the AI left out</span>
+      ${fresh.length ? `<h3 class="field-label" style="margin-top:14px">New categories</h3>` + fresh.map(c => `<div class="prop-row" data-i="${c.i}">
+        <label class="prop-add"><input type="checkbox" class="p-on" checked> Add</label>
+        <div><input type="text" class="p-name" value="${esc(c.name)}" title="${esc(c.name)}" style="width:100%;font-weight:500" aria-label="Name of the new category">
+          ${c.description ? `<div class="meta" style="font-size:12.5px;color:var(--ink-3);margin-top:6px">${esc(c.description)}</div>` : ''}</div>
+        <div><label class="field-label">Keywords</label><textarea class="p-kw" rows="3" aria-label="Keywords for ${esc(c.name)}">${esc(c.keywords.join(', '))}</textarea></div>
+      </div>`).join('') : '<p class="note" style="margin-top:12px">No new categories: your current ones already cover these videos.</p>'}
+      ${changed.length ? `<h3 class="field-label" style="margin-top:22px">New keywords for existing categories</h3>` + changed.map(c => `<div class="prop-changed" data-i="${c.i}">
+        <label class="prop-add"><input type="checkbox" class="p-on" checked> Add</label>
+        <div><b style="font-weight:500">${esc(c.name)}</b> <span class="faint" style="font-size:12.5px">${plural(counts[c.name] || 0, 'video')}</span><div>${c.added.map(k => `<span class="kw-chip">+ ${esc(k)}</span>`).join('')}</div></div>
+      </div>`).join('') : ''}
+      ${same.length ? `<details style="margin-top:18px"><summary class="note" style="cursor:pointer">${plural(same.length, 'category')} unchanged</summary>
+        <p class="note faint" style="margin-top:6px">${same.map(c => esc(c.name)).join(' · ')}</p></details>` : ''}
+      ${dropped.length ? `<div style="margin-top:20px"><span class="field-label">Categories the AI left out</span>
         ${dropped.map(n => `<label class="check" style="margin-top:8px"><input type="checkbox" class="p-drop" value="${esc(n)}">
           <span>Remove <b style="font-weight:500">${esc(n)}</b> <span class="faint">(${plural(counts[n] || 0, 'video')} go back to automatic sorting)</span></span></label>`).join('')}
         <p class="hint">Unticked ones stay as they are.</p></div>` : ''}
     </div>
     <div class="actions">
-      <button class="btn btn-dark btn-sm" data-act="prop-apply">Apply categories</button>
+      <button class="btn btn-dark btn-sm" data-act="prop-apply">Apply changes</button>
       <button class="btn btn-sm" data-act="prop-dismiss">Discard proposal</button>
     </div>
   </section>`;
 }
 function collectProposal() {
+  // Only additions are sent: categories not listed stay exactly as they are (the server keeps them)
   const p = S.data.ai.proposal, categories = [];
-  for (const row of $$('#proposal .prop-row')) {
+  for (const row of $$('#proposal .prop-row, #proposal .prop-changed')) {
     if (!$('.p-on', row).checked) continue;
     const c = p.categories[+row.dataset.i];
-    categories.push({ name: $('.p-name', row).value.trim() || c.name, description: c.description,
-      keywords: $('.p-kw', row).value.split(',').map(x => x.trim()).filter(Boolean) });
+    if (row.classList.contains('prop-row'))
+      categories.push({ name: $('.p-name', row).value.trim() || c.name, description: c.description,
+        keywords: $('.p-kw', row).value.split(',').map(x => x.trim()).filter(Boolean) });
+    else categories.push({ name: c.name, keywords: c.keywords });   // existing category plus its new keywords
   }
   return { categories, remove: $$('#proposal .p-drop').filter(x => x.checked).map(x => x.value) };
 }

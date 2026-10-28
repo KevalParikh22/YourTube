@@ -6,6 +6,7 @@ library. Proposals and suggestions are reviewed and accepted in the dashboard.
 Both functions take `complete(system, prompt) -> text` (see llm.make_completer), so any
 provider, or a fake in tests, can drive them.
 """
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from llm import LLMError, parse_json
@@ -100,13 +101,15 @@ def discover_categories(
 
 {chr(10).join(_line(v) for v in sample)}
 
-Preset categories. Keep each one exactly as written:
+Protected categories. Keep each one exactly as written; they already cover their topics, so do not propose another
+category for the same topic (no near-copies such as "X Strategy" next to "X"):
 {preset_text}
 
 Categories in use now. Keep, rename, merge or drop them as the videos suggest:
 {current}
 
-Propose at most {max_categories} categories in total, presets included, that together cover most of these videos.
+Propose at most {max_categories} categories in total, protected ones included, that together cover most of these videos.
+Add new categories only for topics that none of the existing ones cover.
 Prefer specific, useful topics over vague ones. Do not include a catch-all such as "{FALLBACK_CATEGORY}"; it always exists.
 For each category give a one-sentence description and 5-12 lowercase keywords or short phrases that would appear in matching titles or channel names.
 
@@ -125,30 +128,53 @@ Reply with JSON:
                        "model with a larger context." if cut else "The model's reply had no category list")
 
     out: Dict[str, Dict[str, Any]] = {}
-    lower_presets = {p.lower(): p for p in presets}
+    known = list(presets) + [t for t in taxonomy if t not in presets]
     for c in raw:
         if not isinstance(c, dict):
             continue
         name = _clean_name(c.get("name"))
         if not name or name.lower() in _CATCH_ALL:
             continue
-        name = lower_presets.get(name.lower(), name)
-        if name.lower() in (k.lower() for k in out):
-            continue
+        # A near-copy of a category that exists (or was just proposed) merges into it instead of duplicating it
+        name = _same_topic(name, known + list(out)) or name
         kws = c.get("keywords") if isinstance(c.get("keywords"), list) else []
+        kws = {str(k).strip().lower() for k in kws if str(k).strip()}
+        if name in out:
+            out[name]["keywords"] = sorted(set(out[name]["keywords"]) | kws)[:20]
+            continue
         out[name] = {
             "name": name,
             "description": " ".join(str(c.get("description") or "").split())[:200],
-            "keywords": sorted({str(k).strip().lower() for k in kws if str(k).strip()})[:15],
+            "keywords": sorted(kws)[:15],
         }
     for p in presets:  # the model must not drop a preset
         out.setdefault(p, {"name": p, "description": "", "keywords": []})
     for c in out.values():
         c["preset"] = c["name"] in presets
         c["existing"] = c["name"] in taxonomy
-        # Keep the user's own keywords alongside the model's
+        # Keep the user's own keywords alongside the model's; "added" is what the proposal would change
+        c["added"] = sorted(set(c["keywords"]) - set(taxonomy.get(c["name"], []))) if c["existing"] else []
         c["keywords"] = sorted(set(c["keywords"]) | set(taxonomy.get(c["name"], [])))
     return list(out.values())
+
+
+_NAME_FILLER = {"and", "the", "of", "for", "a", "an", "to", "in", "on"}
+
+def _name_words(name: str) -> set:
+    return {w for w in re.findall(r"[a-z0-9]+", name.lower()) if w not in _NAME_FILLER}
+
+def _same_topic(name: str, names: List[str]) -> Optional[str]:
+    """The existing name this one duplicates: equal ignoring case, one's words contained in the other's
+    ("Finance & Business Strategy" and "Finance & Business"), or at least half their words shared."""
+    words = _name_words(name)
+    for other in names:
+        if other.lower() == name.lower():
+            return other
+    for other in names:
+        ow = _name_words(other)
+        if words and ow and (words <= ow or ow <= words or len(words & ow) / len(words | ow) >= 0.5):
+            return other
+    return None
 
 
 def assign_categories(
