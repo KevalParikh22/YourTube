@@ -3,11 +3,11 @@
 Read this first in every new session, whatever the tool. The orchestrator keeps it updated.
 
 **Last updated:** 2026-10-28 by claude
-**Branch:** feat/nav-redesign
-**Active plan:** docs/plan/nav-redesign.md (done, reviewed; not merged or pushed yet)
+**Branch:** feat/reliability
+**Active plan:** docs/plan/reliability.md (planned, not started)
 
 ## Done
-- Navigation redesign (T1-T7): top bar keeps the six main pages with Search, Settings and Help icons; floating Ask pop-up; Settings sidebar with seven sections (Cloud AI and Local AI separate); separate Help page; About-you validation and language dropdown (`llm.LANGUAGES`, server-checked); keyboard shortcuts with `?` overlay and skip link; inline Add category saved protected. Docs and manual session S8 added. Review (codex) found 2 issues, both fixed.
+- Navigation redesign (T1-T7): top bar keeps the six main pages with Search, Settings and Help icons; floating Ask pop-up; Settings sidebar with seven sections (Cloud AI and Local AI separate); separate Help page; About-you validation and language dropdown (`llm.LANGUAGES`, server-checked); keyboard shortcuts with `?` overlay and skip link; inline Add category saved protected. Docs and manual session S8 added. Review (codex) found 2 issues, both fixed. Merged into master and pushed 2026-10-29.
 - Public release readiness: MIT licence, disclaimer, SECURITY.md, per-OS notes, always-on dashboard access token, GitHub Actions CI (passing). The repo is still private; the user decides when to make it public.
 - page-load: old static report deleted (-364 lines); visual_hints phrase scan cached (library load 0.195 s -> 0.07 s); index_version now uses a change counter (meta table), fixing stale caches when transcript text is replaced with the same number of pieces.
 - Phase 3 (the brain): summaries on click, related moments, learn more, knowledge pages (feat/phase-3-brain, reviewed, not merged or pushed yet).
@@ -15,10 +15,10 @@ Read this first in every new session, whatever the tool. The orchestrator keeps 
 - Manual tests §1 (library at real size) passed on 2026-10-24.
 
 ## In progress
-- None.
+- Planned (not started): reliability (T1-T6): log file with redaction, cause/fix for failures, stored access per playlist + Try again/Dismiss, start at login (systemd/LaunchAgent), untrack AI/team files.
 
 ## Next up
-- User: merge feat/nav-redesign into master and push (asked); manual test sessions (S7, S8 first), list of UI/layout issues, pick the next feature, decide on write-back.
+- User: manual test sessions (S7, S8 first), list of UI/layout issues, pick the next feature, decide on write-back.
 - The dashboard needs its access link: `.venv/bin/python dashboard.py --print-url` (open it once per browser).
 
 ## Problems / blockers
