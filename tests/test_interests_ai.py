@@ -232,3 +232,10 @@ class DashboardEndpointTest(unittest.TestCase):
         # Confirm settings on disk or in storage were never modified
         current_settings = llm.load_settings()
         self.assertEqual(current_settings["interests"], initial_interests)
+
+
+class JsonReplyTest(unittest.TestCase):
+    def test_json_reply_becomes_labelled_lines(self):
+        reply = '```json\n{"Learn": ["Python", "AI agents"], "Level": "intermediate", "Skip": "crypto", "Goal": "not stated"}\n```'
+        out = interests_ai.draft_interests("I want AI agents in Python, skip crypto", "", {}, lambda system, prompt: reply)
+        self.assertEqual(out, "Learn: Python, AI agents\nLevel: intermediate\nSkip: crypto\nGoal: not stated")

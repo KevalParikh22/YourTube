@@ -6,6 +6,7 @@ learning interests (topics, level, what to skip, and goals) while keeping what s
 applies from their existing interests. The output is proposed to the user as a
 suggestion and is never saved automatically.
 """
+import json
 import re
 from typing import Any, Callable, Dict, List, Optional
 
@@ -20,11 +21,13 @@ SYSTEM = (
     "Learn: <topics, concrete and specific>\n"
     "Level: <beginner / intermediate / advanced, per area if mixed>\n"
     "Skip: <what is not wanted; \"nothing specific\" if none>\n"
-    "Goal: <why: job, project, exam, curiosity>\n\n"
+    "Goal: <why: job, project, exam, curiosity; \"not stated\" if the user did not say>\n"
+    "Do not reply in JSON or with code fences.\n\n"
     "Rules:\n"
     "- Write in the same language as the user's text.\n"
     "- Use only what the user said or what the current interests say; never invent topics.\n"
     "- Keep the user's own terms (tool names, frameworks, languages).\n"
+    "- The text may come from speech recognition: fix obvious slips (for example \"iagents\" means \"AI agents\").\n"
     "- The library's categories are context for vocabulary and spelling, not topics to add on your own.\n"
     "- Keep what still applies from current interests and fold in the new answer."
 )
@@ -73,9 +76,28 @@ def _clean_reply(raw: str) -> str:
             text = text[1:-1].strip()
         changed = (text != before)
 
+    text = _from_json(text)
     text = re.sub(r"^`{3,}[a-zA-Z0-9_-]*\s*$", "", text, flags=re.M)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return text
+
+
+def _from_json(text: str) -> str:
+    """Small local models sometimes answer {"Learn": ..., "Level": ...}; turn that into the labelled lines."""
+    if not text.startswith("{"):
+        return text
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return text
+    if not isinstance(data, dict):
+        return text
+    lines = []
+    for key, value in data.items():
+        if isinstance(value, list):
+            value = ", ".join(str(v) for v in value)
+        lines.append(f"{str(key).strip().capitalize()}: {str(value).strip()}")
+    return "\n".join(lines)
 
 
 def _cut_reply(text: str, limit: int = MAX_OUTPUT_CHARS) -> str:
