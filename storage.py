@@ -55,6 +55,7 @@ VIDEOS_DDL = f"""
         status_updated_at TIMESTAMP,
         category_source TEXT NOT NULL DEFAULT 'keywords',
         has_visuals INTEGER,
+        ai_no_match TEXT,
         FOREIGN KEY(playlist_id) REFERENCES playlists(id)
     )
 """
@@ -204,6 +205,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             ("status_updated_at", "TIMESTAMP"),
             ("category_source", "TEXT NOT NULL DEFAULT 'keywords'"),
             ("has_visuals", "INTEGER"),          # slides/whiteboard: NULL = not set, 0/1 = set by the user
+            ("ai_no_match", "TEXT"),            # taxonomy_key() when the AI found no category for this unsorted video
         ):
             if col not in existing:
                 cursor.execute(f"ALTER TABLE videos ADD COLUMN {col} {ddl}")
@@ -627,10 +629,22 @@ def release_category(name: str, db_path: str = DB_PATH, video_ids: Optional[Iter
 
 # --- AI category suggestions -------------------------------------------------
 
-def videos_for_ai(scope: str = "unsorted", db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+def taxonomy_key(names: Iterable[str]) -> str:
+    """Identifies a set of category names, so an AI 'no match' is retried only once the categories change."""
+    import hashlib
+    return hashlib.sha1("\n".join(sorted(names)).encode("utf-8")).hexdigest()[:12]
+
+def mark_no_match(video_ids: Iterable[str], key: str, db_path: str = DB_PATH) -> None:
+    """Records that the AI found no category for these unsorted videos among the categories `key` names."""
+    with get_connection(db_path) as conn:
+        conn.executemany("UPDATE videos SET ai_no_match = ? WHERE video_id = ?", [(key, v) for v in video_ids])
+        conn.commit()
+
+def videos_for_ai(scope: str = "unsorted", db_path: str = DB_PATH, no_match_key: Optional[str] = None) -> List[Dict[str, Any]]:
     """
     Videos the AI may suggest a category for. Hand-set and accepted categories are never offered.
-    'unsorted': unlocked videos in the fallback bucket that have no pending suggestion.
+    'unsorted': unlocked videos in the fallback bucket that have no pending suggestion
+    (and, with no_match_key, that the AI hasn't already found no category for among the same categories).
     'unlocked': every unlocked video (re-checks keyword-sorted ones too).
     """
     if scope not in ("unsorted", "unlocked"):
@@ -640,8 +654,12 @@ def videos_for_ai(scope: str = "unsorted", db_path: str = DB_PATH) -> List[Dict[
     if scope == "unsorted":
         sql += (" AND category IN (?, 'Uncategorized')"
                 " AND video_id NOT IN (SELECT video_id FROM category_suggestions)")
+    params = (FALLBACK_CATEGORY,) if scope == "unsorted" else ()
+    if scope == "unsorted" and no_match_key:
+        sql += " AND (ai_no_match IS NULL OR ai_no_match != ?)"
+        params += (no_match_key,)
     with get_connection(db_path) as conn:
-        rows = conn.execute(sql, (FALLBACK_CATEGORY,) if scope == "unsorted" else ()).fetchall()
+        rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
 def save_suggestions(items: Iterable[Dict[str, Any]], model: str = "", db_path: str = DB_PATH) -> int:

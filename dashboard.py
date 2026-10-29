@@ -326,6 +326,7 @@ def build_state(library=1):
         "playlists": storage.get_playlists(),
         "videos": storage.get_library(),
         "taxonomy": taxonomy,
+        "tax_key": storage.taxonomy_key(taxonomy),   # matches videos.ai_no_match while the categories stay the same
         "fallback_category": FALLBACK_CATEGORY,
         "job": JOB.snapshot(),
         "ai": llm.public_settings(settings, library or 1),

@@ -63,14 +63,15 @@
   }
   .bar-in { max-width: 1160px; margin: 0 auto; padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 28px; }
   .logo { font-size: 17px; font-weight: 700; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
-  .tabs { display: flex; gap: 22px; height: 100%; min-width: 0; }
+  .tabs { display: flex; gap: 22px; height: 100%; min-width: 0; flex: 0 0 auto; }   /* the task pill shrinks, the menu never does */
   .tabs a {
     display: flex; align-items: center; height: 100%; text-decoration: none; color: var(--ink-3); font-weight: 500;
     border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
   }
   .tabs a:hover { color: var(--ink); }
   .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); }
-  .bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  #jobs { min-width: 0; display: flex; }
   .bar-icon { width: 36px; height: 36px; flex: 0 0 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
   .bar-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .bar-icon.on { color: var(--ink); background: var(--sunken); }
@@ -430,8 +431,11 @@
   .done-banner.bad { background: var(--skip-bg); color: var(--skip); }
   .done-banner span { color: var(--ink-2); }
   .jobpill { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px; border-radius: 15px;
-    border: 1px solid var(--line-strong); font-size: 12.5px; font-weight: 500; color: var(--ink-2); max-width: 260px; }
-  .jobpill .jl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    border: 1px solid var(--line-strong); font-size: 12.5px; font-weight: 500; color: var(--ink-2); max-width: 240px; min-width: 0; box-sizing: border-box; }
+  .jobpill .spin { flex: 0 0 auto; }
+  /* the full task label is in the tooltip and the task panel; the bar only has room for its kind */
+  @media (max-width: 1100px) { .jobpill.run .jl, .jobpill .jw { display: none; } }
+  .jobpill .jl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .jobpill b { font-weight: 600; color: var(--ink-3); white-space: nowrap; }
   .jobpill.run { border-color: var(--accent); color: var(--ink); }
   .jobpill.ok { background: var(--watch-bg); border-color: var(--watch); color: var(--watch); }
@@ -492,6 +496,7 @@
     .bar-in { padding: 0 16px; gap: 8px; }
     .logo { display: none; }
     .tabs { flex: 1 1 auto; gap: 14px; overflow-x: auto; scrollbar-width: none; }
+    .bar-right { flex: 0 0 auto; }   /* here the menu scrolls instead */
     .tabs a { font-size: 13.5px; }
   }
   @media (max-width: 900px) {
@@ -1324,7 +1329,7 @@ function renderJobs() {
   const flash = !job.running && last && S.flash?.id === last.id && Date.now() < S.flash.until;
   if (flash) setTimeout(renderJobs, S.flash.until - Date.now() + 50);
   const pill = job.running
-    ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}"><span class="spin"></span><span class="jl">${stopping ? 'Stopping…' : esc(job.label || 'Working')}</span>${waiting ? `<b>+${waiting} waiting</b>` : ''}</button>`
+    ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}" title="${esc(job.label || 'Working')}${waiting ? ` (+${waiting} waiting)` : ''}"><span class="spin"></span><span class="jl">${stopping ? 'Stopping…' : esc((job.label || 'Working').split(/[:\s]/)[0])}</span>${waiting ? `<b>+${waiting}<span class="jw"> waiting</span></b>` : ''}</button>`
     : flash ? `<button class="jobpill ${last.ok && !last.stopped ? 'ok' : 'bad'}" data-act="jobs-toggle"><span class="jl">${last.stopped ? 'Stopped' : last.ok ? 'Finished' : 'Failed'}: ${esc(last.label)}</span></button>`
     : job.recent?.length ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks">Tasks</button>` : '';
   const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
@@ -1348,13 +1353,14 @@ function updateJob() {
   const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
-  if (!mine || (!job.log && !job.running)) { box.innerHTML = waitLine; return; }
+  if (!mine || (!job.log && !job.running) || (job.dismissed && !job.running)) { box.innerHTML = waitLine; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
   const stopping = !!job.stopping || S.stopPending;
   const stage = job.running ? jobStage(job) : '';
   const head = job.running ? `<span class="status-line"><span class="spin"></span>${stage ? `<b style="font-weight:600">${esc(stage)}</b>&nbsp;·&nbsp;` : ''}${stopping ? 'Stopping…' : text[0]} ${stopping ? '<button class="btn-text" disabled>Stopping…</button>' : '<button class="btn-text" data-act="job-stop">Stop</button>'}</span>`
     : `<div class="done-banner ${job.stopped ? 'bad' : job.ok ? 'ok' : 'bad'}"><b>${job.stopped ? `Stopped: ${esc(job.label || '')}` : job.ok ? 'Finished' : 'Failed'}</b>
-        <span>${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span></div>`;
+        <span>${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span>
+        <button class="btn-text" data-act="job-dismiss" data-id="${job.id}" style="margin-left:auto">Close</button></div>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div>${waitLine}<pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
   log.scrollTop = log.scrollHeight;
@@ -1429,8 +1435,9 @@ function viewCategories() {
   const manual = Object.keys(counts).filter(c => !(c in tax) && c !== FALLBACK() && c !== 'Uncategorized');
   const fb = (counts[FALLBACK()] || 0) + (counts.Uncategorized || 0);
   const pending = videos().filter(v => v.suggestion).length;
-  // Mirrors storage.videos_for_ai('unsorted'): unlocked, unsorted, no suggestion waiting
-  const toSort = videos().filter(v => !v.category_locked && !v.suggestion && (v.category === FALLBACK() || v.category === 'Uncategorized')).length;
+  // Mirrors storage.videos_for_ai('unsorted'): unlocked, unsorted, no suggestion waiting, not already "no match" for these categories
+  const unsortedOpen = videos().filter(v => !v.category_locked && !v.suggestion && (v.category === FALLBACK() || v.category === 'Uncategorized'));
+  const noMatch = unsortedOpen.filter(v => v.ai_no_match === S.data.tax_key).length, toSort = unsortedOpen.length - noMatch;
   const running = !!S.data.job.running;
   return `
   <section>
@@ -1441,11 +1448,12 @@ function viewCategories() {
       <button class="btn btn-dark btn-sm" data-act="reclassify">Save and re-sort</button>
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
       ${ai.ready_for.categorize ? `<button class="btn btn-sm" data-act="ai-discover" data-job-btn>Propose categories with AI</button>
-        <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort || ''} unsorted with AI</button>`
+        <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : noMatch ? 'The AI found no category for the rest. Add a category or propose new ones, then sort again' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort ? toSort + ' ' : ''}unsorted with AI</button>`
         : `<a class="btn-text" href="#/settings/routing">Set up AI sorting →</a>`}
       ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>`
         : fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
     </div>
+    ${noMatch && ai.ready_for.categorize ? `<p class="note" style="margin-top:10px">The AI found no matching category for ${plural(noMatch, 'unsorted video')}. Add a category for ${noMatch === 1 ? 'it' : 'them'} or use <b>Propose categories with AI</b>; after the categories change, Sort offers ${noMatch === 1 ? 'it' : 'them'} again.</p>` : ''}
     <div id="job"></div>
   </section>
   ${ai.proposal ? viewProposal(ai.proposal, tax, counts) : ''}
