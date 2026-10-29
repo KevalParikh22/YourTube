@@ -11,6 +11,7 @@ os.environ["YTKB_DB"] = os.path.join(_TMP, "default.db")
 os.environ["YTKB_TAXONOMY"] = os.path.join(_TMP, "taxonomy.json")
 os.environ["YTKB_SETTINGS"] = os.path.join(_TMP, "settings.json")
 os.environ["YTKB_LOG_DIR"] = _TMP
+os.environ.setdefault("YTDLP_NO_PLUGINS", "1")   # as dashboard.py and main.py set it
 # No test may use a real API key, except tests/test_live.py when YTKB_LIVE=1 (kept here, in memory only)
 LIVE_KEYS = {}
 for _k in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):

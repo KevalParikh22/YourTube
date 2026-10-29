@@ -6,6 +6,8 @@ Standard library only; binds to 127.0.0.1 so nothing is exposed to the network.
     python dashboard.py [--port 8765] [--no-open]
 """
 import os
+# yt-dlp's old plugin loader registers a module named 'extractor' that hides ours (extractor.py); no plugins are used
+os.environ.setdefault("YTDLP_NO_PLUGINS", "1")
 import io
 import re
 import sys
@@ -393,6 +395,8 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_request(self, handler, method):
         try:
             handler()
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the browser went away mid-reply (reload, closed tab); nothing to report
         except Exception:
             applog.get("http").exception("Request failed: %s %s", method, urlparse(self.path).path)
             if not getattr(self, "_headers_sent", False):

@@ -171,7 +171,7 @@
 
 ### T4: Failure card, Try again, Dismiss, Help page logs
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **depends on:** T2, T3
 - **files:** `web/index.html`
 - **steps:** Design notes C (client parts).

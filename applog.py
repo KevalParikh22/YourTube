@@ -37,7 +37,7 @@ def redact(text):
 
 KNOWN = [
     (
-        re.compile(r"playlist does not exist|This playlist type is unviewable", re.IGNORECASE),
+        re.compile(r"playlist does not exist|This playlist type is unviewable|Could not extract info from playlist", re.IGNORECASE),
         "The playlist ID is wrong, or the playlist is private and was read without your sign-in",
         'Check the link. For private playlists and Watch Later choose "Use my browser login" or a cookies.txt file',
     ),
@@ -159,7 +159,8 @@ def log_task(kind, label, ok, stopped, started_at, finished_at, output):
     elif stopped:
         logger.warning("Task stopped: %s", prefix)
     else:
-        explained = explain(output)
+        # only the error lines: the printed troubleshooting tips mention causes too
+        explained = explain("\n".join(l for l in lines if l.lower().startswith(("error", "unexpected error"))))
         if explained:
             cause, fix = explained
         else:

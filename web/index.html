@@ -599,6 +599,7 @@ const S = {
   lib: Number.isInteger(+store.get('ytkb.lib')) && store.get('ytkb.lib') !== null ? +store.get('ytkb.lib') : 1,   // 0 = all libraries
   ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '', open: false, returnFocus: null },
   knowledge: { list: null, pages: {}, loadingList: false, loadingPage: null },
+  logs: null,
   addingCat: false,
 };
 
@@ -766,7 +767,7 @@ function renderView() {
     if (['cloud', 'local', 'routing'].includes(valid)) updateJob();
     if (['local', 'cloud', 'routing'].includes(valid) && !S.local) loadLocal();
   }
-  else if (r === 'help') { v.innerHTML = '<div class="eyebrow">Help</div><h1 class="display">Help<em>setup, downloads and guide</em></h1>' + viewSetup() + `<section class="section"><h2 class="h">Keyboard shortcuts</h2>${shortcutTable()}</section>`; if (!S.guide) loadGuide(); }
+  else if (r === 'help') { v.innerHTML = '<div class="eyebrow">Help</div><h1 class="display">Help<em>setup, downloads and guide</em></h1>' + viewSetup() + viewLogs() + `<section class="section"><h2 class="h">Keyboard shortcuts</h2>${shortcutTable()}</section>`; if (!S.guide) loadGuide(); }
   else if (r === 'ask') {
     const id = +routeParam('id') || null;
     if (id && !S.ask.thread.some(t => t.id === id) && !S.ask.busy) openAsk(id);
@@ -1169,6 +1170,7 @@ function viewSources() {
       ? '<span class="warn-text">On Windows, Chrome-based browsers usually block reading their login.</span> If the sync fails, use Firefox or a cookies.txt export.'
       : `Sign-in help ${tip('Private playlists and Watch Later need a sign-in. Detect uses the first browser signed in to YouTube. Syncing again keeps statuses, notes and categories.')}`}
       ${S.data.ai.ready_for.categorize && S.data.ai.auto_after_sync ? '<br>After each sync, the AI suggests categories for new unsorted videos.' : ''}</p>
+    ${syncFailureCard(job)}
     <div id="job"></div>
   </section>
 
@@ -1180,13 +1182,14 @@ function viewSources() {
       <thead><tr><th>Playlist</th>${many ? '<th>Library</th>' : ''}<th class="r">Videos</th><th class="r">Watch time</th><th>Last synced</th><th></th></tr></thead>
       <tbody>${pls.map(p => `<tr>
         <td><a href="#/" data-act="v-src" data-v="${esc(p.id)}" style="font-weight:500">${esc(p.title)}</a>
+          ${p.access?.startsWith('browser:') ? `<div class="faint" style="font-size:12px">with your ${esc(p.access.slice(8).replace(/\b\w/g, c => c.toUpperCase()))} login</div>` : p.access === 'cookies' ? '<div class="faint" style="font-size:12px">with cookies.txt</div>' : ''}
           ${p.removed_videos ? `<div class="faint" style="font-size:12.5px">${p.removed_videos} removed on YouTube, kept in library</div>` : ''}</td>
         ${many ? `<td><select data-change="pl-lib" data-id="${esc(p.id)}" aria-label="Library for ${esc(p.title)}" style="max-width:160px">
           ${S.data.libraries.map(l => `<option value="${l.id}" ${p.library_id === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></td>` : ''}
         <td class="r">${p.active_videos || 0}</td>
         <td class="r">${fmt(p.duration_seconds)}</td>
         <td class="muted">${esc(fmtDate(p.updated_at))}</td>
-        <td class="r" style="white-space:nowrap">${isSingle(p.id) ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>' : `<button class="btn btn-sm" data-act="resync" data-url="${esc(p.original_url || p.id)}">Sync</button>`}
+        <td class="r" style="white-space:nowrap">${isSingle(p.id) ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>' : `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}">Sync</button>`}
           ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : `<p class="note">${S.lib && S.data.playlists.length ? `No playlists in ${esc(libName(S.lib))} yet. Add one above, or move one here from another library.` : 'No playlists yet. Add one above.'}</p>`}
   </section>
@@ -1300,6 +1303,15 @@ function jobStage(job) {
   return label;
 }
 const lastError = log => ((log || '').split('\n').reverse().find(l => /^\s*(Error|Unexpected error)/.test(l)) || '').trim().slice(0, 160);
+function syncFailureCard(job) {
+  if (!job || job.kind !== 'sync' || job.running || job.ok || job.stopped || job.dismissed) return '';
+  const lines = (job.log || '').split('\n');
+  const cause = lines.find(line => /^\s*Cause:\s*/i.test(line))?.replace(/^\s*Cause:\s*/i, '').trim() || lastError(job.log) || 'The sync did not complete.';
+  const fix = lines.find(line => /^\s*Fix:\s*/i.test(line))?.replace(/^\s*Fix:\s*/i, '').trim();
+  return `<div class="banner warn" style="display:block"><b>Sync failed</b><p style="margin:6px 0">${esc(cause)}</p>${fix ? `<p style="margin:6px 0"><b>Fix:</b> ${esc(fix)}</p>` : ''}
+    <div class="actions"><button class="btn btn-sm btn-dark" data-act="job-retry" data-id="${job.id}">Try again</button><button class="btn btn-sm" data-act="job-dismiss" data-id="${job.id}">Dismiss</button>
+    <details><summary class="btn-text" style="cursor:pointer">See details</summary><pre class="log">${esc(lines.filter(Boolean).slice(-40).join('\n'))}</pre></details></div></div>`;
+}
 function renderJobs() {
   const box = $('#jobs'), job = S.data?.job;
   if (!box || !job) return;
@@ -1392,6 +1404,14 @@ async function runIngest(url) {
   try {
     await queued(await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies, library: g.lib || S.lib || 1 }), 'Sync');
   } catch (e) { toast(e.message, true); }
+}
+async function runResync(playlistId) {
+  const g = S.ingest, p = S.data.playlists.find(x => x.id === playlistId);
+  const browser = BROWSERS.some(([k]) => k === g.access) ? g.access : null;
+  // playlists synced before access was stored use the form's choice once; the server then remembers it
+  const body = p?.access ? { playlist_id: playlistId } : { playlist_id: playlistId, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies };
+  try { await queued(await api('/api/ingest', body), 'Sync'); await load(); }
+  catch (e) { toast(e.message, true); }
 }
 
 /* ---------------- categories ---------------- */
@@ -1965,6 +1985,11 @@ function viewSetup() {
     ${win ? '<p class="hint">You are on Windows: use setup.ps1.</p>' : ''}
   </section>
   <article class="guide">${S.guide ? md(S.guide) : '<p class="note">Loading the guide…</p>'}</article>`;
+}
+function viewLogs() {
+  const shown = S.logs ? `<p class="note" style="margin-top:10px">Current log file: <code>${esc(S.logs.path)}</code></p><pre class="log">${esc((S.logs.lines || []).join('\n') || 'No recent problems found.')}</pre>` : '';
+  return `<section class="section card"><h2 class="h">Logs</h2><p class="note">Log file: <code>logs/yourtube.log</code>. Recent warnings and errors can help diagnose problems.</p>
+    <div class="actions"><button class="btn btn-sm" data-act="logs-show">Show recent problems</button><a class="btn btn-sm" href="/download/yourtube.log" download>Download log</a></div>${shown}</section>`;
 }
 // Small Markdown renderer for docs/SETUP.md: headings, code blocks, tables, lists, rules, paragraphs.
 // Text is escaped before any markup is added, so the guide can't inject HTML.
@@ -2657,6 +2682,21 @@ document.addEventListener('click', async e => {
       break;
     case 'job-drop': try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); toast('Removed from the queue'); } catch (err) { toast(err.message, true); } break;
     case 'jobs-toggle': S.jobsOpen = !S.jobsOpen; renderJobs(); break;
+    case 'job-retry': {
+      try { await queued(await api('/api/job/retry', { id: +id }), 'Sync'); await load(); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'job-dismiss': {
+      try { await api('/api/job/dismiss', { id: +id }); await load(); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'logs-show': {
+      try { S.logs = await api('/api/logs?level=warning&lines=200'); renderView(); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'tri-undo': triageUndo(); break;
     case 'session-done': {
       const ids = el.dataset.ids.split(',').filter(Boolean);
@@ -2672,7 +2712,7 @@ document.addEventListener('click', async e => {
       runIngest(url);
       break;
     }
-    case 'resync': S.ingest.url = el.dataset.url; runIngest(el.dataset.url); refresh(); break;
+    case 'resync': runResync(el.dataset.id); break;
     case 'sug-accept': case 'sug-dismiss': case 'sug-accept-list': case 'sug-dismiss-list': case 'sug-accept-sure': case 'sug-accept-sel': {
       const accept = act.startsWith('sug-accept');
       const ids = act === 'sug-accept-sel' ? [...S.sel] : act.endsWith('-list') || act === 'sug-accept-sure' ? S.visible.map(v => v.video_id) : [id];

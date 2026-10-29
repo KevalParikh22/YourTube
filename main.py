@@ -2,8 +2,11 @@
 Command line for YourTube: syncs a playlist (read-only), sorts its videos into categories,
 prints watch time at 1x vs 2x, and runs maintenance jobs. The dashboard (dashboard.py) is the main interface.
 """
+import os
 import sys
 import argparse
+# yt-dlp's old plugin loader registers a module named 'extractor' that hides ours (extractor.py); no plugins are used
+os.environ.setdefault("YTDLP_NO_PLUGINS", "1")
 import applog
 from extractor import extract_playlist_metadata
 from classifier import classify_playlist_videos, load_taxonomy

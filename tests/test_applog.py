@@ -209,3 +209,25 @@ class AppLogTest(unittest.TestCase):
         self.assertIn("ERROR", log)
         self.assertIn("yourtube.sync: Sync failed (public): completely unknown error", log)
 
+
+
+class ExplainOnlyErrorLinesTest(unittest.TestCase):
+    def test_tips_do_not_decide_the_cause(self):
+        import logging
+        output = ("Error: could not read the playlist: HTTP Error 429: Too Many Requests\n"
+                  "3. \"The playlist does not exist\" usually means a wrong ID\n")
+        with self.assertLogs("yourtube.job", level="ERROR") as logs:
+            applog.log_task("sync", "Sync x", False, False, None, None, output)
+        self.assertIn("rate-limiting", logs.output[0])
+
+
+class YtDlpPluginShadowTest(unittest.TestCase):
+    def test_using_yt_dlp_keeps_our_extractor_module(self):
+        import sys
+        import yt_dlp
+        import extractor
+        with yt_dlp.YoutubeDL({"quiet": True}):
+            pass
+        self.assertIs(sys.modules["extractor"], extractor)
+        from extractor import video_id_from_url   # failed after the first sync before YTDLP_NO_PLUGINS
+        self.assertTrue(callable(video_id_from_url))
