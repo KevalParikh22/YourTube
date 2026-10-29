@@ -145,7 +145,7 @@
 
 ### T1: Log file, redaction, task and request logging
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **files:** `applog.py` (new), `dashboard.py`, `tests/__init__.py`, `tests/test_applog.py` (new)
 - **steps:** Design notes A (not `explain`, which is T2).
 - **acceptance:** [ ] a failed task writes an ERROR record with label, kind, duration and last output; [ ] an exception in a request returns 500 JSON and logs the traceback; [ ] tests prove the token, an `sk-ant-` key, an `AIza` key, a `Cookie:` header and a registered secret never reach the file; [ ] logging can't crash the app (unwritable dir test); [ ] rotation configured.

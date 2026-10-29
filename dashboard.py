@@ -23,6 +23,7 @@ from urllib.parse import urlparse, parse_qs
 
 import storage
 import llm
+import applog
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
 from exporter import videos_to_csv, video_markdown, markdown_zip, safe_filename
 
@@ -150,12 +151,17 @@ class Job:
                         print(f"Warning: Meaning index not updated: {e}")
         except Exception as e:  # surface anything unexpected in the job log
             self._buf.write(f"\nUnexpected error: {e}\n")
+            applog.get("job").exception("Unexpected error in task %s", self.state.get("label"))
         with self.lock:
             stopped = self._stop.is_set()
             self.state.update(running=False, ok=bool(ok), stopped=stopped, log=self._buf.getvalue(),
                               finished_at=datetime.now().isoformat(timespec="seconds"))
             self.done.insert(0, {k: self.state.get(k) for k in ("id", "kind", "label", "ok", "stopped", "started_at", "finished_at")})
             del self.done[self.HISTORY:]
+            task_state = self.state.copy()
+            output = self._buf.getvalue()
+        applog.log_task(task_state.get("kind"), task_state.get("label"), bool(ok), stopped,
+                        task_state.get("started_at"), task_state.get("finished_at"), output)
 
 def _library_name(library):
     return next((l["name"] for l in storage.get_libraries() if l["id"] == library), "all libraries")
@@ -322,12 +328,16 @@ class Handler(BaseHTTPRequestHandler):
         for k, v in (extra_headers or {}).items():
             self.send_header(k, v)
         self.end_headers()
+        self._headers_sent = True
         self.wfile.write(data)
 
     def _json(self, obj, code=200):
         self._send(code, json.dumps(obj, default=str))
 
     def _error(self, msg, code=400):
+        if code in (401, 403):
+            applog.get("http").warning("Request denied: %s %s (%s)", self.command,
+                                        urlparse(self.path).path, msg)
         self._json({"error": msg}, code)
 
     def _queued(self, started):
@@ -352,6 +362,24 @@ class Handler(BaseHTTPRequestHandler):
 
     # --- GET -------------------------------------------------------------------
     def do_GET(self):
+        self._handle_request(self._do_get, "GET")
+
+    def do_POST(self):
+        self._handle_request(self._do_post, "POST")
+
+    def _handle_request(self, handler, method):
+        try:
+            handler()
+        except Exception:
+            applog.get("http").exception("Request failed: %s %s", method, urlparse(self.path).path)
+            if not getattr(self, "_headers_sent", False):
+                self._headers_buffer = []
+                try:
+                    self._json({"error": "Something went wrong. Details are in logs/yourtube.log"}, 500)
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    pass
+
+    def _do_get(self):
         if not self._host_ok():
             return self._error("Forbidden host", 403)
         url = urlparse(self.path)
@@ -499,7 +527,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._error("Not found", 404)
 
     # --- POST ------------------------------------------------------------------
-    def do_POST(self):
+    def _do_post(self):
         # Custom header + JSON content type force a CORS preflight, which we never answer,
         # so other websites open in the browser cannot drive this API.
         if not self._host_ok() or self.headers.get("X-YTKB") != "1":
@@ -975,6 +1003,14 @@ def _classifier(library=None):
     taxonomy = load_taxonomy(library=library)
     return lambda title, channel: classify_video(title, channel, taxonomy)
 
+
+def _ytdlp_version():
+    try:
+        from importlib.metadata import version
+        return version("yt-dlp")
+    except Exception:
+        return "unavailable"
+
 def main():
     parser = argparse.ArgumentParser(description="YourTube local dashboard")
     parser.add_argument("--port", type=int, default=8765)
@@ -982,13 +1018,24 @@ def main():
     parser.add_argument("--print-url", action="store_true", help="Print the dashboard link (with its access token) and exit")
     args = parser.parse_args()
 
+    applog.setup()
     global TOKEN
     TOKEN = load_token()
+    applog.set_secret(TOKEN)
+    for config in llm.load_settings().get("providers", {}).values():
+        if isinstance(config, dict):
+            applog.set_secret(config.get("api_key"))
+    for name in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):
+        applog.set_secret(os.environ.get(name))
     url = f"http://127.0.0.1:{args.port}/?t={TOKEN}"
     if args.print_url:
         print(url)
         return
     storage.init_db()
+    import platform
+    applog.get("dashboard").info("Dashboard started: port=%s, python=%s, yt-dlp=%s, platform=%s, db=%s",
+                                  args.port, platform.python_version(), _ytdlp_version(), sys.platform,
+                                  storage.DB_PATH)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     print(f"YourTube dashboard running. Open: {url}  (Ctrl+C to stop)")
     if not args.no_open:
