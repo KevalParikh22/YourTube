@@ -29,6 +29,7 @@ import storage
 import llm
 import applog
 import voice
+import interests_ai
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
 from exporter import videos_to_csv, video_markdown, markdown_zip, safe_filename
 
@@ -946,6 +947,31 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "transcripts": _transcript_categories(settings),
                                    "details_after_sync": bool(settings.get("details_after_sync")),
                                    "use_descriptions": settings.get("use_descriptions", True) is not False})
+
+            if path == "/api/interests/draft":
+                settings = llm.load_settings()
+                if not llm.is_configured(settings, "interests"):
+                    return self._error("Choose an AI for About you in Settings → AI by task")
+                text = body.get("text")
+                current = body.get("current") or ""
+                lib = _library(body.get("library")) or 1
+                lib_settings = llm.for_library(settings, lib)
+                context = {
+                    "library": _library_name(lib),
+                    "categories": list(load_taxonomy(library=lib)),
+                    "language": lib_settings.get("language") or settings.get("language", "English"),
+                }
+                try:
+                    complete = llm.make_completer(settings, "interests")
+                    draft = interests_ai.draft_interests(text, current, context, complete)
+                    return self._json({"interests": draft})
+                except ValueError as e:
+                    return self._error(str(e))
+                except (llm.LLMError, OSError) as e:
+                    return self._error(str(e) or "Could not draft interests with AI", 502)
+                except Exception as e:
+                    applog.get("http").exception("AI draft interests failed unexpectedly")
+                    return self._error(str(e) or "Could not draft interests with AI", 502)
         except ValueError as e:
             return self._error(str(e))
         except llm.LLMError as e:
