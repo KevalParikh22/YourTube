@@ -1,10 +1,13 @@
 """End-to-end checks of the dashboard API against a temporary database."""
 import json
 import os
+import io
+import contextlib
 import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest import mock
 from http.server import ThreadingHTTPServer
 
 import dashboard
@@ -367,3 +370,115 @@ class AccessTokenTest(unittest.TestCase):
         self.assertEqual(dashboard.load_token(), first)
         self.assertGreaterEqual(len(first), 30)
         self.assertNotIn(first, json.dumps(llm.public_settings(llm.load_settings())))
+
+
+class ServiceAndStartupTest(unittest.TestCase):
+    def setUp(self):
+        self.orig_token = dashboard.TOKEN
+        self.addCleanup(setattr, dashboard, "TOKEN", self.orig_token)
+
+    def test_main_non_tty_start_line_without_token(self):
+        buf = io.StringIO()
+        fake_server = mock.MagicMock()
+        fake_server.serve_forever.side_effect = KeyboardInterrupt
+        with mock.patch("dashboard.ThreadingHTTPServer", return_value=fake_server), \
+             mock.patch("sys.stdout.isatty", return_value=False), \
+             contextlib.redirect_stdout(buf):
+            dashboard.main(["--port", "8765", "--no-open"])
+        out = buf.getvalue()
+        self.assertIn("YourTube dashboard running on http://127.0.0.1:8765. Get the link with: .venv/bin/python dashboard.py --print-url", out)
+        self.assertNotIn("?t=", out)
+        self.assertNotIn(dashboard.TOKEN, out)
+
+    def test_main_tty_start_line_with_token(self):
+        buf = io.StringIO()
+        buf.isatty = lambda: True
+        fake_server = mock.MagicMock()
+        fake_server.serve_forever.side_effect = KeyboardInterrupt
+        with mock.patch("dashboard.ThreadingHTTPServer", return_value=fake_server), \
+             contextlib.redirect_stdout(buf):
+            dashboard.main(["--port", "8765", "--no-open"])
+        out = buf.getvalue()
+        self.assertIn(f"YourTube dashboard running. Open: http://127.0.0.1:8765/?t={dashboard.TOKEN}", out)
+
+    def test_main_port_in_use_exits_0_when_yourtube_running(self):
+        import errno
+        buf = io.StringIO()
+        err = OSError(errno.EADDRINUSE, "Address in use")
+        err.errno = errno.EADDRINUSE
+        with mock.patch("dashboard.ThreadingHTTPServer", side_effect=err), \
+             mock.patch("dashboard._probe_job", return_value=True), \
+             contextlib.redirect_stdout(buf), \
+             self.assertRaises(SystemExit) as cm:
+            dashboard.main(["--port", "8765", "--no-open"])
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("YourTube is already running on port 8765 (or another program uses it). Open it with: .venv/bin/python dashboard.py --print-url", buf.getvalue())
+
+    def test_main_port_in_use_exits_1_when_other_program(self):
+        import errno
+        buf = io.StringIO()
+        err = OSError(errno.EADDRINUSE, "Address in use")
+        err.errno = errno.EADDRINUSE
+        with mock.patch("dashboard.ThreadingHTTPServer", side_effect=err), \
+             mock.patch("dashboard._probe_job", return_value=False), \
+             contextlib.redirect_stdout(buf), \
+             self.assertRaises(SystemExit) as cm:
+            dashboard.main(["--port", "8765", "--no-open"])
+        self.assertEqual(cm.exception.code, 1)
+        self.assertIn("YourTube is already running on port 8765 (or another program uses it). Open it with: .venv/bin/python dashboard.py --print-url", buf.getvalue())
+
+    def test_probe_job(self):
+        # 200 and 401 return True
+        res200 = mock.MagicMock()
+        res200.__enter__.return_value = res200
+        res200.getcode.return_value = 200
+        with mock.patch("urllib.request.urlopen", return_value=res200):
+            self.assertTrue(dashboard._probe_job(8765))
+
+        err401 = urllib.error.HTTPError("http://127.0.0.1:8765/api/job", 401, "Unauthorized", {}, io.BytesIO())
+        with mock.patch("urllib.request.urlopen", side_effect=err401):
+            self.assertTrue(dashboard._probe_job(8765))
+        err401.close()
+
+        # 404 returns False
+        err404 = urllib.error.HTTPError("http://127.0.0.1:8765/api/job", 404, "Not Found", {}, io.BytesIO())
+        with mock.patch("urllib.request.urlopen", side_effect=err404):
+            self.assertFalse(dashboard._probe_job(8765))
+        err404.close()
+
+        # Network/connection error returns False
+        with mock.patch("urllib.request.urlopen", side_effect=ConnectionRefusedError):
+            self.assertFalse(dashboard._probe_job(8765))
+
+    def test_service_unit_text_and_script(self):
+        import subprocess
+        service_sh = os.path.join(dashboard.ROOT_DIR, "scripts", "service.sh")
+        try:
+            os.chmod(service_sh, 0o755)
+        except OSError:
+            pass
+        # bash -n syntax check
+        res = subprocess.run(["bash", "-n", service_sh], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"bash -n failed: {res.stderr}")
+
+        # The unit text quotes paths with spaces
+        with open(service_sh, "r", encoding="utf-8") as f:
+            script_text = f.read()
+
+        # Check Linux systemd unit quoting in service.sh
+        self.assertIn('ExecStartPre=/usr/bin/test -d "$ROOT"', script_text)
+        self.assertIn('ExecStart="$ROOT/.venv/bin/python" "$ROOT/dashboard.py" --no-open --port $PORT', script_text)
+
+        # Check macOS launchd plist also exists in service.sh
+        self.assertIn("com.yourtube.dashboard.plist", script_text)
+        self.assertIn("<key>KeepAlive</key>", script_text)
+        self.assertIn("<key>RunAtLoad</key>", script_text)
+
+        # Check service.ps1 exists and has restart settings
+        service_ps1 = os.path.join(dashboard.ROOT_DIR, "scripts", "service.ps1")
+        self.assertTrue(os.path.exists(service_ps1))
+        with open(service_ps1, "r", encoding="utf-8") as f:
+            ps1_text = f.read()
+        self.assertIn("-RestartCount 3", ps1_text)
+        self.assertIn("pythonw.exe", ps1_text)
+

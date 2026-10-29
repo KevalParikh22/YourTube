@@ -106,7 +106,7 @@
     WorkingDirectory=<repo>
     ExecStartPre=/usr/bin/test -d "<repo>"
     ExecStart="<repo>/.venv/bin/python" "<repo>/dashboard.py" --no-open --port <port>
-    Restart=always
+    Restart=on-failure
     RestartSec=15
     [Install]
     WantedBy=default.target
@@ -180,7 +180,7 @@
 
 ### T5: Start at login
 - **worker:** agy
-- **status:** todo
+- **status:** done
 - **files:** `scripts/service.sh` (new), `scripts/service.ps1` (new), `scripts/setup.sh`, `dashboard.py` (main only), `tests/test_dashboard.py`
 - **steps:** Design notes D.
 - **acceptance:** [ ] `bash -n scripts/service.sh` passes; [ ] the unit text quotes paths with spaces; [ ] a test covers the port-in-use message and the non-TTY start line without the token.

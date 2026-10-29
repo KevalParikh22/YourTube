@@ -1089,12 +1089,26 @@ def _ytdlp_version():
     except Exception:
         return "unavailable"
 
-def main():
+def _probe_job(port, timeout=2.0):
+    import urllib.request
+    import urllib.error
+    url = f"http://127.0.0.1:{port}/api/job"
+    req = urllib.request.Request(url, headers={"User-Agent": "YourTube"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as res:
+            return res.getcode() in (200, 401)
+    except urllib.error.HTTPError as err:
+        return err.code in (200, 401)
+    except Exception:
+        return False
+
+
+def main(argv=None):
     parser = argparse.ArgumentParser(description="YourTube local dashboard")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-open", action="store_true", help="Do not open the dashboard in a browser")
     parser.add_argument("--print-url", action="store_true", help="Print the dashboard link (with its access token) and exit")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     applog.setup()
     global TOKEN
@@ -1109,13 +1123,28 @@ def main():
     if args.print_url:
         print(url)
         return
+
+    import errno
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+    except OSError as err:
+        if err.errno == errno.EADDRINUSE:
+            msg = (f"YourTube is already running on port {args.port} (or another program uses it). "
+                   f"Open it with: .venv/bin/python dashboard.py --print-url")
+            print(msg)
+            applog.get("dashboard").warning(msg)
+            sys.exit(0 if _probe_job(args.port) else 1)
+        raise
+
     storage.init_db()
     import platform
     applog.get("dashboard").info("Dashboard started: port=%s, python=%s, yt-dlp=%s, platform=%s, db=%s",
                                   args.port, platform.python_version(), _ytdlp_version(), sys.platform,
                                   storage.DB_PATH)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
-    print(f"YourTube dashboard running. Open: {url}  (Ctrl+C to stop)")
+    if sys.stdout.isatty():
+        print(f"YourTube dashboard running. Open: {url}  (Ctrl+C to stop)")
+    else:
+        print(f"YourTube dashboard running on http://127.0.0.1:{args.port}. Get the link with: .venv/bin/python dashboard.py --print-url")
     if not args.no_open:
         webbrowser.open(url)
     try:

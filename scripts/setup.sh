@@ -106,3 +106,4 @@ say "Done"
 .venv/bin/python local_setup.py || true
 echo
 echo "  Start the dashboard:  .venv/bin/python dashboard.py"
+echo "  Keep it running:      bash scripts/service.sh install"
