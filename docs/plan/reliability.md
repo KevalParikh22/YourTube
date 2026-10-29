@@ -162,7 +162,7 @@
 
 ### T3: Stored access per playlist; retry, dismiss and logs endpoints
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **depends on:** T1
 - **files:** `storage.py`, `main.py`, `dashboard.py`, `tests/test_dashboard.py`, `tests/test_storage.py`
 - **steps:** Design notes C (server parts: migration, `save_playlist`, `run_pipeline` access, `/api/ingest {playlist_id}`, `Job.retry`/`dismiss`, `/api/job/retry`, `/api/job/dismiss`, `GET /api/logs`, the `yourtube.log` download).

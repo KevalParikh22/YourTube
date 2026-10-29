@@ -1,5 +1,6 @@
 """End-to-end checks of the dashboard API against a temporary database."""
 import json
+import os
 import threading
 import unittest
 import urllib.error
@@ -181,6 +182,39 @@ class DashboardTest(unittest.TestCase):
 
     def test_cancel_without_job(self):
         self.assertEqual(self.call("/api/job/cancel", {})[1], {"ok": False, "stopping": False})
+
+    def test_job_retry_latest_failure_and_dismiss(self):
+        from unittest import mock
+        job = dashboard.Job()
+        job.start("test", "failed", lambda: False)   # not an AUTO_EMBED kind: no real embedding call
+        job._worker.join(2)
+        failed_id = job.snapshot()["id"]
+        self.assertTrue(job.dismiss(failed_id))
+        self.assertTrue(job.snapshot()["dismissed"])
+        self.assertIsNotNone(job.retry(failed_id))
+        job._worker.join(2)
+        latest_id = job.snapshot()["id"]
+        self.assertNotEqual(latest_id, failed_id)
+        self.assertIsNone(job.retry(failed_id))
+        self.assertIsNotNone(job.retry(latest_id))
+        job._worker.join(2)
+
+    def test_logs_level_cap_and_download(self):
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "yourtube.log")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("2026-10-29 12:00:00 INFO    yourtube.test: info\n")
+                f.write("2026-10-29 12:00:01 WARNING yourtube.test: warning\n  detail\n")
+                f.write("2026-10-29 12:00:02 ERROR   yourtube.test: error\n")
+            with mock.patch.object(dashboard.applog, "LOG_FILE", path):
+                code, result = self.call("/api/logs?level=warning&lines=1")
+                self.assertEqual(code, 200)
+                self.assertEqual(result["lines"], ["2026-10-29 12:00:02 ERROR   yourtube.test: error"])
+                code, headers, body = self.raw("/download/yourtube.log")
+                self.assertEqual(code, 200)
+                self.assertIn(b"warning", body)
 
     def test_local_endpoints(self):
         self.assertEqual(self.call("/api/local/pull", {"model": "bad name!"})[0], 400)

@@ -61,6 +61,13 @@ def run_pipeline(
     videos = data['videos']
     if browser_cookies == 'auto' and data.get('browser'):
         print(f"   Found a YouTube sign-in in: {data['browser']}")
+    if browser_cookies:
+        data['access'] = f"browser:{data.get('browser') or browser_cookies}"
+    elif cookies_file:
+        data['access'] = "cookies"
+        data['cookies_file'] = cookies_file
+    else:
+        data['access'] = "public"
     print(f"   Successfully extracted {len(videos)} videos (0 bytes downloaded, non-destructive).")
     if data.get('skipped_unavailable'):
         print(f"   Warning: Skipped {data['skipped_unavailable']} private/deleted/unavailable entries.")

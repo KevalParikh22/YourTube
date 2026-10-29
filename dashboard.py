@@ -34,6 +34,7 @@ DOWNLOADS = {
     "setup.sh": (os.path.join(ROOT_DIR, "scripts", "setup.sh"), "text/x-shellscript; charset=utf-8"),
     "setup.ps1": (os.path.join(ROOT_DIR, "scripts", "setup.ps1"), "text/plain; charset=utf-8"),
     "SETUP.md": (os.path.join(ROOT_DIR, "docs", "SETUP.md"), "text/markdown; charset=utf-8"),
+    "yourtube.log": (applog.LOG_FILE, "text/plain; charset=utf-8"),
 }
 FRAMES_DIR = os.path.join(ROOT_DIR, "frames")
 _FRAME_PATH = re.compile(r"^/frames/([\w-]{1,32})/(\d{1,6})\.jpg$")   # only frames/<video id>/<second>.jpg
@@ -72,9 +73,10 @@ class Job:
     def __init__(self):
         self.lock = threading.Lock()
         self.state = {"id": 0, "running": False, "ok": None, "log": "", "kind": None, "label": None,
-                      "started_at": None, "finished_at": None}
+                      "started_at": None, "finished_at": None, "dismissed": False}
         self.pending = []    # [{'id', 'kind', 'label', 'fn', 'queued_at'}]
         self.done = []       # recent finished tasks, newest first (without logs)
+        self.tasks = {}      # retry functions for retained finished tasks
         self._next = 1
         self._buf = io.StringIO()
         self._stop = threading.Event()
@@ -102,6 +104,7 @@ class Job:
                 snap["log"] = self._buf.getvalue()
             snap["queue"] = [{k: t[k] for k in ("id", "kind", "label", "queued_at")} for t in self.pending]
             snap["recent"] = list(self.done)
+            snap["dismissed"] = bool(snap.get("dismissed"))
         return snap
 
     def start(self, kind, label, fn, key=None):
@@ -109,11 +112,12 @@ class Job:
         Queues a task. Returns {'id', 'position'} (0 = started now), or None when the same task (kind + key, default
         the label) is already waiting or running.
         """
-        key = json.dumps([kind, key if key is not None else label], sort_keys=True, default=str)
+        retry_key = key if key is not None else label
+        key = json.dumps([kind, retry_key], sort_keys=True, default=str)
         with self.lock:
             if (self.state["running"] and self.state.get("key") == key) or any(t["key"] == key for t in self.pending):
                 return None
-            task = {"id": self._next, "kind": kind, "label": label, "fn": fn, "key": key,
+            task = {"id": self._next, "kind": kind, "label": label, "fn": fn, "key": key, "retry_key": retry_key,
                     "queued_at": datetime.now().isoformat(timespec="seconds")}
             self._next += 1
             self.pending.append(task)
@@ -123,6 +127,22 @@ class Job:
                 self._worker.start()
         return {"id": task["id"], "position": position}
 
+    def retry(self, task_id):
+        with self.lock:
+            if not self.done or self.done[0]["id"] != task_id or self.done[0]["ok"] or self.done[0].get("stopped"):
+                return None
+            task = self.tasks.get(task_id)
+        if task is None:
+            return None
+        return self.start(task["kind"], task["label"], task["fn"], key=task["retry_key"])
+
+    def dismiss(self, task_id):
+        with self.lock:
+            if self.state.get("id") != task_id or self.state.get("running"):
+                return False
+            self.state["dismissed"] = True
+            return True
+
     def _work(self):
         while True:
             with self.lock:
@@ -130,9 +150,10 @@ class Job:
                     self._worker = None
                     return
                 task = self.pending.pop(0)
+                self.tasks[task["id"]] = task
                 self._buf = io.StringIO()
                 self._stop.clear()
-                self.state = {"id": task["id"], "key": task["key"], "running": True, "ok": None, "log": "", "kind": task["kind"], "label": task["label"],
+                self.state = {"id": task["id"], "key": task["key"], "running": True, "ok": None, "log": "", "kind": task["kind"], "label": task["label"], "dismissed": False,
                               "started_at": datetime.now().isoformat(timespec="seconds"), "finished_at": None}
             self._run(task["fn"])
 
@@ -158,6 +179,8 @@ class Job:
                               finished_at=datetime.now().isoformat(timespec="seconds"))
             self.done.insert(0, {k: self.state.get(k) for k in ("id", "kind", "label", "ok", "stopped", "started_at", "finished_at")})
             del self.done[self.HISTORY:]
+            retained = {t["id"] for t in self.done}
+            self.tasks = {task_id: task for task_id, task in self.tasks.items() if task_id in retained}
             task_state = self.state.copy()
             output = self._buf.getvalue()
         applog.log_task(task_state.get("kind"), task_state.get("label"), bool(ok), stopped,
@@ -412,6 +435,10 @@ class Handler(BaseHTTPRequestHandler):
             if name not in DOWNLOADS:
                 return self._error("Not found", 404)
             path, ctype = DOWNLOADS[name]
+            if name == "yourtube.log":
+                path = applog.LOG_FILE
+            if name == "yourtube.log" and not os.path.isfile(path):
+                return self._error("Log file not found", 404)
             with open(path, "rb") as f:
                 data = f.read()
             headers = {"Content-Disposition": f'attachment; filename="{name}"'} if url.path.startswith("/download/") else None
@@ -420,6 +447,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(build_state(_library((qs.get("library") or ["1"])[0])))
         if url.path == "/api/job":
             return self._json(JOB.snapshot())
+        if url.path == "/api/logs":
+            levels = {"debug": 10, "info": 20, "warning": 30, "error": 40, "critical": 50}
+            level_name = (qs.get("level") or ["warning"])[0].lower()
+            if level_name not in levels:
+                return self._error("level must be debug, info, warning, error or critical")
+            try:
+                limit = max(1, min(1000, int((qs.get("lines") or ["200"])[0])))
+            except ValueError:
+                return self._error("lines must be a number")
+            records = []
+            if os.path.isfile(applog.LOG_FILE):
+                with open(applog.LOG_FILE, encoding="utf-8", errors="replace") as f:
+                    for line in f:
+                        if re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d (DEBUG|INFO|WARNING|ERROR|CRITICAL) ", line):
+                            records.append([line.rstrip("\n")])
+                        elif records:
+                            records[-1].append(line.rstrip("\n"))
+                minimum = levels[level_name]
+                records = [r for r in records if levels.get(re.match(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d (\w+)", r[0]).group(1).lower(), 0) >= minimum]
+            selected = []
+            count = 0
+            for record in reversed(records):
+                if count + len(record) > limit:
+                    continue
+                selected.append(record)
+                count += len(record)
+            lines = [line for record in reversed(selected) for line in record]
+            return self._json({"path": applog.LOG_FILE, "lines": lines})
         if url.path == "/api/export/markdown":
             vid = (qs.get("id") or [""])[0]
             v = next((x for x in storage.get_library() if x["video_id"] == vid), None)
@@ -640,23 +695,33 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"ok": True, "changed": changed})
 
             if path == "/api/ingest":
-                url = _clean(body.get("url"))
+                playlist_id = _clean(body.get("playlist_id"))
+                stored = None
+                if playlist_id:
+                    stored = storage.get_playlist(playlist_id)
+                    if stored is None:
+                        return self._error("Unknown playlist", 404)
+                url = _clean(body.get("url")) if not stored else stored.get("original_url")
                 if not url:
                     return self._error("Playlist URL or ID is required")
                 from extractor import video_id_from_url
                 vid = video_id_from_url(url)
                 if vid:   # a link to one video: added on its own, read without the sign-in
                     return self._queued(JOB.start("sync", f"Add video {vid}", lambda: _add_video(vid, lib or 1), key=vid))
-                access = body.get("access") or "public"
+                access = body.get("access") or (stored.get("access") if stored else None) or "public"
                 browser = cookies = None
-                if access == "browser":
+                if not isinstance(access, str):
+                    return self._error("Unsupported access method")
+                if access == "browser" or access.startswith("browser:"):
                     browser = (body.get("browser") or "").lower()
+                    if access.startswith("browser:") and "access" not in body:
+                        browser = access.split(":", 1)[1]
                     if browser not in ALLOWED_BROWSERS:
                         return self._error("Unsupported browser")
                 elif access == "cookies":
-                    cookies = _clean(body.get("cookies_file"))
+                    cookies = _clean(body.get("cookies_file") or (stored or {}).get("cookies_file"))
                     if not cookies or not os.path.isfile(cookies):
-                        return self._error("cookies.txt file not found")
+                        return self._error("cookies.txt file not found: choose access again")
                 return self._queued(JOB.start("sync", f"Sync {url}", lambda: _sync(url, browser, cookies, lib or 1)))
 
             if path.startswith("/api/ai/") or path == "/api/presets":
@@ -681,6 +746,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("id must be a number")
                 ok = JOB.request_stop(task_id)
                 return self._json({"ok": ok, "stopping": JOB.stop_requested() if ok else False})
+
+            if path in ("/api/job/retry", "/api/job/dismiss"):
+                task_id = body.get("id")
+                if not isinstance(task_id, int) or isinstance(task_id, bool):
+                    return self._error("id must be a number")
+                if path == "/api/job/retry":
+                    started = JOB.retry(task_id)
+                    return self._error("That task can no longer be retried", 404) if started is None else self._queued(started)
+                return self._json({"ok": JOB.dismiss(task_id)})
 
             if path == "/api/details/fetch":
                 from enrich import run_enrich
