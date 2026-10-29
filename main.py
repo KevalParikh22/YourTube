@@ -2,8 +2,12 @@
 Command line for YourTube: syncs a playlist (read-only), sorts its videos into categories,
 prints watch time at 1x vs 2x, and runs maintenance jobs. The dashboard (dashboard.py) is the main interface.
 """
+import os
 import sys
 import argparse
+# yt-dlp's old plugin loader registers a module named 'extractor' that hides ours (extractor.py); no plugins are used
+os.environ.setdefault("YTDLP_NO_PLUGINS", "1")
+import applog
 from extractor import extract_playlist_metadata
 from classifier import classify_playlist_videos, load_taxonomy
 from storage import save_playlist, get_all_videos, init_db
@@ -44,11 +48,29 @@ def run_pipeline(
         print("   2. Or set the YouTube playlist visibility to 'Unlisted' so it requires no cookies.")
         print("   3. \"The playlist does not exist\" usually means a wrong ID, or a private playlist read without")
         print("      a sign-in. See your playlists and their IDs with: python main.py --list --browser auto")
+        cause, fix = applog.explain(str(e)) or (None, None)
+        if cause and fix:
+            print(f"Cause: {cause}")
+            print(f"Fix: {fix}")
+        if browser_cookies:
+            access = f"browser:{browser_cookies}"
+        elif cookies_file:
+            access = "cookies"
+        else:
+            access = "public"
+        applog.get("sync").error("Sync failed (%s): %s", access, str(e))
         return False
         
     videos = data['videos']
     if browser_cookies == 'auto' and data.get('browser'):
         print(f"   Found a YouTube sign-in in: {data['browser']}")
+    if browser_cookies:
+        data['access'] = f"browser:{data.get('browser') or browser_cookies}"
+    elif cookies_file:
+        data['access'] = "cookies"
+        data['cookies_file'] = cookies_file
+    else:
+        data['access'] = "public"
     print(f"   Successfully extracted {len(videos)} videos (0 bytes downloaded, non-destructive).")
     if data.get('skipped_unavailable'):
         print(f"   Warning: Skipped {data['skipped_unavailable']} private/deleted/unavailable entries.")

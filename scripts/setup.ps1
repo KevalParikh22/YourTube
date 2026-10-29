@@ -1,8 +1,9 @@
 # YourTube setup for Windows (PowerShell). NOT YET TESTED ON WINDOWS — please report problems. Guide: docs/SETUP.md
 #   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1            # app only
 #   powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -LocalAI   # also Ollama + a model for this PC
+#   add -Service to keep the dashboard running (starts at logon; untested)
 # Safe to run again; asks before installing anything system-wide.
-param([switch]$LocalAI, [switch]$Yes)
+param([switch]$LocalAI, [switch]$Yes, [switch]$Service)
 $ErrorActionPreference = "Stop"
 # Find the YourTube folder: the current folder, next to this script, or one level up (scripts\)
 $root = @((Get-Location).Path, $PSScriptRoot, (Split-Path $PSScriptRoot -Parent)) |
@@ -59,4 +60,10 @@ if ($LocalAI) {
 
 Write-Host "`nDone" -ForegroundColor White
 & .venv\Scripts\python.exe local_setup.py
-Write-Host "`n  Start the dashboard:  .venv\Scripts\python.exe dashboard.py"
+if ($Service) {
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "service.ps1") -Install
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot "service.ps1") -Open
+} else {
+    Write-Host "`n  Start the dashboard:  .venv\Scripts\python.exe dashboard.py"
+    Write-Host "  Keep it running:      powershell -ExecutionPolicy Bypass -File scripts\service.ps1 -Install"
+}

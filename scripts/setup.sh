@@ -2,6 +2,7 @@
 # YourTube setup for Linux and macOS. Full guide: docs/SETUP.md
 #   bash scripts/setup.sh            # app only: Python environment and dependencies
 #   bash scripts/setup.sh --local-ai # also local AI: Ollama plus a model sized for this computer
+#   bash scripts/setup.sh --service  # also keep the dashboard running: starts at login, restarts after a crash
 #   options: -y/--yes (no questions), YTKB_MODEL=name (choose the model)
 # Safe to run again: every step checks first and skips what is already done.
 # It asks before installing anything system-wide (Ollama's installer may ask for your password).
@@ -15,12 +16,13 @@ for d in "$PWD" "$HERE" "$(dirname "$HERE")"; do
 done
 [ -n "$ROOT" ] || { echo "Run this inside the YourTube folder (the one with dashboard.py), e.g.: cd ~/yourtube && bash setup.sh"; exit 1; }
 cd "$ROOT"
-LOCAL_AI=0; ASSUME_YES=0
+LOCAL_AI=0; ASSUME_YES=0; SERVICE=0
 for arg in "$@"; do
   case "$arg" in
     --local-ai) LOCAL_AI=1 ;;
+    --service)  SERVICE=1 ;;
     -y|--yes)   ASSUME_YES=1 ;;
-    -h|--help)  sed -n '2,7p' "$0"; exit 0 ;;
+    -h|--help)  sed -n '2,8p' "$0"; exit 0 ;;
     *) echo "Unknown option: $arg"; exit 2 ;;
   esac
 done
@@ -105,4 +107,10 @@ fi
 say "Done"
 .venv/bin/python local_setup.py || true
 echo
-echo "  Start the dashboard:  .venv/bin/python dashboard.py"
+if [ "$SERVICE" = 1 ]; then
+  say "Background service"
+  bash scripts/service.sh install && sleep 2 && bash scripts/service.sh open || warn "Could not install the service. Start it by hand: .venv/bin/python dashboard.py"
+else
+  echo "  Start the dashboard:  .venv/bin/python dashboard.py"
+  echo "  Keep it running:      bash scripts/service.sh install   (starts at login, restarts after a crash)"
+fi

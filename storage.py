@@ -86,6 +86,10 @@ def init_db(db_path: str = DB_PATH) -> None:
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        playlist_cols = _columns(cursor, "playlists")
+        for col in ("access", "cookies_file"):
+            if col not in playlist_cols:
+                cursor.execute(f"ALTER TABLE playlists ADD COLUMN {col} TEXT")
 
         cursor.execute(VIDEOS_DDL.format(name="videos"))
 
@@ -311,14 +315,16 @@ def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], d
         ).fetchall()}
 
         cursor.execute("""
-            INSERT INTO playlists (id, title, original_url, total_videos, total_duration_seconds, updated_at, library_id)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?)
+            INSERT INTO playlists (id, title, original_url, total_videos, total_duration_seconds, updated_at, library_id, access, cookies_file)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?)
             ON CONFLICT(id) DO UPDATE SET
                 title = excluded.title,
                 original_url = COALESCE(NULLIF(excluded.original_url, ''), playlists.original_url),
                 total_videos = excluded.total_videos,
                 total_duration_seconds = excluded.total_duration_seconds,
-                updated_at = CURRENT_TIMESTAMP
+                updated_at = CURRENT_TIMESTAMP,
+                access = COALESCE(excluded.access, playlists.access),
+                cookies_file = COALESCE(excluded.cookies_file, playlists.cookies_file)
         """, (
             playlist_id,
             playlist_info.get('title', 'Untitled Playlist'),
@@ -326,6 +332,7 @@ def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], d
             len(videos),
             sum(v.get('duration_seconds', 0) for v in videos),
             int(library_id or 1),   # only for a new playlist: a re-sync keeps the library it was moved to
+            playlist_info.get('access'), playlist_info.get('cookies_file'),
         ))
 
         for idx, v in enumerate(videos):
@@ -487,7 +494,7 @@ def get_playlists(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT p.id, p.title, p.original_url, p.created_at, p.updated_at, p.library_id,
+            SELECT p.id, p.title, p.original_url, p.created_at, p.updated_at, p.library_id, p.access, p.cookies_file,
                    SUM(CASE WHEN pi.removed = 0 THEN 1 ELSE 0 END) AS active_videos,
                    SUM(CASE WHEN pi.removed = 1 THEN 1 ELSE 0 END) AS removed_videos,
                    SUM(CASE WHEN pi.removed = 0 THEN v.duration_seconds ELSE 0 END) AS duration_seconds
@@ -498,6 +505,12 @@ def get_playlists(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
             ORDER BY p.updated_at DESC
         """)
         return [dict(row) for row in cursor.fetchall()]
+
+def get_playlist(playlist_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
+        return dict(row) if row else None
 
 def update_videos(
     video_ids: Iterable[str],

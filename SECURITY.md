@@ -21,6 +21,7 @@ YourTube runs locally on your machine. Your library, transcripts, and credential
 - **Access token:** Needs the access token to access the dashboard or its API.
 - **Host header:** Checks the `Host` header on incoming requests to prevent DNS rebinding.
 - **Write checks:** Checks the `Host` header and the `X-YTKB` header on writes (`POST` requests) to protect against cross-site requests.
+- **Logs:** `logs/yourtube.log` records failures to help with debugging. API keys, cookie headers and the access token are replaced with `[hidden]` before anything is written. When run as a background service, the access link is not printed to the service output.
 
 ## AI data privacy
 

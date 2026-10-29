@@ -16,6 +16,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | **S6 · Setup and decisions** | §4 | ~15 min | Nothing |
 | **S7 · Summaries and knowledge (Phase 3)** | S7 below | ~40 min + waiting | Ollama running; pick 4–5 videos of one category you know well |
 | **S8 · Navigation, Settings and shortcuts** | S8 below | ~15 min | Nothing |
+| **S9 · Failures, logs and always-on** | S9 below | ~15 min | Nothing |
 
 ### S1 extra checks (new ratings, 2026-10-24)
 
@@ -53,6 +54,18 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S8.6 | Add category | Categories → Add category → name + keywords → Save; then Propose with AI | Inline row, no pop-up; the new category is protected, editable, and never offered for removal | |
 | S8.7 | Keyboard only | Press `?`, then try every shortcut; Tab from the top of the page | All work, none fire while typing; "Skip to content" appears first; focus is always visible | |
 | S8.8 | Old links | Open `#/ai` and `#/setup` | They land on Settings → Cloud AI and Help | |
+
+### S9 checks (failures, logs and always-on, 2026-10-29)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S9.1 | Failed sync | Playlists → add a made-up link such as `https://www.youtube.com/playlist?list=PLzzzzzzzzzzzzzzzz` | A card with the cause, a fix, Try again, Dismiss, See details | |
+| S9.2 | It sticks, then goes | Refresh the page; then Dismiss; refresh again | Still there after the first refresh; gone after Dismiss | |
+| S9.3 | Retry works | Add a real playlist after a failed one, without restarting | It syncs (before the fix, everything failed until a restart) | |
+| S9.4 | Remembered access | Sync your private playlist or Watch Later from its row | It uses the login it was added with; the row says "with your Chrome login" | |
+| S9.5 | Logs | Help → Logs → Show recent problems; Download log | The failure is listed with cause and fix; no API key or `?t=` token in the file | |
+| S9.6 | Always on | `bash scripts/service.sh install`; log out and in (or reboot) | The dashboard opens at http://127.0.0.1:8765 without starting anything | |
+| S9.7 | Recovers | Imitate a crash: `pkill -9 -f dashboard.py`, wait 20 s | It is back (a normal stop with `systemctl --user stop yourtube` stays stopped) | |
 
 ## 1. Library at real size ✓ done 2026-10-24
 

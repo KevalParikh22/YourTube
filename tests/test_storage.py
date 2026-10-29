@@ -19,6 +19,11 @@ class StorageTest(unittest.TestCase):
         self.assertEqual(self.save([video("a"), video("b")]), {"added": 2, "updated": 0, "removed": 0})
         self.assertEqual(self.save([video("a"), video("b"), video("c")]), {"added": 1, "updated": 2, "removed": 0})
 
+    def test_playlist_access_is_saved_and_old_callers_do_not_clear_it(self):
+        storage.save_playlist({**playlist("PL-access"), "access": "browser:chrome"}, [video("a")], db_path=self.db)
+        storage.save_playlist(playlist("PL-access"), [video("a")], db_path=self.db)
+        self.assertEqual(storage.get_playlist("PL-access", db_path=self.db)["access"], "browser:chrome")
+
     def test_resync_keeps_status_notes_and_locked_category(self):
         self.save([video("a", category="Auto"), video("b", category="Auto")])
         storage.update_videos(["a"], status="completed", notes="great", category="Mine", db_path=self.db)
@@ -84,6 +89,7 @@ class StorageTest(unittest.TestCase):
         self.assertEqual((a["status"], a["notes"], a["category"], a["category_locked"], a["category_source"]),
                          ("completed", "my notes", "Mine", 1, "manual"))
         self.assertEqual(a["sources"], [{"id": "PL1", "position": 3, "removed": 0, "library": 1}])   # old playlists join library 1
+        self.assertIn("access", storage.get_playlist("PL1", db_path=self.db))
         storage.update_videos(["a"], status="skipped", db_path=self.db)
         self.assertEqual(self.lib()["a"]["status"], "skipped")
         storage.init_db(self.db)  # second run is a no-op

@@ -19,13 +19,14 @@ Everything you need to install, configure and run YourTube on your own computer.
 
 ## 2. Quick start
 
-Download the setup script from the dashboard (**Setup** page) or use the copy in `scripts/`, then run it **inside the YourTube folder** (the one containing `dashboard.py`).
+Download the setup script from the dashboard (**Help** page, ? icon) or use the copy in `scripts/`, then run it **inside the YourTube folder** (the one containing `dashboard.py`).
 
 **Linux and macOS**
 
 ```bash
 bash scripts/setup.sh              # the app only
 bash scripts/setup.sh --local-ai   # the app plus local AI (Ollama and a model that fits your computer)
+bash scripts/setup.sh --local-ai --service   # recommended: also keep the dashboard running (see "Keep it running")
 ```
 
 **Windows (PowerShell)**
@@ -33,13 +34,29 @@ bash scripts/setup.sh --local-ai   # the app plus local AI (Ollama and a model t
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1            # the app only
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -LocalAI   # the app plus local AI
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -LocalAI -Service   # also keep it running (not yet tested)
 ```
 
-Then start the dashboard. It opens in your browser through its **access link** (`http://127.0.0.1:8765/?t=…`, also printed in the terminal). The link carries a private token, so other people using the same computer can't open your dashboard. After the first visit your browser remembers it, and plain http://127.0.0.1:8765 works.
+With `--service` the dashboard is now running and opens in your browser, and you can skip the next command. Otherwise start the dashboard. It opens in your browser through its **access link** (`http://127.0.0.1:8765/?t=…`, also printed in the terminal). The link carries a private token, so other people using the same computer can't open your dashboard. After the first visit your browser remembers it, and plain http://127.0.0.1:8765 works.
 
 ```bash
 .venv/bin/python dashboard.py              # Windows: .venv\Scripts\python.exe dashboard.py
 ```
+
+### Keep it running
+
+Instead of starting it by hand each time, install it as a background service. It starts when you log in and restarts by itself if it crashes. If the YourTube folder is on a drive that mounts after login, the service keeps retrying every 15 seconds until the folder is there.
+
+```bash
+bash scripts/service.sh install      # Linux (systemd user service) and macOS (LaunchAgent)
+bash scripts/service.sh open         # open the dashboard with its access link
+bash scripts/service.sh status       # is it running?
+bash scripts/service.sh uninstall    # stop it and remove the service
+```
+
+Add `--port 8766` to `install` and `open` to use another port. On Windows: `powershell -ExecutionPolicy Bypass -File scripts\service.ps1 -Install` (also `-Open`, `-Status`, `-Uninstall`; not yet tested). After updating YourTube, restart the service so it runs the new code: `systemctl --user restart yourtube` (macOS: run `uninstall` then `install`).
+
+Starting `dashboard.py` while it already runs prints "YourTube is already running on port 8765" and exits; open it with `bash scripts/service.sh open` or `.venv/bin/python dashboard.py --print-url`.
 
 ### What the setup script does
 
@@ -52,6 +69,7 @@ Then start the dashboard. It opens in your browser through its **access link** (
 | 4b. Local transcription *(local AI only)* | Installs faster-whisper from `requirements-local.txt` (plus NVIDIA libraries on Linux/Windows; about 1.2 GB). The speech model downloads on first use (~1.6 GB) | **Yes** |
 | 5. Model *(local AI only)* | Downloads the model that fits your GPU and makes it YourTube's default AI | **Yes** |
 | 6. Embedding model *(local AI only)* | Downloads `qwen3-embedding:0.6b` (0.64 GB) for questions and search by meaning | **Yes** |
+| 7. Service *(`--service` only)* | Installs the background service (see "Keep it running") and opens the dashboard | No (only files in your user folder) |
 | Done | Prints the local AI check | — |
 
 The script is safe to run again: every step skips what is already done.
@@ -62,6 +80,7 @@ The script is safe to run again: every step skips what is already done.
 |---|---|---|---|
 | Local AI | `--local-ai` | `-LocalAI` | Also install Ollama and a model |
 | No questions | `-y` / `--yes` | `-Yes` | Answer "yes" to every question |
+| Keep it running | `--service` | `-Service` | Start the dashboard at login and restart it after a crash |
 | Choose the model | `YTKB_MODEL=qwen3.5:2b bash scripts/setup.sh --local-ai` | `$env:YTKB_MODEL="qwen3.5:2b"` | Use this model instead of the recommendation |
 | Help | `--help` | — | Show usage |
 
@@ -249,6 +268,7 @@ Shortcuts are ignored while you type in a field.
 | `reports/` | Old static reports from earlier versions (no longer written) | Yes |
 | `frames/` | Slide thumbnails for the slide strip | Yes (the strip disappears; read slides again to restore it) |
 | `media_cache/` | Temporary audio and video while processing; emptied after each job | Yes |
+| `logs/` | `yourtube.log` (and up to 5 older copies of 2 MB each): failures with their cause, fix and details. Keys, cookies and the access token are blanked out | Yes |
 | `.venv/` | The Python environment | Yes (run the setup again) |
 
 ### `settings.json` keys
@@ -287,6 +307,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `YTKB_DB` | Use another database file (handy for testing) |
 | `YTKB_TAXONOMY` | Use another categories file |
 | `YTKB_SETTINGS` | Use another settings file |
+| `YTKB_LOG_DIR` | Write `yourtube.log` to another folder |
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | API keys, used when no key is saved in Settings → Cloud AI |
 | `YTKB_MODEL` | Model the setup script downloads instead of the recommendation |
 
@@ -316,8 +337,12 @@ Your database is upgraded automatically when the dashboard starts. Back up `yt_k
 
 ## 9. Troubleshooting
 
+When something fails, the task's card shows the cause and a fix. **Try again** re-runs it; **Dismiss** hides it. Every failure is also written to `logs/yourtube.log` with the details; the Help page (? icon) shows recent problems and can download the log to attach to a bug report.
+
 | Problem | Fix |
 |---|---|
+| A sync fails, and trying again fails too | Read the cause on the card, or in Help → Logs → Show recent problems. A playlist re-syncs with the access it was added with; for a private playlist or Watch Later choose your browser login before adding it. |
+| The dashboard doesn't open after a restart | `bash scripts/service.sh status`; if it isn't installed, start it with `.venv/bin/python dashboard.py` or install the service. |
 | "The playlist does not exist" | Wrong ID, or a private playlist read without a sign-in. Run `main.py --list`. |
 | Private playlist has 0 videos | The chosen browser isn't signed in to YouTube. Try **Detect**, or another browser. |
 | "Confirm you're not a bot" during Fetch details | YouTube is rate-limiting. Wait an hour or two; progress is kept. |

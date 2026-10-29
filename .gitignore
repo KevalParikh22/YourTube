@@ -10,3 +10,13 @@ reports/
 media_cache/
 frames/
 .team/runs/
+# Logs
+logs/
+# AI assistant and team-workflow files (kept locally, not published)
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+HANDOFF.md
+.claude/
+.team/
+docs/plan/
