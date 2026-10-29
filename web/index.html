@@ -75,6 +75,9 @@
   .bar-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .bar-icon.on { color: var(--ink); background: var(--sunken); }
 
+  .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; margin-right: 6px; vertical-align: 1px; animation: rec-pulse 1s ease-in-out infinite; }
+  @keyframes rec-pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
   .skip-link { position: fixed; z-index: 100; top: 8px; left: 8px; padding: 8px 12px; background: var(--raised); border: 2px solid var(--accent); border-radius: 6px; transform: translateY(-160%); }
   .skip-link:focus { transform: translateY(0); }
   .shortcut-scrim { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 20px; background: #0008; }
@@ -2123,7 +2126,7 @@ function viewAbout() {
         <label class="field-label" for="ai-look">What are you looking for?</label>
         <textarea id="ai-look" rows="3" placeholder="Say or type it in your own words: what you want to learn, your level, what to skip, and why">${esc(S.about.look)}</textarea>
         <div class="actions" style="margin-top:8px">
-          <button type="button" class="btn btn-sm" data-act="voice-rec" aria-label="Record your answer" ${voiceAvailable ? '' : `disabled title="${esc(voiceHint)}"`}>${S.about.recording ? `■ Stop ${clock(S.about.seconds)}` : '🎙 Record'}</button>
+          <button type="button" class="btn btn-sm" data-act="voice-rec" aria-label="Record your answer" ${voiceAvailable ? '' : `disabled title="${esc(voiceHint)}"`}>${S.about.recording ? `<span class="rec-dot" aria-hidden="true"></span>■ Stop ${clock(S.about.seconds)}` : '🎙 Record'}</button>
           ${!voiceAvailable ? `<span class="hint" title="${esc(voiceHint)}">Voice unavailable · Run <code>bash scripts/setup.sh --local-ai</code></span>` : ''}
           <button type="button" class="btn btn-dark btn-sm" data-act="interests-draft" ${!S.about.look.trim() || S.about.recording ? 'disabled' : ''}>${S.about.drafting ? '<span class="spin" style="display:inline-block"></span> Writing…' : 'Write my interests with AI'}</button>
         </div>
@@ -2602,11 +2605,11 @@ async function startAboutRecording() {
     aboutTimer = setInterval(() => {
       a.seconds = Math.floor((Date.now() - aboutStarted) / 1000);
       if (a.seconds >= 180) stopAboutRecording();
-      else { const button = $('[data-act="voice-rec"]'); if (button) button.textContent = `■ Stop ${clock(a.seconds)}`; }
+      else { const button = $('[data-act="voice-rec"]'); if (button) button.innerHTML = `<span class="rec-dot" aria-hidden="true"></span>■ Stop ${clock(a.seconds)}`; }
     }, 1000);
     refresh();
   } catch (err) {
-    releaseAboutMic(); a.recording = false;
+    releaseAboutMic(); a.recording = false; aboutRecorder = null; aboutChunks = [];
     a.error = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
       ? "Allow the microphone for this page (the address bar's site settings), or type instead" : err.message;
     refresh(); toast(a.error, true);
