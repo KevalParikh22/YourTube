@@ -1,6 +1,6 @@
 # PRD: Phase 3 — The brain
 
-**Status:** built (2026-10-28) · plan: `docs/plan/phase-3-brain.md`
+**Status:** built (2026-10-28)
 
 Before Phase 3, a video only had notes once it was rated, so 10 of 313 videos had any. Phase 3 makes the summary its own step, richer than YouTube's, and adds learning across videos.
 
