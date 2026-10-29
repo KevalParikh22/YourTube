@@ -172,6 +172,17 @@ class SuggestionTest(unittest.TestCase):
         # pending suggestions are not offered again
         self.assertEqual(storage.videos_for_ai("unsorted", db_path=self.db), [])
 
+    def test_no_match_is_not_offered_again_until_categories_change(self):
+        before = {v["video_id"] for v in storage.videos_for_ai("unsorted", db_path=self.db)}
+        self.assertIn("a", before)
+        key = storage.taxonomy_key(["Cooking", "Fitness"])
+        storage.mark_no_match(["a"], key, db_path=self.db)
+        same = {v["video_id"] for v in storage.videos_for_ai("unsorted", db_path=self.db, no_match_key=key)}
+        self.assertEqual(same, before - {"a"})
+        changed = storage.taxonomy_key(["Cooking", "Fitness", "Woodworking"])
+        self.assertIn("a", {v["video_id"] for v in storage.videos_for_ai("unsorted", db_path=self.db, no_match_key=changed)})
+        self.assertEqual(storage.taxonomy_key(["Fitness", "Cooking"]), key)   # order doesn't matter
+
     def test_accept_by_confidence_then_dismiss(self):
         storage.save_suggestions([{"video_id": "a", "category": "Cooking", "confidence": 0.9},
                                   {"video_id": "b", "category": "Fitness", "confidence": 0.5}], db_path=self.db)

@@ -1348,13 +1348,14 @@ function updateJob() {
   const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
-  if (!mine || (!job.log && !job.running)) { box.innerHTML = waitLine; return; }
+  if (!mine || (!job.log && !job.running) || (job.dismissed && !job.running)) { box.innerHTML = waitLine; return; }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
   const stopping = !!job.stopping || S.stopPending;
   const stage = job.running ? jobStage(job) : '';
   const head = job.running ? `<span class="status-line"><span class="spin"></span>${stage ? `<b style="font-weight:600">${esc(stage)}</b>&nbsp;·&nbsp;` : ''}${stopping ? 'Stopping…' : text[0]} ${stopping ? '<button class="btn-text" disabled>Stopping…</button>' : '<button class="btn-text" data-act="job-stop">Stop</button>'}</span>`
     : `<div class="done-banner ${job.stopped ? 'bad' : job.ok ? 'ok' : 'bad'}"><b>${job.stopped ? `Stopped: ${esc(job.label || '')}` : job.ok ? 'Finished' : 'Failed'}</b>
-        <span>${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span></div>`;
+        <span>${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span>
+        <button class="btn-text" data-act="job-dismiss" data-id="${job.id}" style="margin-left:auto">Close</button></div>`;
   box.innerHTML = `<div style="margin-top:18px">${head}</div>${waitLine}<pre class="log">${esc(job.log || '')}</pre>`;
   const log = $('.log', box);
   log.scrollTop = log.scrollHeight;
@@ -1429,8 +1430,9 @@ function viewCategories() {
   const manual = Object.keys(counts).filter(c => !(c in tax) && c !== FALLBACK() && c !== 'Uncategorized');
   const fb = (counts[FALLBACK()] || 0) + (counts.Uncategorized || 0);
   const pending = videos().filter(v => v.suggestion).length;
-  // Mirrors storage.videos_for_ai('unsorted'): unlocked, unsorted, no suggestion waiting
-  const toSort = videos().filter(v => !v.category_locked && !v.suggestion && (v.category === FALLBACK() || v.category === 'Uncategorized')).length;
+  // Mirrors storage.videos_for_ai('unsorted'): unlocked, unsorted, no suggestion waiting, not already "no match" for these categories
+  const unsortedOpen = videos().filter(v => !v.category_locked && !v.suggestion && (v.category === FALLBACK() || v.category === 'Uncategorized'));
+  const noMatch = unsortedOpen.filter(v => v.ai_no_match === S.data.tax_key).length, toSort = unsortedOpen.length - noMatch;
   const running = !!S.data.job.running;
   return `
   <section>
@@ -1441,11 +1443,12 @@ function viewCategories() {
       <button class="btn btn-dark btn-sm" data-act="reclassify">Save and re-sort</button>
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
       ${ai.ready_for.categorize ? `<button class="btn btn-sm" data-act="ai-discover" data-job-btn>Propose categories with AI</button>
-        <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort || ''} unsorted with AI</button>`
+        <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : noMatch ? 'The AI found no category for the rest. Add a category or propose new ones, then sort again' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort ? toSort + ' ' : ''}unsorted with AI</button>`
         : `<a class="btn-text" href="#/settings/routing">Set up AI sorting →</a>`}
       ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>`
         : fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
     </div>
+    ${noMatch && ai.ready_for.categorize ? `<p class="note" style="margin-top:10px">The AI found no matching category for ${plural(noMatch, 'unsorted video')}. Add a category for ${noMatch === 1 ? 'it' : 'them'} or use <b>Propose categories with AI</b>; after the categories change, Sort offers ${noMatch === 1 ? 'it' : 'them'} again.</p>` : ''}
     <div id="job"></div>
   </section>
   ${ai.proposal ? viewProposal(ai.proposal, tax, counts) : ''}

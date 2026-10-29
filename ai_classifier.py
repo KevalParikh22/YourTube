@@ -271,13 +271,15 @@ def _suggest_library(scope: str, library: int, libs: Dict[str, int],
     from classifier import load_taxonomy
 
     settings = llm.for_library(llm.load_settings(), library)
-    videos = [v for v in storage.videos_for_ai(scope) if libs.get(v["video_id"], 1) == library]
+    taxonomy = load_taxonomy(library=library)
+    key = storage.taxonomy_key(taxonomy)
+    videos = [v for v in storage.videos_for_ai(scope, no_match_key=key) if libs.get(v["video_id"], 1) == library]
     names = {l["id"]: l["name"] for l in storage.get_libraries()}
     print(f"AI suggestions for {names.get(library, 'library')} with {llm.describe(settings, 'categorize')}")
     if not videos:
-        print("   Nothing to sort: no unlocked videos without a pending suggestion.")
+        print("   Nothing to sort: every unsorted video has a suggestion waiting, was set by hand, "
+              "or fits none of the current categories.")
         return True
-    taxonomy = load_taxonomy(library=library)
     if not taxonomy:
         print("   This library has no categories yet. Add some, or use Propose categories with AI first.")
         return True
@@ -299,14 +301,23 @@ def _suggest_library(scope: str, library: int, libs: Dict[str, int],
         return False
     model = llm.model_for(settings, "categorize")
     stored = storage.save_suggestions(result["suggestions"], model=model)
-    same = len(result["suggestions"]) - stored
+    # unsorted videos the AI kept unsorted: remembered, so Sort doesn't offer them again until the categories change
+    unsorted = {v["video_id"] for v in videos if v.get("category") in (FALLBACK_CATEGORY, "Uncategorized")}
+    no_match = [s["video_id"] for s in result["suggestions"]
+                if s["video_id"] in unsorted and s["category"] in (FALLBACK_CATEGORY, "Uncategorized")]
+    storage.mark_no_match(no_match, key)
+    same = len(result["suggestions"]) - stored - len(no_match)
     print(f"{stored} suggestion{'' if stored == 1 else 's'} ready for review"
           + (f", {same} already in the suggested category" if same else "")
           + (f", {result['failed_batches']} batches failed" if result["failed_batches"] else "") + ".")
     if result["stopped"]:
         print(f"Stopped. {stored} suggestions so far are saved.")
         return True
-    print("   Nothing changes until you accept them (Library → AI suggestions).")
+    if no_match:
+        print(f"   {len(no_match)} video{'' if len(no_match) == 1 else 's'} fit none of your {len(taxonomy)} categories "
+              f"and stay in {FALLBACK_CATEGORY}. To place them, add a category for them or use Propose categories with AI.")
+    if stored:
+        print("   Nothing changes until you accept them (Library → AI suggestions).")
     return True
 
 
