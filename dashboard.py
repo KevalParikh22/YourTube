@@ -12,6 +12,8 @@ import io
 import re
 import sys
 import json
+import base64
+import binascii
 import argparse
 import hmac
 import secrets
@@ -26,6 +28,7 @@ from urllib.parse import urlparse, parse_qs
 import storage
 import llm
 import applog
+import voice
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
 from exporter import videos_to_csv, video_markdown, markdown_zip, safe_filename
 
@@ -42,6 +45,12 @@ FRAMES_DIR = os.path.join(ROOT_DIR, "frames")
 _FRAME_PATH = re.compile(r"^/frames/([\w-]{1,32})/(\d{1,6})\.jpg$")   # only frames/<video id>/<second>.jpg
 ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
+MAX_BODY = 12_000_000
+_VOICE_AVAILABLE = None
+
+
+class BodyTooLarge(Exception):
+    pass
 
 # Access token (always on, decided 2026-10-28): protects the dashboard from other users of a shared computer.
 # main() sets TOKEN; None turns the check off (tests that build a server directly).
@@ -307,6 +316,9 @@ def build_state(library=1):
                 taxonomy.setdefault(name, kws)
     else:
         taxonomy = load_taxonomy(library=library)
+    global _VOICE_AVAILABLE
+    if _VOICE_AVAILABLE is None:
+        _VOICE_AVAILABLE = voice.available()
     return {
         "library": library or 0,
         "libraries": storage.get_libraries(),
@@ -321,6 +333,7 @@ def build_state(library=1):
         "details_after_sync": bool(settings.get("details_after_sync")),
         "use_descriptions": settings.get("use_descriptions", True) is not False,
         "platform": sys.platform,
+        "voice": _VOICE_AVAILABLE,
     }
 
 class Handler(BaseHTTPRequestHandler):
@@ -379,6 +392,10 @@ class Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             raise json.JSONDecodeError("bad Content-Length", "", 0) from None
+        if length < 0:
+            raise json.JSONDecodeError("bad Content-Length", "", 0)
+        if length > MAX_BODY:
+            raise BodyTooLarge()
         raw = self.rfile.read(length) if length else b"{}"
         data = json.loads(raw or b"{}")
         if not isinstance(data, dict):
@@ -597,10 +614,31 @@ class Handler(BaseHTTPRequestHandler):
             return self._error("Expected JSON", 415)
         try:
             body = self._body()
+        except BodyTooLarge:
+            return self._error("Request too large", 413)
         except json.JSONDecodeError:
             return self._error("Invalid JSON")
 
         path = urlparse(self.path).path
+        if path == "/api/voice/transcribe":
+            if not voice.available():
+                return self._error("Voice input needs local transcription. Run: bash scripts/setup.sh --local-ai", 503)
+            audio = body.get("audio")
+            mime = body.get("mime")
+            if not isinstance(audio, str):
+                return self._error("Could not read the recording")
+            try:
+                data = base64.b64decode(audio, validate=True)
+            except (binascii.Error, ValueError):
+                return self._error("Could not read the recording")
+            try:
+                return self._json(voice.transcribe_clip(data, mime))
+            except ValueError as e:
+                applog.get("http").warning("Voice transcription failed: reason=%s bytes=%d", str(e), len(data))
+                return self._error(str(e))
+            except Exception:
+                applog.get("http").exception("Voice transcription failed unexpectedly (%d bytes)", len(data))
+                return self._error("Could not transcribe the recording", 500)
         try:
             if path == "/api/videos/update":
                 ids = body.get("ids") or []
