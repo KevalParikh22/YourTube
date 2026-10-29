@@ -63,7 +63,7 @@
   }
   .bar-in { max-width: 1160px; margin: 0 auto; padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 28px; }
   .logo { font-size: 17px; font-weight: 700; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
-  .tabs { display: flex; gap: 22px; height: 100%; }
+  .tabs { display: flex; gap: 22px; height: 100%; min-width: 0; }
   .tabs a {
     display: flex; align-items: center; height: 100%; text-decoration: none; color: var(--ink-3); font-weight: 500;
     border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
@@ -71,6 +71,17 @@
   .tabs a:hover { color: var(--ink); }
   .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); }
   .bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .bar-icon { width: 36px; height: 36px; flex: 0 0 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
+  .bar-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .bar-icon.on { color: var(--ink); background: var(--sunken); }
+
+  .skip-link { position: fixed; z-index: 100; top: 8px; left: 8px; padding: 8px 12px; background: var(--raised); border: 2px solid var(--accent); border-radius: 6px; transform: translateY(-160%); }
+  .skip-link:focus { transform: translateY(0); }
+  .shortcut-scrim { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 20px; background: #0008; }
+  .shortcut-dialog { width: min(520px, 100%); max-height: min(80vh, 640px); overflow: auto; padding: 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); box-shadow: 0 16px 48px #0004; }
+  .shortcut-dialog h2 { margin: 0 0 14px; }
+  .shortcut-table { width: 100%; border-collapse: collapse; }
+  .shortcut-table th, .shortcut-table td { padding: 7px 9px; text-align: left; border-bottom: 1px solid var(--line); }
 
   /* ---------- controls ---------- */
   select, input[type="text"], input[type="search"], input[type="number"], input[type="password"], textarea {
@@ -227,10 +238,11 @@
   .policy p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
 
   /* ---------- categories ---------- */
-  .cat-row { display: grid; grid-template-columns: 240px minmax(0, 1fr) 120px; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
+  .cat-row { display: grid; grid-template-columns: 240px minmax(0, 1fr) 130px; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .cat-row input[type="text"] { width: 100%; font-weight: 500; }
+  .cat-row-add { background: var(--sunken); border: 1px solid var(--line); border-radius: 8px; padding: 16px 14px; margin-bottom: 14px; }
   /* Keyword lists grow with their text instead of clipping it (field-sizing where supported, rows as fallback) */
-  textarea.kw, textarea.p-kw { field-sizing: content; min-height: 5.2em; max-height: 14em; line-height: 1.5; }
+  textarea.kw, textarea.p-kw, textarea.cat-add-kw { field-sizing: content; min-height: 5.2em; max-height: 14em; line-height: 1.5; }
   .cat-row .meta { font-size: 12.5px; color: var(--ink-3); margin-top: 6px; }
   .cat-row .meta a { color: var(--ink-2); }
   .cat-row > div:last-child { text-align: right; }
@@ -241,6 +253,7 @@
   .tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3); border: 1px solid var(--line-strong); border-radius: 4px; padding: 0 5px; margin-left: 6px; vertical-align: 1px; }
   .tag.new { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
   .cat-opts { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+  .cat-add-actions { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; padding-top: 22px; }
   .prop-add { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 13px; font-weight: 500; padding-top: 6px; }
   .prop-add input { margin: 0 !important; }
   .prop-changed { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: start; }
@@ -294,6 +307,13 @@
   .prov .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); margin-right: 8px; vertical-align: 1px; }
   .prov .dot.ok { background: var(--watch); }
   .route { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 0; }
+  .settings-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; margin-top: 24px; }
+  .settings-side { position: sticky; top: 20px; display: grid; gap: 4px; }
+  .settings-side a { color: var(--ink-2); text-decoration: none; border-radius: 6px; padding: 9px 11px; font-size: 13.5px; }
+  .settings-side a:hover { background: var(--sunken); color: var(--ink); }
+  .settings-side a.on { background: var(--sunken); color: var(--ink); font-weight: 600; }
+  .settings-content { min-width: 0; }
+  .settings-content > .section:first-child { margin-top: 0; }
 
   /* ---------- video details ---------- */
   .det-counts { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 14px; font-size: 13px; color: var(--ink-2); }
@@ -378,6 +398,22 @@
   .hist a:hover { background: var(--sunken); color: var(--ink); }
   .hist a.on { background: var(--sunken); color: var(--ink); font-weight: 500; }
   .hist a small { display: block; color: var(--ink-3); font-size: 11.5px; margin-top: 2px; }
+  .ask-fab { position: fixed; right: 20px; bottom: 20px; z-index: 39; width: 56px; height: 56px; padding: 0; border: 0; border-radius: 50%; display: grid; place-items: center; background: var(--ink); color: var(--bg); box-shadow: 0 5px 18px #0003; cursor: pointer; }
+  .ask-fab svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .ask-pop { position: fixed; right: 20px; bottom: 88px; z-index: 39; width: 400px; height: 600px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; overflow: hidden; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 10px 36px #0003; }
+  .ask-pop-head { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .ask-pop-head strong { font-size: 14px; white-space: nowrap; }
+  .ask-pop-scope { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 11.5px; }
+  .ask-pop-head .btn { height: 30px; padding: 0 8px; font-size: 12px; }
+  .ask-pop-body { min-height: 0; flex: 1; overflow: auto; padding: 0 16px 16px; }
+  .ask-pop-body .answer { margin-top: 18px; }
+  .ask-pop-body .answer h2 { font-size: 15px; }
+  .ask-pop-body .answer .body { font-size: 14px; }
+  .ask-pop-body .srcs { display: none; }
+  .ask-pop-input { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--line); }
+  .ask-pop-input input { flex: 1; height: 40px; }
+  .ask-pop-input .btn { height: 40px; }
+  @media (max-width: 640px) { .ask-pop { inset: 0; width: auto; height: auto; max-height: none; border-radius: 0; } }
   #jobs { position: relative; }
   #d-summary ul { list-style: none; padding-left: 0; margin: 6px 0 14px; }
   #d-summary li { margin-bottom: 8px; }
@@ -445,11 +481,14 @@
 
   /* ---------- responsive ---------- */
   @media (max-width: 760px) {
+    .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .settings-side { position: static; display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
+    .settings-side a { flex: 0 0 auto; border: 1px solid var(--line); }
     .s-row { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
     .hit { grid-template-columns: minmax(0, 1fr); gap: 0; }
-    .bar-in { padding: 0 16px; gap: 14px; }
+    .bar-in { padding: 0 16px; gap: 8px; }
     .logo { display: none; }
-    .tabs { gap: 14px; overflow-x: auto; scrollbar-width: none; }
+    .tabs { flex: 1 1 auto; gap: 14px; overflow-x: auto; scrollbar-width: none; }
     .tabs a { font-size: 13.5px; }
   }
   @media (max-width: 900px) {
@@ -464,6 +503,7 @@
     .policy { grid-template-columns: 1fr; gap: 16px; }
     .cat-row { grid-template-columns: minmax(0, 1fr); gap: 10px; }
     .cat-row > div:last-child { text-align: left; }
+    .cat-add-actions { justify-content: flex-start; padding-top: 4px; }
     .prop-row { grid-template-columns: 24px minmax(0, 1fr); }
     .prop-row > :last-child { grid-column: 2; }
     .ai-grid { grid-template-columns: minmax(0, 1fr); }
@@ -475,9 +515,10 @@
     .form-grid { grid-template-columns: minmax(0, 1fr); }
   }
   @media (max-width: 640px) {
-    .bar-in { padding: 0 16px; gap: 16px; }
+    .bar-in { padding: 0 16px; gap: 8px; }
     .logo { display: none; }
-    .tabs { gap: 16px; overflow-x: auto; }
+    .tabs { flex: 1 1 auto; gap: 16px; overflow-x: auto; scrollbar-width: none; }
+    .bar-right { gap: 2px; }
     .page { padding: 28px 16px 72px; }
     .display { font-size: 32px; }
     .display em { display: block; margin: 4px 0 0; font-size: 18px; }
@@ -488,19 +529,25 @@
 </style>
 </head>
 <body>
+<a class="skip-link" href="#view">Skip to content</a>
 <header class="bar">
   <div class="bar-in">
     <a class="logo" href="#/">YourTube</a>
     <span id="libpick"></span>
     <nav class="tabs" id="tabs"></nav>
     <div class="bar-right">
-      <a class="btn icon-btn" id="gsearch-btn" href="#/search" aria-label="Search" title="Search (/)">⌕</a>
       <span id="jobs"></span>
+      <a class="btn icon-btn bar-icon" id="gsearch-btn" href="#/search" aria-label="Search (/)" title="Search  /"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5"></circle><path d="m16 16 4.2 4.2"></path></svg></a>
+      <a class="btn icon-btn bar-icon" id="settings-btn" href="#/settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path><path d="M19 12a7 7 0 0 1-.2 1.6l1.2.9-1.1 1.9-1.4-.5a7.8 7.8 0 0 1-1.4.8l-.2 1.5h-2.2l-.3-1.5a7.8 7.8 0 0 1-1.6 0L11 18l-2-1.1.5-1.4a7.8 7.8 0 0 1-1-1.3L7 14.3l-.5-2.1 1.4-.7a7.8 7.8 0 0 1 .1-1.6l-1.2-.9 1.1-1.9 1.4.5a7.8 7.8 0 0 1 1.4-.8l.2-1.5h2.2l.3 1.5a7.8 7.8 0 0 1 1.6 0l.8-1.3 2 1.1-.5 1.4a7.8 7.8 0 0 1 1 1.3l1.5-.1.5 2.1-1.4.7"></path></svg></a>
+      <a class="btn icon-btn bar-icon" id="help-btn" href="#/help" aria-label="Help" title="Help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.6 9a2.5 2.5 0 1 1 4.6 1.3c-.8 1.1-2.2 1.4-2.2 3"></path><path d="M12 17h.01"></path></svg></a>
     </div>
   </div>
 </header>
-<main class="page" id="view"><div class="empty">Loading…</div></main>
+<main class="page" id="view" tabindex="-1"><div class="empty">Loading…</div></main>
 <div id="drawer"></div>
+<button class="ask-fab" id="ask-fab" data-act="ask-open" aria-label="Ask your library (A)" title="Ask your library (A)"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11.5a7.5 7.5 0 0 1-7.5 7.5H6l-3 2v-5.5A7.5 7.5 0 1 1 20 11.5Z"></path><path d="M8 10h8M8 14h5"></path></svg></button>
+<div id="ask-pop-root"></div>
+<div id="shortcut-root"></div>
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -510,7 +557,9 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['', 'Library'], ['ask', 'Ask'], ['knowledge', 'Knowledge'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories'], ['settings', 'Settings']];
+const TABS = [['', 'Library'], ['knowledge', 'Knowledge'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories']];
+const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then P', 'Plan'], ['G then T', 'Triage'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then H', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
+const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
 const JOB_TEXT = {
@@ -548,8 +597,9 @@ const S = {
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
   lib: Number.isInteger(+store.get('ytkb.lib')) && store.get('ytkb.lib') !== null ? +store.get('ytkb.lib') : 1,   // 0 = all libraries
-  ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '' },
+  ask: { q: '', cat: '', src: '', done: true, video: null, busy: false, thread: [], hist: null, hq: '', open: false, returnFocus: null },
   knowledge: { list: null, pages: {}, loadingList: false, loadingPage: null },
+  addingCat: false,
 };
 
 /* ---------------- helpers ---------------- */
@@ -678,26 +728,45 @@ async function load() {
   render();
   if (S.data.job.running || S.data.job.queue?.length) pollJob();
 }
-function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); }
+function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); renderAskPop(); }
+function renderShortcutHelp() {
+  const root = $('#shortcut-root');
+  if (!S.shortcutsOpen) { root.innerHTML = ''; return; }
+  root.innerHTML = `<div class="shortcut-scrim" data-act="shortcut-dismiss"><section class="shortcut-dialog" role="dialog" aria-modal="true" aria-labelledby="shortcut-title"><h2 id="shortcut-title">Keyboard shortcuts</h2>${shortcutTable()}<div class="actions" style="margin-top:16px"><button class="btn" data-act="shortcut-close">Close</button></div></section></div>`;
+  root.querySelector('[data-act="shortcut-close"]')?.focus();
+}
 function refresh() { const y = scrollY; renderView(); scrollTo(0, y); }
 function renderBar() {
   const r = route();
-  const tab = SETTINGS_PAGES.some(([k]) => k === r) ? 'settings' : r;
+  const tab = r === 'settings' || r.startsWith('settings/') ? 'settings' : r;
   $('#libpick').innerHTML = S.data.libraries.length > 1 || S.lib !== 1
     ? `<select data-change="lib" aria-label="Library" class="libsel">${S.data.libraries.map(l => `<option value="${l.id}" ${S.lib === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         <option value="0" ${S.lib === 0 ? 'selected' : ''}>All libraries</option></select>` : '';
-  $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}">${l}</a>`).join('');
+  $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}"${tab === k ? ' aria-current="page"' : ''}>${l}</a>`).join('');
+  $('#gsearch-btn').classList.toggle('on', r === 'search');
+  $('#settings-btn').classList.toggle('on', tab === 'settings');
+  $('#help-btn').classList.toggle('on', r === 'help');
+  for (const [btn, on] of [['#settings-btn', tab === 'settings'], ['#help-btn', r === 'help']]) {
+    if (on) $(btn).setAttribute('aria-current', 'page'); else $(btn).removeAttribute('aria-current');
+  }
 }
 function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
 function renderView() {
   const r = route(), v = $('#view');
+  if (r === 'ai') { location.replace('#/settings/cloud'); return; }
+  if (r === 'setup') { location.replace('#/help'); return; }
   if (r === 'plan') v.innerHTML = videos().length ? viewPlan() : emptyState();
   else if (r === 'triage') { v.innerHTML = videos().length ? viewTriage() : emptyState(); updateJob(); }
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
-  else if (r === 'settings') v.innerHTML = settingsNav(r) + viewGeneral();
-  else if (r === 'ai') { v.innerHTML = settingsNav(r) + viewAI(); updateJob(); if (!S.local) loadLocal(); }
-  else if (r === 'setup') { v.innerHTML = settingsNav(r) + viewSetup(); if (!S.guide) loadGuide(); }
+  else if (r === 'settings' || r.startsWith('settings/')) {
+    const section = r.split('/')[1] || 'general';
+    const valid = SETTINGS_PAGES.some(([key]) => key === section) ? section : 'general';
+    v.innerHTML = settingsNav(valid) + settingsContent(valid);
+    if (['cloud', 'local', 'routing'].includes(valid)) updateJob();
+    if (['local', 'cloud', 'routing'].includes(valid) && !S.local) loadLocal();
+  }
+  else if (r === 'help') { v.innerHTML = '<div class="eyebrow">Help</div><h1 class="display">Help<em>setup, downloads and guide</em></h1>' + viewSetup() + `<section class="section"><h2 class="h">Keyboard shortcuts</h2>${shortcutTable()}</section>`; if (!S.guide) loadGuide(); }
   else if (r === 'ask') {
     const id = +routeParam('id') || null;
     if (id && !S.ask.thread.some(t => t.id === id) && !S.ask.busy) openAsk(id);
@@ -976,7 +1045,7 @@ function viewTriage() {
     <div class="eyebrow">Triage${t.cat ? ` · ${esc(t.cat)}` : ''}</div>
     <h1 class="display num">${fmt(follow / S.speed)}<em>if you follow the ratings, instead of ${fmt(all / S.speed)} for everything at ${sx(S.speed)}</em></h1>
     <p class="lede">${open.length - unrated} of ${plural(open.length, 'unwatched video')} rated. Nothing changes until you act. ${tip('Ratings weigh depth, fit with your interests, time against value and freshness.')}</p>
-    ${!ai.ready_for.rate ? `<div class="banner"><span>Choose an AI for ratings to get a Watch / Skim / Skip verdict for every video.</span><a class="btn btn-sm" href="#/ai">Set up AI</a></div>`
+    ${!ai.ready_for.rate ? `<div class="banner"><span>Choose an AI for ratings to get a Watch / Skim / Skip verdict for every video.</span><a class="btn btn-sm" href="#/settings/routing">Set up AI</a></div>`
       : unrated ? `<div class="banner"><span>${plural(unrated, 'video')} not rated yet${open.filter(v => !v.rating && v.details?.status !== 'done').length ? '. Videos without transcripts are rated from title and description only' : ''}.</span>
         <button class="btn btn-dark btn-sm" data-act="rate-batch" data-job-btn>Rate ${plural(unrated, 'video')}</button></div>` : ''}
     <div id="job"></div>
@@ -1155,11 +1224,8 @@ function viewDetailsCard() {
       <button class="btn btn-dark btn-sm" data-act="details-fetch" data-job-btn ${!need ? 'disabled' : ''}>${need ? `Fetch details for ${plural(Math.min(need, 200), 'video')}` : 'All fetched'}</button>
       ${need > 200 ? `<span class="faint" style="font-size:12.5px">200 per run (about ${Math.round(200 * 5 / 60)} min). Run again for the rest.</span>`
         : need ? `<span class="faint" style="font-size:12.5px">About ${Math.max(1, Math.round(need * 5 / 60))} min</span>` : ''}
+      <a class="btn-text" href="#/settings/sync">Sync settings →</a>
     </div>
-    <label class="check" style="margin-top:14px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
-      <span>Fetch details for new videos after each sync ${tip('Up to 50 new videos per sync: descriptions, chapters and captions. Transcripts, search inside videos and good ratings need them.')}</span></label>
-    <label class="check" style="margin-top:10px"><input type="checkbox" data-change="use-descriptions" ${S.data.use_descriptions ? 'checked' : ''}>
-      <span>Use descriptions in search and AI ${tip('Descriptions come with the captions at no extra cost. Turn this off if they are mostly links and sponsor text.')}</span></label>
     ${viewAsr()}
     ${viewVisuals()}
   </section>`;
@@ -1175,7 +1241,7 @@ function viewVisuals() {
       Only the video picture is downloaded (no audio), anonymously; it is deleted after reading, and small thumbnails are kept for a slide strip.
       Mark videos in their panel, switch on <b>Slides</b> for a category, or accept the suggestions below.</p>
     ${!P.available ? `<div class="banner"><span>Needs Pillow and ffmpeg: <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
-      : !P.model_ok ? `<div class="banner"><span>The vision model (${esc(P.model || 'none')}) isn't ready in Ollama or can't read images. <a href="#/ai">Choose one on the AI page</a>.</span></div>` : ''}
+      : !P.model_ok ? `<div class="banner"><span>The vision model (${esc(P.model || 'none')}) isn't ready in Ollama or can't read images. <a href="#/settings/local">Choose one in Local AI settings</a>.</span></div>` : ''}
     <div class="actions">
       ${P.videos ? `<button class="btn btn-dark btn-sm" data-act="vis-run" data-job-btn ${!P.available || !P.model_ok ? 'disabled' : ''}>Read slides for ${plural(P.videos, 'video')}</button>
         <span class="faint" style="font-size:12.5px">${fmt(P.seconds)} of video · about ${Math.max(1, Math.round(P.minutes))} min with ${esc(P.model)}</span>`
@@ -1260,10 +1326,10 @@ function updateJob() {
   if (!box) return;
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
-    : route() === 'ai' ? ['pull', 'embed'].includes(job.kind)
+    : route().startsWith('settings') ? ['pull', 'embed'].includes(job.kind)
     : route() === 'knowledge' ? job.kind === 'knowledge'
     : ['sync', 'details', 'asr', 'visual'].includes(job.kind) || !job.kind;
-  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route() === 'ai' ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
+  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
   if (!mine || (!job.log && !job.running)) { box.innerHTML = waitLine; return; }
@@ -1352,7 +1418,7 @@ function viewCategories() {
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
       ${ai.ready_for.categorize ? `<button class="btn btn-sm" data-act="ai-discover" data-job-btn>Propose categories with AI</button>
         <button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort || ''} unsorted with AI</button>`
-        : `<a class="btn-text" href="#/ai">Set up AI sorting →</a>`}
+        : `<a class="btn-text" href="#/settings/routing">Set up AI sorting →</a>`}
       ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>`
         : fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
     </div>
@@ -1361,6 +1427,7 @@ function viewCategories() {
   ${ai.proposal ? viewProposal(ai.proposal, tax, counts) : ''}
   <section class="section">
     ${ai.proposal ? '<h2 class="h">Current categories</h2>' : ''}
+    ${S.addingCat ? viewAddCategoryRow() : ''}
     ${Object.keys(tax).map(n => `<div class="cat-row">
       <div><label class="field-label">Category name</label><input type="text" value="${esc(n)}" title="${esc(n)}" data-change="rename" data-old="${esc(n)}" aria-label="Category name">
         <div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n] || 0, 'video')}</a></div>
@@ -1379,6 +1446,24 @@ function viewCategories() {
       <div><button class="btn-text" data-act="adopt-cat" data-name="${esc(n)}">Add keywords</button><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
   </section>`;
+}
+function viewAddCategoryRow() {
+  return `
+  <div class="cat-row cat-row-add" id="cat-add-row">
+    <div>
+      <label class="field-label" for="new-cat-name">Category name</label>
+      <input type="text" id="new-cat-name" placeholder="Category name" aria-label="Category name" autofocus>
+      <div id="new-cat-err" class="hint warn-text" role="alert" style="margin-top:4px;display:none"></div>
+    </div>
+    <div>
+      <label class="field-label" for="new-cat-kw">Keywords</label>
+      <textarea id="new-cat-kw" class="cat-add-kw" rows="4" placeholder="Separate keywords with commas (optional)" aria-label="Keywords for new category"></textarea>
+    </div>
+    <div class="cat-add-actions">
+      <button class="btn btn-dark btn-sm" data-act="save-add-cat">Save</button>
+      <button class="btn-text" data-act="cancel-add-cat">Cancel</button>
+    </div>
+  </div>`;
 }
 function viewProposal(p, tax, counts) {
   const proposed = new Set(p.categories.map(c => c.name));
@@ -1568,6 +1653,26 @@ function askResult() {
       <button class="btn btn-sm" data-act="ask-del" data-ask="${th[0].id}">Delete${th.length > 1 ? ' conversation' : ''}</button>
     </div>`;
 }
+function renderAskPop() {
+  const a = S.ask, root = $('#ask-pop-root'), fab = $('#ask-fab'), full = route() === 'ask';
+  fab.hidden = full;
+  if (!a.open || full) { root.innerHTML = ''; return; }
+  const vid = a.video && byId(a.video), title = vid?.title;
+  const th = a.thread, busy = a.busy;
+  const latest = th[th.length - 1];
+  const turns = th.map(r => askTurn(r, false)).join('<hr class="ask-sep">');
+  root.innerHTML = `<section class="ask-pop" role="dialog" aria-label="Ask your library" aria-modal="true">
+    <header class="ask-pop-head"><strong>Ask your library</strong><span class="ask-pop-scope">${vid ? `Only: ${esc(title)}` : 'This library'}</span>
+      ${vid ? '<button class="btn" data-act="ask-unscope" aria-label="Remove video scope">✕</button>' : ''}
+      <button class="btn" data-act="ask-new">New</button>
+      <a class="btn" href="#/ask${latest ? `?id=${latest.id}` : ''}" data-act="ask-full">Open full page</a>
+      <button class="btn" data-act="ask-close" aria-label="Close Ask">Close</button></header>
+    <div class="ask-pop-body" id="ask-pop-body">${turns || (!busy ? '<p class="ask-pop-empty">Ask a question about your videos.</p>' : '')}${busy ? '<p class="note" style="margin-top:18px"><span class="spin" style="display:inline-block"></span> Reading your videos and writing an answer…</p>' : ''}</div>
+    <div class="ask-pop-input"><input id="aq" type="text" value="${esc(a.q)}" maxlength="1000" ${busy ? 'disabled' : ''} aria-label="Question" placeholder="${th.length ? 'Ask a follow-up' : vid ? 'Ask about this video' : 'Ask your library'}">
+      <button class="btn btn-dark" data-act="ask-go" ${busy || !S.data.ai.ready_for.ask ? 'disabled' : ''}>${busy ? 'Working…' : 'Ask'}</button></div>
+  </section>`;
+  if (!busy) $('#aq')?.focus({ preventScroll: true });
+}
 function askHistory() {
   const a = S.ask, items = a.hist || [], open = a.thread[0]?.thread_id;
   return `<h4>Earlier questions</h4>
@@ -1576,7 +1681,7 @@ function askHistory() {
       : items.map(h => `<a href="#/ask?id=${h.id}" class="${open === h.id ? 'on' : ''}">${esc(h.question)}<small>${esc((h.created_at || '').slice(0, 16))}${h.follow_ups ? ` · ${plural(h.follow_ups, 'follow-up')}` : ''}${h.filters?.video_ids?.length === 1 ? ` · ${esc(askScope(h.filters))}` : ''}</small></a>`).join('')}`;
 }
 function renderAsk() {
-  if (route() !== 'ask') return;
+  if (route() !== 'ask') { renderAskPop(); return; }
   const y = scrollY; renderView(); scrollTo(0, y);
 }
 async function loadAskHistory() {
@@ -1593,9 +1698,10 @@ async function openAsk(id) {
   renderAsk();
 }
 function askAbout(id) {
-  Object.assign(S.ask, { video: id, thread: [], q: '' });
+  Object.assign(S.ask, { video: id, thread: [], q: '', open: true });
   closeDrawer();
-  if (location.hash !== '#/ask') location.hash = '#/ask'; else renderAsk();
+  renderAskPop();
+  $('#aq')?.focus({ preventScroll: true });
 }
 async function runAsk() {
   const a = S.ask, q = ($('#aq')?.value || a.q).trim(), last = a.thread[a.thread.length - 1];
@@ -1609,7 +1715,7 @@ async function runAsk() {
       : { categories: a.cat ? [a.cat] : [], playlists: a.src ? [a.src] : inLib, include_done: a.done };
     const r = await api('/api/ask', last ? { question: q, follow_up_of: last.id } : { question: q, filters });
     a.thread = [...a.thread, r]; a.q = '';
-    history.replaceState(null, '', `#/ask?id=${r.id}`);
+    if (route() === 'ask') history.replaceState(null, '', `#/ask?id=${r.id}`);
   } catch (e) { toast(e.message, true); }
   a.busy = false;
   renderAsk();
@@ -1668,7 +1774,7 @@ function viewKnowledgeList() {
     <h1 class="display">Knowledge base<em>Topic pages from your summaries</em></h1>
     <p class="lede">Study pages combining notes, minutes, and quotes across your videos, citing every moment.</p>
     ${!S.lib ? `<div class="banner"><span>Knowledge pages belong to a single library. Showing pages for <b>${esc(libName(1) || 'Library 1')}</b>. Pick a specific library above to switch.</span></div>` : ''}
-    ${!ai.ready_for.summarize ? `<div class="banner"><span>Set up an AI for summaries in Settings to build knowledge pages.</span><a class="btn btn-sm" href="#/ai">Set up AI</a></div>` : ''}
+    ${!ai.ready_for.summarize ? `<div class="banner"><span>Set up an AI for summaries in Settings to build knowledge pages.</span><a class="btn btn-sm" href="#/settings/routing">Set up AI</a></div>` : ''}
     <div id="job"></div>
   </section>
 
@@ -1844,7 +1950,7 @@ async function loadGuide() {
     const r = await fetch('/docs/setup');
     S.guide = r.ok ? await r.text() : `Could not load the guide (${r.status}).`;
   } catch (e) { S.guide = 'Could not load the guide: ' + e.message; }
-  if (route() === 'setup') refresh();
+  if (route() === 'help') refresh();
 }
 function viewSetup() {
   const win = S.data.platform === 'win32';
@@ -1910,10 +2016,8 @@ function md(src) {
 }
 
 /* ---------------- AI settings ---------------- */
-const LANGUAGES = ['English', 'Hindi', 'Gujarati', 'Marathi', 'Bengali', 'Tamil', 'Telugu', 'Kannada', 'Malayalam', 'Punjabi', 'Urdu',
-  'Spanish', 'French', 'German', 'Portuguese', 'Japanese', 'Korean', 'Chinese', 'Arabic'];
 function viewAI() {
-  const ai = S.data.ai, edit = S.ai.provider, ready = Object.entries(ai.providers).filter(([, p]) => p.ready);
+  const ai = S.data.ai;
   const sameAs = name => {
     const f = ai.task_follows?.[name], p = f ? ai.tasks[f] || ai.provider : ai.provider;
     return `Same as ${f ? esc(ai.task_labels[f].split(' ')[0].toLowerCase()) : 'default'}${p !== 'none' && ai.providers[p] ? ` (${esc(ai.providers[p].label)})` : ''}`;
@@ -1923,22 +2027,8 @@ function viewAI() {
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
-  return `
-  <section>
-    <p class="lede"><b style="font-weight:600">${ready.length ? plural(ready.length, 'AI') + ' ready' : 'No AI set up yet'}${ai.ready ? ' · default: ' + esc(ai.providers[ai.provider].label) : ''}.</b> Choose AI providers for each task. ${tip('AI only suggests and rates; nothing changes until you accept. Cloud AI receives titles, descriptions and transcripts, never cookies. Local models keep data on this computer.')}</p>
-  </section>
-
-  ${viewLocal()}
-
-  <section class="section card">
-    <h2 class="h">Your AIs</h2>
-    ${Object.entries(ai.providers).map(([k, p]) => `<div class="prov">
-      <div><span class="dot ${p.ready ? 'ok' : ''}"></span><b style="font-weight:500">${esc(p.label)}</b>
-        <span class="faint" style="font-size:12.5px">${p.ready ? ' · ' + esc(p.model) : p.local ? ' · runs on this computer, free' : ' · needs an API key'}</span></div>
-      <button class="btn btn-sm" data-act="ai-edit" data-p="${k}">${edit === k ? 'Close' : p.ready ? 'Edit' : 'Set up'}</button>
-    </div>${edit === k ? aiEditor(k, p) : ''}`).join('')}
-  </section>
-
+  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local));
+  const routing = `
   <section class="section card">
     <h2 class="h">Which AI does what</h2>
     <div style="margin-top:12px">
@@ -1948,9 +2038,17 @@ function viewAI() {
     <p class="hint">AI choices ${tip('A smaller or local model often works well for categories. Ratings read whole transcripts, so a larger context window can help. Questions use the ratings choice unless you choose another model.')}</p>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
   </section>`;
+  return { cloud, routing };
+}
+function providerCards(providers) {
+  const edit = S.ai.provider;
+  return `<section class="section card"><h2 class="h">${providers.some(([, p]) => p.local) ? 'Local AI providers' : 'Cloud AI providers'}</h2>
+    ${providers.map(([k, p]) => `<div class="prov"><div><span class="dot ${p.ready ? 'ok' : ''}"></span><b style="font-weight:500">${esc(p.label)}</b>
+      <span class="faint" style="font-size:12.5px">${p.ready ? ' · ' + esc(p.model) : p.local ? ' · runs on this computer, free' : ' · needs an API key'}</span></div>
+      <button class="btn btn-sm" data-act="ai-edit" data-p="${k}">${edit === k ? 'Close' : p.ready ? 'Edit' : 'Set up'}</button></div>${edit === k ? aiEditor(k, p) : ''}`).join('')}</section>`;
 }
 function viewGeneral() {
-  const ai = S.data.ai, formula = ratingFormula(ai.rating_formula || {});
+  const ai = S.data.ai;
   return `
   <section class="section card">
     <h2 class="h">Display</h2>
@@ -1962,9 +2060,11 @@ function viewGeneral() {
       <span>Show descriptions in the video panel</span></label>
     <p class="hint">Descriptions are collapsed by default in each video panel.</p>
     <p class="hint">Display options ${tip('Watch times use this speed by default; the Plan page can change it too. Display settings are saved in this browser.')}</p>
-  </section>
-
-  <section class="section card">
+  </section>`;
+}
+function viewScoring() {
+  const ai = S.data.ai, formula = ratingFormula(ai.rating_formula || {});
+  return `<section class="section card">
     <h2 class="h">How scores are calculated</h2>
     <p class="hint">Score formula ${tip('Quality combines depth, time value and freshness. Fit adjusts the result with an interest penalty or bonus.')}</p>
     <div class="ai-grid">
@@ -1974,34 +2074,65 @@ function viewGeneral() {
     </div>
     <div class="kv-line" id="formula-example">Example: ${formulaExample(formula)}</div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="formula-save">Save</button><button class="btn btn-sm" data-act="formula-reset">Reset to default</button></div>
-  </section>
-
-  <section class="section card">
+  </section>`;
+}
+function viewAbout() {
+  const ai = S.data.ai;
+  const langs = ai.languages || [];
+  const curLang = ai.language || 'English';
+  const customLang = (curLang && !langs.includes(curLang)) ? curLang : null;
+  const langOptions = [
+    ...(customLang ? [`<option value="${esc(customLang)}" selected>${esc(customLang)} (custom)</option>`] : []),
+    ...langs.map(l => `<option value="${esc(l)}" ${curLang === l ? 'selected' : ''}>${esc(l)}</option>`)
+  ].join('');
+  const interests = ai.interests || '';
+  return `<section class="section card">
     <h2 class="h">About you${S.data.libraries.length > 1 ? ` · ${esc(S.lib ? libName(S.lib) : libName(1))}` : ''}</h2>
     ${S.data.libraries.length > 1 ? `<p class="note">Library-specific interests ${tip(`Ratings judge each video against its library's goals.${S.lib ? '' : ` “All libraries” is selected: this edits ${libName(1)}.`}`)}</p>` : ''}
     <div class="ai-grid">
-      <div class="full"><label class="field-label" for="ai-interests">Learning interests ${tip('Ratings favour videos that fit these interests.')}</label>
-        <textarea id="ai-interests" rows="3" placeholder="e.g. Building AI agents and RAG in Python, system design for interviews. Not interested in crypto or AI news hype.">${esc(ai.interests)}</textarea></div>
+      <div class="full">
+        <div style="display:flex;justify-content:space-between;align-items:baseline">
+          <label class="field-label" for="ai-interests">Learning interests ${tip('Ratings favour videos that fit these interests.')}</label>
+          <span id="ai-interests-count" class="hint" style="font-size:12px">${interests.length} / 2000</span>
+        </div>
+        <textarea id="ai-interests" rows="3" placeholder="e.g. Building AI agents and RAG in Python, system design for interviews. Not interested in crypto or AI news hype.">${esc(interests)}</textarea>
+        <div id="ai-interests-err" class="hint warn-text" style="margin-top:4px;display:none"></div>
+      </div>
       <div><label class="field-label" for="ai-lang">Response language</label>
-        <input id="ai-lang" type="text" list="ai-langs" value="${esc(ai.language)}"><datalist id="ai-langs">${LANGUAGES.map(l => `<option value="${l}">`).join('')}</datalist></div>
+        <select id="ai-lang">${langOptions}</select></div>
       <div></div>
-      <label class="check full"><input type="checkbox" id="ai-auto" ${ai.auto_after_sync ? 'checked' : ''}>
-        <span>Suggest after sync</span> ${tip('After each playlist sync, suggest categories for new unsorted videos.')}</label>
     </div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
   </section>`;
 }
-const SETTINGS_PAGES = [['settings', 'General'], ['ai', 'AI'], ['setup', 'Setup and help']];
+const SETTINGS_PAGES = [['general', 'General'], ['about', 'About you'], ['routing', 'AI by task'], ['cloud', 'Cloud AI'], ['local', 'Local AI'], ['sync', 'Sync and details'], ['scoring', 'Scoring']];
 function settingsNav(cur) {
-  return `<section>
-    <div class="eyebrow">Settings</div>
-    <h1 class="display">Settings<em>${{ settings: 'speed, theme and about you', ai: 'AI providers, local AI and search', setup: 'install, scripts and the guide' }[cur]}</em></h1>
-    <div class="chips" style="margin-top:16px">${SETTINGS_PAGES.map(([k, l]) => `<a class="chip ${cur === k ? 'on' : ''}" href="#/${k}" style="text-decoration:none">${l}</a>`).join('')}</div>
+  return `<div class="eyebrow">Settings</div><h1 class="display">Settings<em>${SETTINGS_PAGES.find(([k]) => k === cur)?.[1] || 'General'}</em></h1>
+    <div class="settings-layout"><nav class="settings-side" aria-label="Settings sections">${SETTINGS_PAGES.map(([k, label]) => `<a class="${cur === k ? 'on' : ''}" href="#/settings/${k}"${cur === k ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav><div class="settings-content">`;
+}
+function settingsContent(section) {
+  if (section === 'general') return viewGeneral() + '</div></div>';
+  if (section === 'about') return viewAbout() + '</div></div>';
+  if (section === 'scoring') return viewScoring() + '</div></div>';
+  if (section === 'sync') return viewSyncSettings() + '</div></div>';
+  const ai = viewAI();
+  return (section === 'cloud' ? ai.cloud : section === 'local' ? viewLocal() + providerCards(Object.entries(S.data.ai.providers).filter(([, p]) => p.local)) : ai.routing) + '</div></div>';
+}
+function viewSyncSettings() {
+  const ai = S.data.ai;
+  return `<section class="section card"><h2 class="h">Sync and details</h2>
+    <label class="check" style="margin-top:12px"><input type="checkbox" data-change="details-after-sync" ${S.data.details_after_sync ? 'checked' : ''}>
+      <span>Fetch details for new videos after each sync ${tip('Fetch descriptions, chapters and captions for up to 50 new videos per sync.')}</span></label>
+    <label class="check" style="margin-top:10px"><input type="checkbox" data-change="use-descriptions" ${S.data.use_descriptions ? 'checked' : ''}>
+      <span>Use descriptions in search and AI ${tip('Descriptions are included with captions. Turn this off if they are mostly links and sponsor text.')}</span></label>
+    <label class="check" style="margin-top:10px"><input type="checkbox" id="ai-auto" ${ai.auto_after_sync ? 'checked' : ''}>
+      <span>Suggest categories for new videos after each sync ${tip('After each playlist sync, suggest categories for new unsorted videos.')}</span></label>
+    <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
   </section>`;
 }
 async function loadLocal() {
   try { S.local = await api('/api/local/status'); } catch (e) { S.local = { error: e.message }; }
-  if (route() === 'ai') refresh();
+  if (route().startsWith('settings/')) refresh();
 }
 function viewLocal() {
   const L = S.local, ai = S.data.ai, running = !!S.data.job.running;
@@ -2017,7 +2148,7 @@ function viewLocal() {
   return `
   <section class="section card">
     <h2 class="h">Local AI on this computer</h2>
-    <p class="note">Local AI ${tip('Run models on your own machine with Ollama: free, private and works offline. Run bash scripts/setup.sh --local-ai (Windows: scripts/setup.ps1 -LocalAI) to set up Ollama and a suitable model.')} <a href="#/setup">Setup guide and downloads →</a></p>
+    <p class="note">Local AI ${tip('Run models on your own machine with Ollama: free, private and works offline. Run bash scripts/setup.sh --local-ai (Windows: scripts/setup.ps1 -LocalAI) to set up Ollama and a suitable model.')} <a href="#/help">Setup guide and downloads →</a></p>
     <div style="margin-top:8px">
       ${row(L.gpu.ok, 'GPU', L.gpu.detail)}
       ${row(L.memory.ok, 'Memory', L.memory.detail)}
@@ -2112,7 +2243,11 @@ function aiEditorBody(k) {
   return body;
 }
 function aiPrefsBody() {
-  return { interests: $('#ai-interests').value, language: $('#ai-lang').value, auto_after_sync: $('#ai-auto').checked };
+  const body = {};
+  if ($('#ai-interests')) body.interests = $('#ai-interests').value;
+  if ($('#ai-lang')) body.language = $('#ai-lang').value;
+  if ($('#ai-auto')) body.auto_after_sync = $('#ai-auto').checked;
+  return body;
 }
 function aiRoutesBody() {
   const tasks = {};
@@ -2131,6 +2266,49 @@ function collectTax() {
   return t;
 }
 async function saveTax(t) { S.data.taxonomy = (await api('/api/taxonomy', { taxonomy: t })).taxonomy; }
+async function saveNewCategory() {
+  const nameInput = $('#new-cat-name');
+  const name = (nameInput?.value || '').trim();
+  const errEl = $('#new-cat-err');
+  if (!name) {
+    if (errEl) { errEl.textContent = 'Category name is required'; errEl.style.display = 'block'; }
+    nameInput?.focus();
+    return;
+  }
+  const t = collectTax();
+  const lower = name.toLowerCase();
+  const existing = new Set([
+    ...Object.keys(t).map(k => k.toLowerCase()),
+    ...videos().map(v => (v.category || '').toLowerCase()),
+    (FALLBACK() || '').toLowerCase(),
+    'uncategorized'
+  ]);
+  if (existing.has(lower)) {
+    if (errEl) { errEl.textContent = 'That category already exists'; errEl.style.display = 'block'; }
+    nameInput?.focus();
+    return;
+  }
+  if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+  const kw = ($('#new-cat-kw')?.value || '').split(',').map(s => s.trim()).filter(Boolean);
+  t[name] = kw;
+  const saveBtn = $('[data-act="save-add-cat"]');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+  let saved = false;
+  try {
+    await saveTax(t); saved = true;
+    const r = await api('/api/presets', { name, preset: true });
+    S.data.ai.presets = r.presets;
+    S.addingCat = false;
+    refresh();
+    toast(`Added "${name}"`);
+  } catch (err) {
+    // undo the half-done add so Save can be retried without the duplicate check blocking it
+    if (saved) { delete t[name]; try { await saveTax(t); } catch {} }
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+    if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+    toast(err.message, true);
+  }
+}
 
 /* ---------------- drawer ---------------- */
 function renderDrawer() {
@@ -2210,7 +2388,7 @@ function drawerSummary(v) {
   if (result?.error) return `<div class="kv-line">Could not load summary: ${esc(result.error)}. <button class="btn-text" style="padding:0;height:auto" data-act="summary-retry" data-id="${esc(v.video_id)}">Retry</button></div>`;
   if (!result?.summary) return S.data.ai.ready_for.summarize
     ? `<div class="kv-line">No summary yet. <button class="btn-text" style="padding:0;height:auto" data-act="summarize-one" data-id="${esc(v.video_id)}" data-job-btn>Summarise</button> <span class="faint">(local models take about 1–2 minutes)</span></div>`
-    : '<div class="kv-line">No summary yet. <a href="#/ai">Choose an AI for summaries in Settings</a>.</div>';
+    : '<div class="kv-line">No summary yet. <a href="#/settings/routing">Choose an AI for summaries in Settings</a>.</div>';
   const s = result.summary, moments = result.moments || {};
   const at = t => Number.isFinite(+t) ? Math.max(0, Math.floor(+t)) : 0;
   const time = t => t == null || !Number.isFinite(+t) ? '' : `<button class="time-link" data-act="seek" data-t="${at(t)}">${clock(at(t))}</button>`;   // no time: no fake 0:00 link
@@ -2383,7 +2561,10 @@ document.addEventListener('click', async e => {
     case 'search-more': S.search.limit += 50; renderSearchResults(); break;
     case 'seek': seek(+el.dataset.t); break;
     case 'ask-go': runAsk(); break;
-    case 'ask-new': S.ask.thread = []; S.ask.q = ''; location.hash = '#/ask'; break;
+    case 'ask-open': S.ask.returnFocus = el; S.ask.open = true; renderAskPop(); $('#aq')?.focus({ preventScroll: true }); break;
+    case 'ask-close': S.ask.open = false; renderAskPop(); (S.ask.returnFocus || $('#ask-fab'))?.focus(); break;
+    case 'ask-full': S.ask.open = false; break;
+    case 'ask-new': S.ask.thread = []; S.ask.q = ''; if (route() === 'ask') location.hash = '#/ask'; else renderAskPop(); break;
     case 'ask-unscope': S.ask.video = null; renderAsk(); break;
     case 'ask-video': askAbout(id); break;
     case 'ask-copy': {
@@ -2553,7 +2734,39 @@ document.addEventListener('click', async e => {
       break;
     case 'ai-edit': S.ai.provider = S.ai.provider === el.dataset.p ? null : el.dataset.p; S.ai.key = ''; refresh(); break;
     case 'ai-save': try { await saveAi(aiEditorBody(el.dataset.p)); refresh(); renderBar(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
-    case 'ai-save-prefs': try { await saveAi(aiPrefsBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
+    case 'ai-save-prefs': {
+      const interestsEl = $('#ai-interests');
+      if (interestsEl) {
+        const val = interestsEl.value;
+        const trimmed = val.trim();
+        const errEl = $('#ai-interests-err');
+        let errMsg = '';
+        if (val.length > 2000) {
+          errMsg = 'Interests must be 2,000 characters or fewer';
+        } else if (trimmed && trimmed.split(/\s+/).filter(Boolean).length < 3) {
+          errMsg = 'Describe your interests in at least 3 words, or leave blank';
+        }
+        if (errMsg) {
+          if (errEl) { errEl.textContent = errMsg; errEl.style.display = 'block'; }
+          toast(errMsg, true);
+          break;
+        }
+        if (errEl) { errEl.textContent = ''; errEl.style.display = 'none'; }
+      }
+      try {
+        await saveAi(aiPrefsBody());
+        refresh();
+        toast('Saved');
+      } catch (err) {
+        const errEl = $('#ai-interests-err');
+        if (errEl && err.message.toLowerCase().includes('interests')) {
+          errEl.textContent = err.message;
+          errEl.style.display = 'block';
+        }
+        toast(err.message, true);
+      }
+      break;
+    }
     case 'formula-save': {
       const values = Object.fromEntries($$('[data-formula]').map(input => [input.dataset.formula, +input.value]));
       values.depth /= 100; values.value /= 100; values.freshness /= 100;
@@ -2588,14 +2801,28 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'add-cat': {
-      const n = askName();
-      if (!n) break;
-      const t = collectTax();
-      if (n in t) { toast('That category already exists', true); break; }
-      t[n] = [];
-      try { await saveTax(t); refresh(); toast(`Added "${n}". Now give it some keywords.`); } catch (err) { toast(err.message, true); }
+      if (S.addingCat) {
+        const input = $('#new-cat-name');
+        input?.focus();
+        input?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        break;
+      }
+      if (S.data?.taxonomy) Object.assign(S.data.taxonomy, collectTax());
+      S.addingCat = true;
+      refresh();
+      const input = $('#new-cat-name');
+      input?.focus();
+      input?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       break;
     }
+    case 'save-add-cat':
+      await saveNewCategory();
+      break;
+    case 'cancel-add-cat':
+      S.addingCat = false;
+      refresh();
+      $('[data-act="add-cat"]')?.focus();
+      break;
     case 'adopt-cat': { const t = collectTax(); t[el.dataset.name] = []; try { await saveTax(t); refresh(); } catch (err) { toast(err.message, true); } break; }
     case 'reclassify':
       try { await saveTax(collectTax()); const r = await api('/api/reclassify', {}); await load(); toast(`Saved. ${plural(r.changed, 'video')} moved.`); } catch (err) { toast(err.message, true); }
@@ -2612,6 +2839,7 @@ document.addEventListener('change', async e => {
   const el = e.target, ch = el.dataset.change;
   if (ch === 'lib') {
     S.lib = +el.value; store.set('ytkb.lib', S.lib);
+    S.addingCat = false;
     Object.assign(S.view, { cat: '', src: '' }); S.sel.clear(); S.ask.video = null; S.search.res = null;
     S.knowledge.list = null; S.knowledge.pages = {};
     await load(); if (route() === 'search' && S.search.q) runSearch();
@@ -2717,6 +2945,27 @@ document.addEventListener('input', e => {
     const example = $('#formula-example'); if (example) example.textContent = `Example: ${formulaExample(f)}`;
     return;
   }
+  if (el.id === 'ai-interests') {
+    const cnt = $('#ai-interests-count');
+    if (cnt) {
+      cnt.textContent = `${el.value.length} / 2000`;
+      cnt.classList.toggle('warn-text', el.value.length > 2000);
+    }
+    const errEl = $('#ai-interests-err');
+    if (errEl && errEl.style.display !== 'none') {
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
+    return;
+  }
+  if (el.id === 'new-cat-name') {
+    const errEl = $('#new-cat-err');
+    if (errEl && errEl.style.display !== 'none') {
+      errEl.textContent = '';
+      errEl.style.display = 'none';
+    }
+    return;
+  }
   if (el.id === 'sq') {
     S.search.q = el.value; S.search.limit = 50; clearTimeout(sT);
     sT = setTimeout(() => { history.replaceState(null, '', `#/search?q=${encodeURIComponent(S.search.q)}`); runSearch(); }, 250);
@@ -2731,14 +2980,48 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('focusout', e => { if (e.target.id === 'd-notes') saveNotes(); });
 document.addEventListener('keydown', e => {
+  const typing = e.target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName);
+  if (S.shortcutsOpen) {
+    if (e.key === 'Escape') { e.preventDefault(); S.shortcutsOpen = false; renderShortcutHelp(); (S.shortcutReturnFocus || $('#help-btn'))?.focus(); return; }
+    if (e.key === 'Tab') {
+      const nodes = [...$('#shortcut-root').querySelectorAll('button, a[href], [tabindex]:not([tabindex="-1"])')];
+      if (nodes.length) { const first = nodes[0], last = nodes[nodes.length - 1]; if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); } }
+    }
+    return;
+  }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'g') { S.goAt = Date.now(); return; }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && S.goAt && Date.now() - S.goAt < 1500) {
+    const routes = { l: '#/', k: '#/knowledge', p: '#/plan', t: '#/triage', y: '#/sources', c: '#/categories', s: '#/settings', h: '#/help' };
+    const dest = routes[e.key.toLowerCase()]; S.goAt = 0;
+    if (dest) { e.preventDefault(); location.hash = dest; return; }
+  }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && e.key === '?') { e.preventDefault(); S.shortcutsOpen = true; S.shortcutReturnFocus = document.activeElement; renderShortcutHelp(); return; }
+  if (e.key === 'Escape' && S.ask.open && route() !== 'ask') { S.ask.open = false; renderAskPop(); (S.ask.returnFocus || $('#ask-fab'))?.focus(); return; }
+  if (e.key === 'Escape' && S.addingCat && route() === 'categories') {
+    e.preventDefault(); S.addingCat = false; refresh(); $('[data-act="add-cat"]')?.focus(); return;
+  }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'a' && route() !== 'ask') {
+    e.preventDefault(); S.ask.returnFocus = $('#ask-fab'); S.ask.open = true; renderAskPop(); $('#aq')?.focus({ preventScroll: true }); return;
+  }
   if (e.key === 'Escape' && S.drawer) { closeDrawer(); return; }
-  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName)) return;
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
   if (e.key === '/') { e.preventDefault(); if (route() !== 'search') location.hash = '#/search'; setTimeout(() => $('#sq')?.focus(), 50); }
-  if (S.drawer && (e.key === 'j' || e.key === 'k')) $(`[data-act="step"][data-dir="${e.key === 'j' ? 1 : -1}"]`)?.click();
+  if (S.drawer && (e.key.toLowerCase() === 'j' || e.key.toLowerCase() === 'k')) $(`[data-act="step"][data-dir="${e.key.toLowerCase() === 'j' ? 1 : -1}"]`)?.click();
 
 });
-document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); } });
-addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); renderBar(); renderView(); scrollTo(0, 0); } });
+document.addEventListener('click', e => {
+  if (!S.shortcutsOpen) return;
+  if (e.target.closest('[data-act="shortcut-close"]') || (e.target.classList.contains('shortcut-scrim') && !e.target.closest('.shortcut-dialog'))) {
+    S.shortcutsOpen = false; renderShortcutHelp(); (S.shortcutReturnFocus || $('#help-btn'))?.focus();
+  }
+});
+// href would change the hash route, so only move focus
+document.querySelector('.skip-link').addEventListener('click', e => { e.preventDefault(); $('#view')?.focus(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); }
+  if (e.key === 'Enter' && e.target.id === 'new-cat-name' && !e.isComposing) { e.preventDefault(); saveNewCategory(); }
+});
+addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); S.addingCat = false; renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
 
 applyTheme();
 load();

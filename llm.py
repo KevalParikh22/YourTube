@@ -49,6 +49,13 @@ TASKS = {"categorize": "Categories", "rate": "Ratings", "summarize": "Summaries"
 # Tasks that follow another task's choice when they have none of their own
 TASK_FOLLOWS = {"ask": "rate", "summarize": "rate"}
 
+LANGUAGES = [
+    "English", "Hindi", "Gujarati", "Marathi", "Bengali", "Tamil", "Telugu",
+    "Kannada", "Malayalam", "Punjabi", "Urdu", "Spanish", "French", "German",
+    "Portuguese", "Italian", "Dutch", "Russian", "Japanese", "Korean",
+    "Chinese", "Arabic", "Turkish", "Indonesian",
+]
+
 # Approximate USD per 1M tokens (input, output), for cost estimates only
 PRICES = {
     "claude-opus-5-5": (4.00, 20.00), "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50),
@@ -174,6 +181,7 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
         "category_notes": settings["category_notes"], "proposal": settings["proposal"],
         "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS, "task_follows": TASK_FOLLOWS,
         "interests": settings["interests"], "language": settings["language"],
+        "languages": LANGUAGES,
         "local_only": bool(settings.get("local_only")),
         "asr_model": settings.get("asr_model") or "auto",
         "vision_model": settings.get("vision_model") or "",
