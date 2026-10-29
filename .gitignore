@@ -10,3 +10,5 @@ reports/
 media_cache/
 frames/
 .team/runs/
+# Logs
+logs/
