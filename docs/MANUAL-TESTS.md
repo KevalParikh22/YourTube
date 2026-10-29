@@ -17,6 +17,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | **S7 · Summaries and knowledge (Phase 3)** | S7 below | ~40 min + waiting | Ollama running; pick 4–5 videos of one category you know well |
 | **S8 · Navigation, Settings and shortcuts** | S8 below | ~15 min | Nothing |
 | **S9 · Failures, logs and always-on** | S9 below | ~15 min | Nothing |
+| **S10 · Speak your interests** | S10 below | ~10 min | A microphone; local AI set up |
 
 ### S1 extra checks (new ratings, 2026-10-24)
 
@@ -66,6 +67,16 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S9.5 | Logs | Help → Logs → Show recent problems; Download log | The failure is listed with cause and fix; no API key or `?t=` token in the file | |
 | S9.6 | Always on | `bash scripts/service.sh install`; log out and in (or reboot) | The dashboard opens at http://127.0.0.1:8765 without starting anything | |
 | S9.7 | Recovers | Imitate a crash: `pkill -9 -f dashboard.py`, wait 20 s | It is back (a normal stop with `systemctl --user stop yourtube` stays stopped) | |
+
+### S10 checks (speak your interests, 2026-10-29)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S10.1 | Record | Settings → About you → 🎙 Record → talk 30–60 s about what you want to learn and skip → Stop | The browser asks for the mic once; the timer runs; the mic light goes off after Stop; your words appear in the box within ~15 s | |
+| S10.2 | Your accent and terms | Say tool names and mixed Hindi/Gujarati/English if you use them | Text is close enough to fix by hand; note words it gets wrong | |
+| S10.3 | Draft | Write my interests with AI | Four lines (Learn, Level, Skip, Goal); nothing invented; your existing interests that still apply are kept | |
+| S10.4 | Use, not saved | Use this → leave the page without Save → come back | Interests are unchanged until you press Save | |
+| S10.5 | Better ratings | Save the new interests, re-rate 5 videos (Triage → Rate) | Scores and reasons match what you said better than before | |
 
 ## 1. Library at real size ✓ done 2026-10-24
 
