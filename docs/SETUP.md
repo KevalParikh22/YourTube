@@ -26,6 +26,7 @@ Download the setup script from the dashboard (**Help** page, ? icon) or use the 
 ```bash
 bash scripts/setup.sh              # the app only
 bash scripts/setup.sh --local-ai   # the app plus local AI (Ollama and a model that fits your computer)
+bash scripts/setup.sh --local-ai --service   # recommended: also keep the dashboard running (see "Keep it running")
 ```
 
 **Windows (PowerShell)**
@@ -33,9 +34,10 @@ bash scripts/setup.sh --local-ai   # the app plus local AI (Ollama and a model t
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1            # the app only
 powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -LocalAI   # the app plus local AI
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -LocalAI -Service   # also keep it running (not yet tested)
 ```
 
-Then start the dashboard. It opens in your browser through its **access link** (`http://127.0.0.1:8765/?t=…`, also printed in the terminal). The link carries a private token, so other people using the same computer can't open your dashboard. After the first visit your browser remembers it, and plain http://127.0.0.1:8765 works.
+With `--service` the dashboard is now running and opens in your browser, and you can skip the next command. Otherwise start the dashboard. It opens in your browser through its **access link** (`http://127.0.0.1:8765/?t=…`, also printed in the terminal). The link carries a private token, so other people using the same computer can't open your dashboard. After the first visit your browser remembers it, and plain http://127.0.0.1:8765 works.
 
 ```bash
 .venv/bin/python dashboard.py              # Windows: .venv\Scripts\python.exe dashboard.py
@@ -67,6 +69,7 @@ Starting `dashboard.py` while it already runs prints "YourTube is already runnin
 | 4b. Local transcription *(local AI only)* | Installs faster-whisper from `requirements-local.txt` (plus NVIDIA libraries on Linux/Windows; about 1.2 GB). The speech model downloads on first use (~1.6 GB) | **Yes** |
 | 5. Model *(local AI only)* | Downloads the model that fits your GPU and makes it YourTube's default AI | **Yes** |
 | 6. Embedding model *(local AI only)* | Downloads `qwen3-embedding:0.6b` (0.64 GB) for questions and search by meaning | **Yes** |
+| 7. Service *(`--service` only)* | Installs the background service (see "Keep it running") and opens the dashboard | No (only files in your user folder) |
 | Done | Prints the local AI check | — |
 
 The script is safe to run again: every step skips what is already done.
@@ -77,6 +80,7 @@ The script is safe to run again: every step skips what is already done.
 |---|---|---|---|
 | Local AI | `--local-ai` | `-LocalAI` | Also install Ollama and a model |
 | No questions | `-y` / `--yes` | `-Yes` | Answer "yes" to every question |
+| Keep it running | `--service` | `-Service` | Start the dashboard at login and restart it after a crash |
 | Choose the model | `YTKB_MODEL=qwen3.5:2b bash scripts/setup.sh --local-ai` | `$env:YTKB_MODEL="qwen3.5:2b"` | Use this model instead of the recommendation |
 | Help | `--help` | — | Show usage |
 
