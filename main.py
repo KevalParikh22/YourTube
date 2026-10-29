@@ -4,6 +4,7 @@ prints watch time at 1x vs 2x, and runs maintenance jobs. The dashboard (dashboa
 """
 import sys
 import argparse
+import applog
 from extractor import extract_playlist_metadata
 from classifier import classify_playlist_videos, load_taxonomy
 from storage import save_playlist, get_all_videos, init_db
@@ -44,6 +45,17 @@ def run_pipeline(
         print("   2. Or set the YouTube playlist visibility to 'Unlisted' so it requires no cookies.")
         print("   3. \"The playlist does not exist\" usually means a wrong ID, or a private playlist read without")
         print("      a sign-in. See your playlists and their IDs with: python main.py --list --browser auto")
+        cause, fix = applog.explain(str(e)) or (None, None)
+        if cause and fix:
+            print(f"Cause: {cause}")
+            print(f"Fix: {fix}")
+        if browser_cookies:
+            access = f"browser:{browser_cookies}"
+        elif cookies_file:
+            access = "cookies"
+        else:
+            access = "public"
+        applog.get("sync").error("Sync failed (%s): %s", access, str(e))
         return False
         
     videos = data['videos']

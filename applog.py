@@ -35,6 +35,67 @@ def redact(text):
     return text
 
 
+KNOWN = [
+    (
+        re.compile(r"playlist does not exist|This playlist type is unviewable", re.IGNORECASE),
+        "The playlist ID is wrong, or the playlist is private and was read without your sign-in",
+        'Check the link. For private playlists and Watch Later choose "Use my browser login" or a cookies.txt file',
+    ),
+    (
+        re.compile(r"Sign in to confirm you.?re not a bot", re.IGNORECASE),
+        "YouTube asked for a sign-in check",
+        "Sync with your browser login, wait a few minutes, or update yt-dlp: .venv/bin/python -m pip install -U yt-dlp",
+    ),
+    (
+        re.compile(r"HTTP Error 429|Too Many Requests", re.IGNORECASE),
+        "YouTube is rate-limiting this computer",
+        "Wait 15–30 minutes, then try again",
+    ),
+    (
+        re.compile(r"could not find .*cookies database|failed to decrypt|secretstorage", re.IGNORECASE),
+        "The browser's cookies could not be read",
+        "Sign in to YouTube in that browser, close it, and try again; on Linux install secretstorage; or use a cookies.txt export",
+    ),
+    (
+        re.compile(r"Unsupported URL|is not a valid URL", re.IGNORECASE),
+        "The link is not a YouTube playlist or video",
+        "Paste a link like https://www.youtube.com/playlist?list=…",
+    ),
+    (
+        re.compile(r"Connection refused.*11434|11434.*Connection refused|Ollama[\s\S]*not running|not running[\s\S]*Ollama", re.IGNORECASE),
+        "Ollama is not running",
+        "Start Ollama (ollama serve)",
+    ),
+    (
+        re.compile(r"getaddrinfo|Name or service not known|timed out|Connection (?:refused|reset)|URLError", re.IGNORECASE),
+        "No connection to YouTube",
+        "Check the internet connection and try again",
+    ),
+    (
+        re.compile(r"nsig extraction failed|Unable to extract|Requested format is not available", re.IGNORECASE),
+        "YouTube changed something that yt-dlp does not handle yet",
+        "Update yt-dlp: .venv/bin/python -m pip install -U yt-dlp",
+    ),
+    (
+        re.compile(r"database is locked", re.IGNORECASE),
+        "Another program is using the library database",
+        "Close other YourTube windows or scripts and try again",
+    ),
+    (
+        re.compile(r"No space left on device", re.IGNORECASE),
+        "The disk is full",
+        "Free some space",
+    ),
+]
+
+
+def explain(output):
+    if not output:
+        return None
+    text = str(output)
+    return next(((cause, fix) for pattern, cause, fix in KNOWN if pattern.search(text)), None)
+
+
 class RedactFilter(logging.Filter):
     def filter(self, record):
         record.msg = redact(record.getMessage())
@@ -98,7 +159,12 @@ def log_task(kind, label, ok, stopped, started_at, finished_at, output):
     elif stopped:
         logger.warning("Task stopped: %s", prefix)
     else:
-        error = next((line for line in reversed(lines) if line.startswith("Error:")), None)
+        explained = explain(output)
+        if explained:
+            cause, fix = explained
+        else:
+            cause = next((line for line in reversed(lines) if line.startswith("Error:")), None) or "See the output below"
+            fix = "See the output below"
         details = "\n".join("    " + line for line in lines[-40:]) or "    (no output)"
-        logger.error("Task failed: %s\n  Cause: %s\n  Fix: See the output below\n  Last output:\n%s",
-                     prefix, error or "See the output below", details)
+        logger.error("Task failed: %s\n  Cause: %s\n  Fix: %s\n  Last output:\n%s",
+                     prefix, cause, fix, details)

@@ -153,7 +153,7 @@
 
 ### T2: Cause and fix for known failures
 - **worker:** agy
-- **status:** todo
+- **status:** done
 - **depends on:** T1
 - **files:** `applog.py`, `main.py`, `tests/test_applog.py`
 - **steps:** Design notes B.
