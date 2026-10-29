@@ -6,7 +6,7 @@ import unittest
 from unittest import mock
 
 import llm
-from ai_classifier import FALLBACK_CATEGORY, assign_categories, discover_categories
+from ai_classifier import FALLBACK_CATEGORY, _same_topic, assign_categories, discover_categories
 from llm import LLMError, parse_json
 
 
@@ -224,3 +224,19 @@ class ContextTest(unittest.TestCase):
         ctx = storage.ai_context(["a", "b"], excerpt_chars=50, db_path=db)
         self.assertEqual((ctx["a"]["description"], ctx["a"]["summary"], len(ctx["a"]["excerpt"])), ("desc", "short", 50))
         self.assertEqual(ctx["b"], {"description": "", "summary": "", "excerpt": ""})
+
+
+class SameTopicTest(unittest.TestCase):
+    KNOWN = ["AI & Machine Learning", "Productivity & Career", "Finance & Business", "Business, Tech Trends & Podcasts",
+             "Software Engineering & Coding"]
+
+    def test_near_copies_merge_into_the_closest_existing_category(self):
+        for proposed, existing in [("Productivity and Career Growth", "Productivity & Career"),
+                                   ("AI and Tools", "AI & Machine Learning"), ("AI Agents", "AI & Machine Learning"),
+                                   ("Career Growth", "Productivity & Career"), ("Business Strategy", "Finance & Business"),
+                                   ("Coding Tutorials", "Software Engineering & Coding")]:
+            self.assertEqual(_same_topic(proposed, self.KNOWN), existing, proposed)
+
+    def test_new_topics_stay_new(self):
+        for proposed in ("Cooking", "Woodworking Projects", "Travel Vlogs"):
+            self.assertIsNone(_same_topic(proposed, self.KNOWN), proposed)

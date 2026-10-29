@@ -109,7 +109,8 @@ Categories in use now. Keep, rename, merge or drop them as the videos suggest:
 {current}
 
 Propose at most {max_categories} categories in total, protected ones included, that together cover most of these videos.
-Add new categories only for topics that none of the existing ones cover.
+Add new categories only for topics that none of the existing ones cover. To keep an existing category, use its name exactly;
+never return a variant of it (not "Productivity and Career Growth" for "Productivity & Career", not "AI Tools" for "AI & Machine Learning").
 Prefer specific, useful topics over vague ones. Do not include a catch-all such as "{FALLBACK_CATEGORY}"; it always exists.
 For each category give a one-sentence description and 5-12 lowercase keywords or short phrases that would appear in matching titles or channel names.
 
@@ -165,16 +166,22 @@ def _name_words(name: str) -> set:
 
 def _same_topic(name: str, names: List[str]) -> Optional[str]:
     """The existing name this one duplicates: equal ignoring case, one's words contained in the other's
-    ("Finance & Business Strategy" and "Finance & Business"), or at least half their words shared."""
+    ("Finance & Business Strategy" and "Finance & Business"), at least half their words shared, or a shared
+    word plus at most one new one ("AI Tools" and "AI & Machine Learning"). The closest match wins."""
     words = _name_words(name)
     for other in names:
         if other.lower() == name.lower():
             return other
+    best, best_score = None, 0.0
     for other in names:
         ow = _name_words(other)
-        if words and ow and (words <= ow or ow <= words or len(words & ow) / len(words | ow) >= 0.5):
-            return other
-    return None
+        shared = words & ow
+        if not shared:
+            continue
+        score = len(shared) / len(words | ow)
+        if (words <= ow or ow <= words or score >= 0.5 or len(words - ow) <= 1) and score > best_score:
+            best, best_score = other, score
+    return best
 
 
 def assign_categories(
