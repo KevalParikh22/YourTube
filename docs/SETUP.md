@@ -203,13 +203,14 @@ On **Settings → Cloud AI**, click **Set up** next to a provider, paste the key
 
 ### Which AI does what
 
-In **Settings → AI by task** (*Which AI does what*), pick a **Default** AI, then optionally a different one for **Categories**, **Ratings and summaries** and **Questions and answers**. Example: a free local model for categories and Claude for ratings. A rating run shows the estimated tokens and cost before it starts. **Questions and answers** uses the same AI as ratings unless you pick one.
+In **Settings → AI by task** (*Which AI does what*), pick a **Default** AI, then optionally a different one for **Categories**, **Ratings**, **Summaries**, **Questions and answers** and **About you** (drafting your interests). Example: a free local model for categories and Claude for ratings. A rating run shows the estimated tokens and cost before it starts. **Summaries**, **Questions and answers** and **About you** use the same AI as ratings unless you pick one.
 
 ### Settings
 
 Settings has a side menu: **General** (default playback speed and theme, kept in this browser), **About you**, **AI by task**, **Cloud AI**, **Local AI**, **Sync and details** and **Scoring** (how scores are calculated).
 
 **About you:**
+- **What are you looking for?** Say it (🎙 **Record**, up to 3 minutes; you can record several times) or type it, in your own words. **Write my interests with AI** turns it into four short lines (Learn, Level, Skip, Goal), keeping what still applies from your current interests. **Use this** puts the draft into Interests; nothing is saved until you press **Save**. Voice is turned into text on your computer by Whisper (`small` model on the CPU, about 10 seconds per minute of speech; the first use downloads it, ~0.5 GB) and the recording is deleted right away. It needs local transcription (`bash scripts/setup.sh --local-ai`); the browser asks once for microphone access.
 - **Interests:** what you want to learn. Ratings favour videos that match. Optional; if filled in, at least 3 words and at most 2,000 characters.
 - **Language:** summaries and rating reasons are written in this language (default English), chosen from the list of supported languages.
 

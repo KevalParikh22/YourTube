@@ -75,6 +75,9 @@
   .bar-icon svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .bar-icon.on { color: var(--ink); background: var(--sunken); }
 
+  .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #e5484d; margin-right: 6px; vertical-align: 1px; animation: rec-pulse 1s ease-in-out infinite; }
+  @keyframes rec-pulse { 50% { opacity: .25; } }
+  @media (prefers-reduced-motion: reduce) { .rec-dot { animation: none; } }
   .skip-link { position: fixed; z-index: 100; top: 8px; left: 8px; padding: 8px 12px; background: var(--raised); border: 2px solid var(--accent); border-radius: 6px; transform: translateY(-160%); }
   .skip-link:focus { transform: translateY(0); }
   .shortcut-scrim { position: fixed; inset: 0; z-index: 70; display: grid; place-items: center; padding: 20px; background: #0008; }
@@ -601,6 +604,7 @@ const S = {
   knowledge: { list: null, pages: {}, loadingList: false, loadingPage: null },
   logs: null,
   addingCat: false,
+  about: { look: '', error: '', suggestion: '', recording: false, seconds: 0 },
 };
 
 /* ---------------- helpers ---------------- */
@@ -2111,16 +2115,30 @@ function viewAbout() {
     ...langs.map(l => `<option value="${esc(l)}" ${curLang === l ? 'selected' : ''}>${esc(l)}</option>`)
   ].join('');
   const interests = ai.interests || '';
+  const currentInterests = S.about.current ?? interests;
+  const voiceAvailable = !!S.data.voice;
+  const voiceHint = "Voice input needs local transcription. Run: bash scripts/setup.sh --local-ai";
   return `<section class="section card">
     <h2 class="h">About you${S.data.libraries.length > 1 ? ` · ${esc(S.lib ? libName(S.lib) : libName(1))}` : ''}</h2>
     ${S.data.libraries.length > 1 ? `<p class="note">Library-specific interests ${tip(`Ratings judge each video against its library's goals.${S.lib ? '' : ` “All libraries” is selected: this edits ${libName(1)}.`}`)}</p>` : ''}
     <div class="ai-grid">
+      <div class="full" style="padding:14px;border:1px solid var(--line);border-radius:8px;background:var(--sunken)">
+        <label class="field-label" for="ai-look">What are you looking for?</label>
+        <textarea id="ai-look" rows="3" placeholder="Say or type it in your own words: what you want to learn, your level, what to skip, and why">${esc(S.about.look)}</textarea>
+        <div class="actions" style="margin-top:8px">
+          <button type="button" class="btn btn-sm" data-act="voice-rec" aria-label="Record your answer" ${voiceAvailable ? '' : `disabled title="${esc(voiceHint)}"`}>${S.about.recording ? `<span class="rec-dot" aria-hidden="true"></span>■ Stop ${clock(S.about.seconds)}` : '🎙 Record'}</button>
+          ${!voiceAvailable ? `<span class="hint" title="${esc(voiceHint)}">Voice unavailable · Run <code>bash scripts/setup.sh --local-ai</code></span>` : ''}
+          <button type="button" class="btn btn-dark btn-sm" data-act="interests-draft" ${!S.about.look.trim() || S.about.recording ? 'disabled' : ''}>${S.about.drafting ? '<span class="spin" style="display:inline-block"></span> Writing…' : 'Write my interests with AI'}</button>
+        </div>
+        <div class="hint warn-text" role="status" aria-live="polite" style="margin-top:6px">${esc(S.about.error)}</div>
+        ${S.about.suggestion ? `<div style="margin-top:12px;padding:12px;background:var(--raised);border:1px solid var(--line);border-radius:8px"><div class="field-label">Suggested interests</div><pre style="white-space:pre-wrap;font:inherit;margin:6px 0 10px">${esc(S.about.suggestion)}</pre><div class="actions"><button type="button" class="btn btn-dark btn-sm" data-act="interests-use">Use this</button><button type="button" class="btn btn-sm" data-act="interests-edit">Edit</button><button type="button" class="btn-text" data-act="interests-discard">Discard</button></div></div>` : ''}
+      </div>
       <div class="full">
         <div style="display:flex;justify-content:space-between;align-items:baseline">
           <label class="field-label" for="ai-interests">Learning interests ${tip('Ratings favour videos that fit these interests.')}</label>
-          <span id="ai-interests-count" class="hint" style="font-size:12px">${interests.length} / 2000</span>
+          <span id="ai-interests-count" class="hint" style="font-size:12px">${currentInterests.length} / 2000</span>
         </div>
-        <textarea id="ai-interests" rows="3" placeholder="e.g. Building AI agents and RAG in Python, system design for interviews. Not interested in crypto or AI news hype.">${esc(interests)}</textarea>
+        <textarea id="ai-interests" rows="3" placeholder="e.g. Building AI agents and RAG in Python, system design for interviews. Not interested in crypto or AI news hype.">${esc(currentInterests)}</textarea>
         <div id="ai-interests-err" class="hint warn-text" style="margin-top:4px;display:none"></div>
       </div>
       <div><label class="field-label" for="ai-lang">Response language</label>
@@ -2556,6 +2574,52 @@ function setView(patch) {
 }
 
 /* ---------------- events ---------------- */
+let aboutRecorder = null, aboutStream = null, aboutChunks = [], aboutTimer = null, aboutStarted = 0;
+function releaseAboutMic() {
+  clearInterval(aboutTimer); aboutTimer = null;
+  aboutStream?.getTracks().forEach(track => track.stop()); aboutStream = null;
+}
+async function startAboutRecording() {
+  const a = S.about;
+  a.error = '';
+  try {
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('Voice recording is unavailable in this browser. Type instead.');
+    aboutStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const types = ['audio/webm;codecs=opus', 'audio/ogg', 'audio/mp4'];
+    const mimeType = types.find(type => MediaRecorder.isTypeSupported(type));
+    aboutChunks = [];
+    aboutRecorder = new MediaRecorder(aboutStream, mimeType ? { mimeType } : undefined);
+    aboutRecorder.ondataavailable = event => { if (event.data?.size) aboutChunks.push(event.data); };
+    aboutRecorder.onstop = async () => {
+      releaseAboutMic(); a.recording = false; a.error = 'Transcribing…'; refresh();
+      try {
+        const blob = new Blob(aboutChunks, { type: aboutRecorder.mimeType || mimeType || 'audio/webm' });
+        const buffer = await blob.arrayBuffer();
+        let binary = ''; for (const byte of new Uint8Array(buffer)) binary += String.fromCharCode(byte);
+        const result = await api('/api/voice/transcribe', { audio: btoa(binary), mime: blob.type });
+        a.look = [a.look.trim(), result.text].filter(Boolean).join(a.look.trim() ? '\n' : ''); a.error = '';
+      } catch (err) { a.error = err.message; toast(err.message, true); }
+      aboutRecorder = null; aboutChunks = []; refresh(); $('#ai-look')?.focus();
+    };
+    aboutRecorder.start(); a.recording = true; a.seconds = 0; aboutStarted = Date.now();
+    aboutTimer = setInterval(() => {
+      a.seconds = Math.floor((Date.now() - aboutStarted) / 1000);
+      if (a.seconds >= 180) stopAboutRecording();
+      else { const button = $('[data-act="voice-rec"]'); if (button) button.innerHTML = `<span class="rec-dot" aria-hidden="true"></span>■ Stop ${clock(a.seconds)}`; }
+    }, 1000);
+    refresh();
+  } catch (err) {
+    releaseAboutMic(); a.recording = false; aboutRecorder = null; aboutChunks = [];
+    a.error = err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError'
+      ? "Allow the microphone for this page (the address bar's site settings), or type instead" : err.message;
+    refresh(); toast(a.error, true);
+  }
+}
+function stopAboutRecording() {
+  if (aboutRecorder && aboutRecorder.state !== 'inactive') aboutRecorder.stop();
+  else releaseAboutMic();
+  S.about.recording = false; refresh();
+}
 document.addEventListener('click', async e => {
   if (S.jobsOpen && !e.target.closest('#jobs')) { S.jobsOpen = false; renderJobs(); }
   const el = e.target.closest('[data-act]');
@@ -2563,6 +2627,21 @@ document.addEventListener('click', async e => {
   const act = el.dataset.act, id = el.dataset.id;
   if (el.tagName === 'A' && el.getAttribute('href') === '#/') e.preventDefault();
   switch (act) {
+    case 'voice-rec': if (S.about.recording) stopAboutRecording(); else startAboutRecording(); break;
+    case 'interests-draft': {
+      S.about.look = $('#ai-look')?.value || ''; S.about.error = ''; S.about.drafting = true; refresh();
+      try { S.about.suggestion = (await api('/api/interests/draft', { text: S.about.look, current: $('#ai-interests')?.value || '', library: S.lib })).interests; }
+      catch (err) { S.about.error = err.message; toast(err.message, true); }
+      finally { S.about.drafting = false; refresh(); }
+      break;
+    }
+    case 'interests-use': case 'interests-edit': {
+      const target = $('#ai-interests'); if (target) { target.value = S.about.suggestion; target.dispatchEvent(new Event('input', { bubbles: true })); target.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+      S.about.suggestion = ''; refresh();
+      if (act === 'interests-use') $('[data-act="ai-save-prefs"]')?.focus(); else $('#ai-interests')?.focus();
+      break;
+    }
+    case 'interests-discard': S.about.suggestion = ''; refresh(); break;
     case 'v-status': setView({ status: el.dataset.v }); break;
     case 'v-cat': setView({ cat: el.dataset.v, status: S.view.status === 'gone' ? 'todo' : S.view.status }); break;
     case 'v-src': setView({ src: el.dataset.v }); break;
@@ -2795,6 +2874,7 @@ document.addEventListener('click', async e => {
       }
       try {
         await saveAi(aiPrefsBody());
+        S.about.current = undefined;
         refresh();
         toast('Saved');
       } catch (err) {
@@ -2879,6 +2959,7 @@ document.addEventListener('change', async e => {
   const el = e.target, ch = el.dataset.change;
   if (ch === 'lib') {
     S.lib = +el.value; store.set('ytkb.lib', S.lib);
+    S.about.current = undefined;   // unsaved interests belong to the library that was shown
     S.addingCat = false;
     Object.assign(S.view, { cat: '', src: '' }); S.sel.clear(); S.ask.video = null; S.search.res = null;
     S.knowledge.list = null; S.knowledge.pages = {};
@@ -2980,6 +3061,12 @@ document.addEventListener('change', async e => {
 let qT, sT, aT;
 document.addEventListener('input', e => {
   const el = e.target;
+  if (el.id === 'ai-look') {
+    S.about.look = el.value;
+    const draft = $('[data-act="interests-draft"]'); if (draft) draft.disabled = !el.value.trim() || S.about.recording || S.about.drafting;
+    return;
+  }
+  if (el.id === 'ai-interests') { S.about.current = el.value; }
   if (el.dataset.formula) {
     const f = ratingFormula(Object.fromEntries($$('[data-formula]').map(input => [input.dataset.formula, +input.value / (['depth','value','freshness'].includes(input.dataset.formula) ? 100 : 1)])));
     const example = $('#formula-example'); if (example) example.textContent = `Example: ${formulaExample(f)}`;
@@ -3020,6 +3107,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('focusout', e => { if (e.target.id === 'd-notes') saveNotes(); });
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && S.about.recording) { e.preventDefault(); stopAboutRecording(); return; }
   const typing = e.target?.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName);
   if (S.shortcutsOpen) {
     if (e.key === 'Escape') { e.preventDefault(); S.shortcutsOpen = false; renderShortcutHelp(); (S.shortcutReturnFocus || $('#help-btn'))?.focus(); return; }
@@ -3061,7 +3149,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); }
   if (e.key === 'Enter' && e.target.id === 'new-cat-name' && !e.isComposing) { e.preventDefault(); saveNewCategory(); }
 });
-addEventListener('hashchange', () => { if (S.data) { S.sel.clear(); S.addingCat = false; renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
+addEventListener('hashchange', () => { if (S.about.recording) stopAboutRecording(); if (S.data) { S.sel.clear(); S.addingCat = false; renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
 
 applyTheme();
 load();
