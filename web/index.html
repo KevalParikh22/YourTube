@@ -563,6 +563,7 @@ const JOB_TEXT = {
   sync: ['Reading playlist. Large playlists take a minute.', 'Playlist synced', 'Sync failed. See the log.'],
   discover: ['Asking the AI to propose categories…', 'Categories proposed. Review them below.', 'AI run failed. See the log.'],
   suggest: ['Asking the AI to sort videos…', 'Suggestions ready to review', 'AI run failed. See the log.'],
+  split: ['Finding specific topics in this category…', 'Split proposal ready to review', 'Category split failed. See the log.'],
   details: ['Fetching video details, one video every few seconds…', 'Video details fetched', 'Details run stopped early. See the log.'],
   rate: ['Rating videos…', 'Videos rated', 'Rating stopped early. See the log.'],
   summarize: ['Summarising videos…', 'Video summaries ready', 'Summarising stopped early. See the log.'],
@@ -1300,11 +1301,11 @@ function renderJobs() {
 function updateJob() {
   const box = $('#job'), job = S.data.job;
   if (!box) return;
-  const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
+  const mine = route() === 'categories' ? ['discover', 'suggest', 'split'].includes(job.kind)
     : route().startsWith('settings') ? ['pull', 'embed'].includes(job.kind)
     : route() === 'knowledge' ? job.kind === 'knowledge'
     : ['sync', 'details', 'asr', 'visual'].includes(job.kind) || !job.kind;
-  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
+  const myKinds = route() === 'categories' ? ['discover', 'suggest', 'split'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
   if (!mine || (!job.log && !job.running) || (job.dismissed && !job.running)) { box.innerHTML = waitLine; return; }
@@ -1410,7 +1411,8 @@ function viewCategories() {
     ${noMatch && ai.ready_for.categorize ? `<p class="note" style="margin-top:10px">The AI found no matching category for ${plural(noMatch, 'unsorted video')}. Add a category for ${noMatch === 1 ? 'it' : 'them'} or use <b>Propose categories with AI</b>; after the categories change, Sort offers ${noMatch === 1 ? 'it' : 'them'} again.</p>` : ''}
     <div id="job"></div>
   </section>
-  ${ai.proposal ? viewProposal(ai.proposal, tax, counts) : ''}
+    ${ai.split ? viewSplit(ai.split, counts) : ''}
+    ${ai.proposal ? viewProposal(ai.proposal, tax, counts) : ''}
   <section class="section">
     ${ai.proposal ? '<h2 class="h">Current categories</h2>' : ''}
     ${S.addingCat ? viewAddCategoryRow() : ''}
@@ -1424,13 +1426,21 @@ function viewCategories() {
         </div></div>
       <div><label class="field-label" for="kw-${n.replace(/[^\w-]/g, '_')}">Keywords</label><textarea id="kw-${n.replace(/[^\w-]/g, '_')}" class="kw" data-name="${esc(n)}" rows="4" placeholder="Separate keywords with commas">${esc(tax[n].join(', '))}</textarea>
         ${notes[n] ? `<div class="field-label">Category note ${tip(notes[n])}</div>` : ''}</div>
-      <div><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
+      <div>${(counts[n] || 0) >= 6 ? `<button class="btn-text" data-act="split-cat" data-name="${esc(n)}" data-job-btn ${!ai.ready_for.categorize ? 'disabled title="Set up an AI provider in Settings first"' : ''}>Split with AI</button>` : ''}<button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
     ${manual.map(n => `<div class="cat-row">
       <div><b style="font-weight:500;overflow-wrap:anywhere" title="${esc(n)}">${esc(n)}</b><div class="meta"><a href="#/" data-act="v-cat" data-v="${esc(n)}">${plural(counts[n], 'video')}</a> · set by hand</div></div>
       <p class="field-label" style="padding-top:6px">No keywords ${tip('This category only holds videos you moved here yourself.')}</p>
-      <div><button class="btn-text" data-act="adopt-cat" data-name="${esc(n)}">Add keywords</button><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
+      <div>${counts[n] >= 6 ? `<button class="btn-text" data-act="split-cat" data-name="${esc(n)}" data-job-btn ${!ai.ready_for.categorize ? 'disabled title="Set up an AI provider in Settings first"' : ''}>Split with AI</button>` : ''}<button class="btn-text" data-act="adopt-cat" data-name="${esc(n)}">Add keywords</button><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
+  </section>`;
+}
+function viewSplit(split, counts) {
+  const categories = Array.isArray(split.categories) ? split.categories : [];
+  return `<section class="section card" id="split-panel">
+    <h2 class="h">Split <b>${esc(split.category || 'category')}</b> (${plural(counts[split.category] || 0, 'video')}) into:</h2>
+    <div>${categories.map((c, i) => `<label class="prop-changed"><input type="checkbox" data-split-choice="${i}" checked style="margin-top:4px;accent-color:var(--ink)"><span><b>${esc(c.name)}</b>${c.description ? `<span class="muted"> — ${esc(c.description)}</span>` : ''}<br><span class="faint">Keywords: ${esc((c.keywords || []).join(', '))}</span></span></label>`).join('')}</div>
+    <div class="actions"><button class="btn btn-dark btn-sm" data-act="split-apply">Create and sort</button><button class="btn btn-sm" data-act="split-dismiss">Dismiss</button></div>
   </section>`;
 }
 function viewAddCategoryRow() {
@@ -1812,7 +1822,7 @@ function viewKnowledgeList() {
           </tbody>
         </table></div>`}
   </section>
-  ${list.length ? (list.some(c => c.page && c.page !== 'none')
+  ${Array.isArray(list) && list.length ? (list.some(c => c.page && c.page !== 'none')
     ? `<details class="section"><summary class="h" style="cursor:pointer">How this works</summary><ol class="note"><li>Pick a category you're studying.</li><li>Summarise at least 3 of its videos.</li><li>Build its page.</li></ol></details>`
     : `<section class="section card"><h2 class="h">Start here</h2><ol class="note"><li>Pick a category you're studying.</li><li>Summarise at least 3 of its videos.</li><li>Build its page.</li></ol></section>`)
     : ''}`;
@@ -2784,6 +2794,30 @@ document.addEventListener('click', async e => {
     }
     case 'ai-discover': try { await saveTax(collectTax()); } catch (err) { toast(err.message, true); break; } startAi('/api/ai/discover'); break;
     case 'ai-suggest': try { await saveTax(collectTax()); } catch (err) { toast(err.message, true); break; } startAi('/api/ai/suggest', { scope: 'unsorted' }); break;
+    case 'split-cat': {
+      try {
+        await saveTax(collectTax());
+        const res = await api('/api/categories/split', { name: el.dataset.name });
+        await queued(res, `Split ${el.dataset.name}`);
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'split-apply': {
+      const split = S.data.ai.split;
+      const names = $$('[data-split-choice]:checked').map(input => split?.categories?.[+input.dataset.splitChoice]?.name).filter(Boolean);
+      if (!names.length) { toast('Choose at least one category', true); break; }
+      try {
+        const res = await api('/api/categories/split/apply', { names });
+        await load();
+        await queued(res, 'Category suggestions');
+        toast('Categories created. Sorting suggestions are running.');
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'split-dismiss':
+      try { await api('/api/categories/split/dismiss', {}); await load(); toast('Split proposal dismissed'); }
+      catch (err) { toast(err.message, true); }
+      break;
     case 'prop-apply': {
       const body = collectProposal();
       if (!body.categories.length) { toast('Tick at least one category', true); break; }
