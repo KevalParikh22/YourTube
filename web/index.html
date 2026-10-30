@@ -90,8 +90,9 @@
   /* ---------- controls ---------- */
   select, input[type="text"], input[type="search"], input[type="number"], input[type="password"], textarea {
     font: inherit; color: var(--ink); background: var(--raised); border: 1px solid var(--line-strong);
-    border-radius: 8px; height: 32px; padding: 0 10px; min-width: 0;
+    border-radius: 8px; height: 34px; padding: 0 10px; min-width: 0;
   }
+  select, input[type="text"], input[type="number"] { font-size: 13.5px; height: 34px; }
   select { appearance: none; padding-right: 32px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='m2 4 4 4 4-4' fill='none' stroke='%23706b64' stroke-width='1.5'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 10px center; }
   textarea { height: auto; padding: 8px 10px; width: 100%; resize: vertical; line-height: 1.5; }
   input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent); }
@@ -159,7 +160,7 @@
   }
   .selbar .btn-text { color: color-mix(in srgb, var(--bg) 72%, transparent); }
   .selbar .btn-text:hover { color: var(--bg); }
-  .selbar select { font-size: 12.5px; margin: 0 4px; }
+  .selbar select { margin: 0 4px; }
   .selbar select option { color: var(--ink); background: var(--raised); }
   .selbar strong { margin-right: 10px; font-weight: 600; }
   .selbar .grow { flex: 1; }
@@ -213,14 +214,6 @@
   .tbl-wrap { overflow-x: auto; }
 
   /* ---------- plan ---------- */
-  .sentence { font-size: 22px; line-height: 2; color: var(--ink-2); margin: 10px 0 0; }
-  .sentence input {
-    font: inherit; font-size: 20px; color: var(--ink); height: 36px; padding: 0 6px; border: 0;
-    border-bottom: 1.5px solid var(--ink-3); border-radius: 0; background: transparent; text-align: center;
-  }
-  .sentence input[type="number"] { width: 72px; }
-  .sentence select { max-width: 280px; }
-  .sentence input:focus { box-shadow: none; border-bottom-color: var(--accent); }
   .meter { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; margin: 8px 0 4px; }
   .meter i { display: block; height: 100%; background: var(--accent); }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 16px; }
@@ -228,6 +221,8 @@
   /* ---------- playlists ---------- */
   .card { background: var(--raised); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
   .form-grid { display: grid; grid-template-columns: minmax(0, 1fr) 220px auto; gap: 10px; margin-top: 14px; }
+  .form-row { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end; }
+  .form-row .field { display: grid; gap: 5px; margin: 0; font-size: 12.5px; color: var(--ink-2); font-weight: 500; }
   .field-label { display: block; font-size: 12.5px; color: var(--ink-2); margin-bottom: 5px; font-weight: 500; }
   .hint { font-size: 12.5px; color: var(--ink-3); margin: 10px 0 0; }
   .log {
@@ -525,7 +520,6 @@
     .page { padding: 28px 16px 72px; }
     .display { font-size: 32px; }
     .display em { display: block; margin: 4px 0 0; font-size: 18px; }
-    .sentence { font-size: 18px; }
     .row { grid-template-columns: 26px 72px minmax(0, 1fr) auto; gap: 10px; }
     .row .pick { display: none; }
   }
@@ -998,19 +992,19 @@ function viewHome() {
   <section>
     <div class="eyebrow">Home</div>
     <h1 class="display num">${allDays ? `${fmt(all.rem / S.speed)} left at ${sx(S.speed)}` : 'All watched'}<em>${allDays ? `done by ${finish(allDays)}` : ''}</em></h1>
-    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;margin-top:18px">
-      <label class="field-label">Minutes a day<input style="display:block;margin-top:5px" type="number" min="5" step="5" value="${p.mins}" data-change="p-mins" aria-label="Minutes a day"></label>
-      <label class="field-label">Days a week<input style="display:block;margin-top:5px" type="number" min="1" max="7" value="${p.days}" data-change="p-days" aria-label="Days a week"></label>
-      <label class="field-label">Speed<select style="display:block;margin-top:5px" data-change="speed" aria-label="Speed">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select></label>
+    <div class="form-row" style="margin-top:18px">
+      <label class="field">Minutes a day<input type="number" min="5" step="5" value="${p.mins}" data-change="p-mins" aria-label="Minutes a day"></label>
+      <label class="field">Days a week<input type="number" min="1" max="7" value="${p.days}" data-change="p-days" aria-label="Days a week"></label>
+      <label class="field">Speed<select data-change="speed" aria-label="Speed">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select></label>
     </div>
   </section>
 
   <section class="section">
     <h2 class="h">Today's session</h2>
-    <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;margin-top:12px">
-      <label class="field-label">Minutes<input style="display:block;margin-top:5px" type="number" min="5" step="5" value="${S.session.mins}" data-change="s-mins" aria-label="Session minutes"></label>
-      <label class="field-label">Category<select style="display:block;margin-top:5px" data-change="s-cat" aria-label="Category"><option value="">Any category</option>${categoryNames().map(c => `<option value="${esc(c)}" ${S.session.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
-      <label class="field-label">Order<select style="display:block;margin-top:5px" data-change="s-order" aria-label="Order">${[['order', 'Playlist order'], ['shortest', 'Shortest first'], ['longest', 'Longest first'], ['progress', 'Unfinished first']].map(([k, l]) => `<option value="${k}" ${S.session.order === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div class="form-row" style="margin-top:12px">
+      <label class="field">Minutes<input type="number" min="5" step="5" value="${S.session.mins}" data-change="s-mins" aria-label="Session minutes"></label>
+      <label class="field">Category<select data-change="s-cat" aria-label="Category"><option value="">Any category</option>${categoryNames().map(c => `<option value="${esc(c)}" ${S.session.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>
+      <label class="field">Order<select data-change="s-order" aria-label="Order">${[['order', 'Playlist order'], ['shortest', 'Shortest first'], ['longest', 'Longest first'], ['progress', 'Unfinished first']].map(([k, l]) => `<option value="${k}" ${S.session.order === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
     </div>
     <div style="margin-top:16px"><div class="note">${plural(session.picked.length, 'video')} · ${fmt(used)} of ${S.session.mins}m</div><div class="meter"><i style="width:${Math.min(100, used / (S.session.mins * 60) * 100)}%"></i></div>
       ${session.picked.length ? `<ul class="rows">${session.picked.map(row).join('')}</ul><div class="actions">${playLinks(session.picked)} <button class="btn btn-sm" data-act="session-done" data-ids="${esc(session.picked.map(v => v.video_id).join(','))}">Mark all watched</button></div>`
