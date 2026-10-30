@@ -5,6 +5,8 @@
 #   bash scripts/service.sh uninstall
 #   bash scripts/service.sh status
 #   bash scripts/service.sh open [--port 8765]
+#   bash scripts/service.sh restart
+#   bash scripts/service.sh update
 set -euo pipefail
 
 PORT=8765
@@ -17,20 +19,20 @@ while [ $# -gt 0 ]; do
       PORT="$2"; shift 2 ;;
     --port=*)
       PORT="${1#*=}"; shift ;;
-    install|uninstall|status|open)
+    install|uninstall|status|open|restart|update)
       CMD="$1"; shift ;;
     -h|--help)
-      echo "Usage: $0 {install|uninstall|status|open} [--port N]"
+      echo "Usage: $0 {install|uninstall|status|open|restart|update} [--port N]"
       exit 0 ;;
     *)
       echo "Error: unknown argument: $1" >&2
-      echo "Usage: $0 {install|uninstall|status|open} [--port N]" >&2
+      echo "Usage: $0 {install|uninstall|status|open|restart|update} [--port N]" >&2
       exit 2 ;;
   esac
 done
 
 if [ -z "$CMD" ]; then
-  echo "Usage: $0 {install|uninstall|status|open} [--port N]" >&2
+  echo "Usage: $0 {install|uninstall|status|open|restart|update} [--port N]" >&2
   exit 2
 fi
 
@@ -55,6 +57,27 @@ if [ ! -x "$PY" ]; then
 fi
 
 OS="$(uname -s)"
+
+service_installed() {
+  if [ "$OS" = "Linux" ]; then
+    systemctl --user cat yourtube.service >/dev/null 2>&1
+  elif [ "$OS" = "Darwin" ]; then
+    [ -f "$HOME/Library/LaunchAgents/com.yourtube.dashboard.plist" ]
+  else
+    return 1
+  fi
+}
+
+restart_service() {
+  if [ "$OS" = "Linux" ]; then
+    systemctl --user restart yourtube.service
+  elif [ "$OS" = "Darwin" ]; then
+    launchctl kickstart -k "gui/$(id -u)/com.yourtube.dashboard"
+  else
+    echo "Error: unsupported operating system: $OS" >&2
+    return 1
+  fi
+}
 
 case "$CMD" in
   install)
@@ -168,6 +191,42 @@ EOF
       else
         echo "Open the dashboard link in your browser: $URL"
       fi
+    fi
+    ;;
+
+  restart)
+    if ! service_installed; then
+      if [ "$OS" != "Linux" ] && [ "$OS" != "Darwin" ]; then
+        echo "Error: unsupported operating system: $OS" >&2
+      else
+        echo "Error: YourTube service is not installed. Run: bash scripts/service.sh install" >&2
+      fi
+      exit 1
+    fi
+    restart_service
+    ;;
+
+  update)
+    if ! git -C "$ROOT" pull --ff-only; then
+      echo "Error: git pull failed; fix it and run this again" >&2
+      exit 1
+    fi
+    if "$PY" -m pip --version >/dev/null 2>&1; then
+      "$PY" -m pip install -q -r "$ROOT/requirements.txt"
+    else
+      python3 -m pip --python "$PY" install -q -r "$ROOT/requirements.txt"
+    fi
+    if "$PY" -c "import faster_whisper" >/dev/null 2>&1; then
+      if "$PY" -m pip --version >/dev/null 2>&1; then
+        "$PY" -m pip install -q -r "$ROOT/requirements-local.txt"
+      else
+        python3 -m pip --python "$PY" install -q -r "$ROOT/requirements-local.txt"
+      fi
+    fi
+    if service_installed; then
+      restart_service
+    else
+      echo "Updated. Start it with: bash scripts/service.sh install"
     fi
     ;;
 esac
