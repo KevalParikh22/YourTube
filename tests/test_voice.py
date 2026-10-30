@@ -34,6 +34,11 @@ class VoiceClipTest(unittest.TestCase):
         self.assertEqual(result["language"], "en")
         self.assertFalse(any(name.endswith(".m4a") for name in os.listdir(self.tmp.name)))
 
+    def test_unavailable_with_mlx_whisper_only(self):
+        with mock.patch.object(voice.local_asr, "available", return_value=True), \
+             mock.patch("importlib.util.find_spec", side_effect=lambda name: None if name == "faster_whisper" else object()):
+            self.assertFalse(voice.available())
+
     def test_temp_file_removed_after_transcriber_failure(self):
         with mock.patch.object(voice.local_asr, "decode", return_value=[0.0] * 16000):
             with self.assertRaisesRegex(RuntimeError, "failed"):

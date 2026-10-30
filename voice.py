@@ -16,7 +16,9 @@ _whisper = None
 
 
 def available() -> bool:
-    return local_asr.available()
+    # Voice notes always use faster-whisper on the CPU, so mlx-whisper alone (Apple Silicon) is not enough
+    import importlib.util
+    return local_asr.available() and importlib.util.find_spec("faster_whisper") is not None
 
 
 def _model():
