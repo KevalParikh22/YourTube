@@ -105,6 +105,102 @@ class SetupTest(unittest.TestCase):
         s.update(provider="none", tasks={})
         llm.save_settings(s)
 
+    def test_gpu_nvidia(self):
+        with mock.patch("shutil.which", return_value="nvidia-smi"), mock.patch(
+                "local_setup._run", return_value="NVIDIA RTX, 8192, 1024"):
+            gpu = local_setup.gpu(system="Linux")
+        self.assertEqual((gpu["vendor"], gpu["name"], gpu["vram_mb"], gpu["used_mb"], gpu["ollama_gpu"]),
+                         ("nvidia", "NVIDIA RTX", 8192, 1024, True))
+
+    def test_gpu_amd_linux_sysfs(self):
+        with tempfile.TemporaryDirectory() as drm:
+            device = os.path.join(drm, "card0", "device")
+            os.makedirs(device)
+            for filename, value in {"vendor": "0x1002", "mem_info_vram_total": str(8 * 1024 ** 3),
+                                    "mem_info_vram_used": str(2 * 1024 ** 3), "product_name": "Radeon RX"}.items():
+                with open(os.path.join(device, filename), "w") as f:
+                    f.write(value)
+            with mock.patch("shutil.which", return_value=None):
+                gpu = local_setup.gpu(system="Linux", drm=drm)
+        self.assertEqual((gpu["vendor"], gpu["name"], gpu["vram_mb"], gpu["used_mb"]),
+                         ("amd", "Radeon RX", 8192, 2048))
+
+    def test_gpu_prefers_amd_over_intel_on_linux(self):
+        with tempfile.TemporaryDirectory() as drm:
+            for card, vendor in (("card0", "0x8086"), ("card1", "0x1002")):
+                device = os.path.join(drm, card, "device")
+                os.makedirs(device)
+                with open(os.path.join(device, "vendor"), "w") as f:
+                    f.write(vendor)
+                if vendor == "0x1002":
+                    with open(os.path.join(device, "mem_info_vram_total"), "w") as f:
+                        f.write(str(4 * 1024 ** 3))
+            with mock.patch("shutil.which", return_value=None):
+                gpu = local_setup.gpu(system="Linux", drm=drm)
+        self.assertEqual(gpu["vendor"], "amd")
+
+    def test_gpu_intel_linux(self):
+        with tempfile.TemporaryDirectory() as drm:
+            device = os.path.join(drm, "card0", "device")
+            os.makedirs(device)
+            with open(os.path.join(device, "vendor"), "w") as f:
+                f.write("0x8086")
+            with mock.patch("shutil.which", return_value=None):
+                gpu = local_setup.gpu(system="Linux", drm=drm)
+        self.assertEqual((gpu["vendor"], gpu["vram_mb"], gpu["ollama_gpu"]), ("intel", 0, False))
+        self.assertIn("CPU", gpu["detail"])
+
+    def test_gpu_linux_intel_only_card(self):
+        with tempfile.TemporaryDirectory() as drm:
+            device = os.path.join(drm, "card0", "device")
+            os.makedirs(device)
+            with open(os.path.join(device, "vendor"), "w") as f:
+                f.write("0x8086")
+            with mock.patch("shutil.which", return_value=None):
+                gpu = local_setup.gpu(system="Linux", drm=drm)
+        self.assertEqual(gpu["vendor"], "intel")
+        self.assertFalse(gpu["ollama_gpu"])
+
+    def test_gpu_windows_amd_dict(self):
+        with mock.patch("shutil.which", return_value=None), mock.patch(
+                "local_setup._run", return_value='{"Name":"AMD Radeon 780M","AdapterRAM":4294967295}') as run:
+            gpu = local_setup.gpu(system="Windows")
+        self.assertEqual((gpu["vendor"], gpu["vram_mb"], gpu["ollama_gpu"]), ("amd", 4095, True))
+        self.assertIn("at least", gpu["detail"])
+        self.assertEqual(run.call_args.kwargs["timeout"], 10)
+
+    def test_gpu_windows_prefers_amd_in_list(self):
+        output = '[{"Name":"Intel UHD","AdapterRAM":1024},{"Name":"AMD Radeon","AdapterRAM":8589934592}]'
+        with mock.patch("shutil.which", return_value=None), mock.patch("local_setup._run", return_value=output):
+            gpu = local_setup.gpu(system="Windows")
+        self.assertEqual(gpu["vendor"], "amd")
+
+    def test_gpu_apple_silicon(self):
+        with mock.patch("shutil.which", return_value=None), mock.patch("platform.machine", return_value="arm64"), \
+                mock.patch("local_setup._run", side_effect=["Apple M2", str(16 * 1024 ** 3)]):
+            gpu = local_setup.gpu(system="Darwin")
+        self.assertEqual((gpu["vendor"], gpu["name"], gpu["vram_mb"]), ("apple", "Apple M2", 10649))
+        self.assertIn("10.4 GB", gpu["detail"])
+
+    def test_gpu_nothing_found_and_bad_outputs_do_not_raise(self):
+        with mock.patch("shutil.which", return_value=None), mock.patch("local_setup.glob.glob", return_value=[]):
+            gpu = local_setup.gpu(system="FreeBSD")
+        self.assertEqual((gpu["ok"], gpu["vendor"], gpu["ollama_gpu"]), (False, None, False))
+        with mock.patch("shutil.which", return_value="nvidia-smi"), mock.patch("local_setup._run", return_value="bad"), \
+                mock.patch("local_setup.glob.glob", return_value=[]):
+            self.assertFalse(local_setup.gpu(system="Linux")["ok"])
+
+    def test_status_keeps_cpu_recommendations_for_intel(self):
+        intel = {"ok": True, "vendor": "intel", "ollama_gpu": False, "vram_mb": 24000}
+        with mock.patch("local_setup.gpu", return_value=intel), \
+                mock.patch("local_setup.ollama", return_value={"models": []}), \
+                mock.patch("local_setup.memory", return_value={"ok": False}), \
+                mock.patch("local_setup.ffmpeg", return_value={"ok": False}), \
+                mock.patch("local_setup.whisper", return_value={"ok": False}), \
+                mock.patch("local_setup.embed_status", return_value={}):
+            status = local_setup.status()
+        self.assertEqual(next(r["model"] for r in status["recommended"] if r["best"]), "qwen3.5:2b")
+
 
 class EmbedSetupTest(unittest.TestCase):
     def test_embed_status_and_choice(self):
