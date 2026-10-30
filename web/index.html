@@ -572,6 +572,7 @@ const JOB_TEXT = {
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
   embed: ['Updating the meaning index…', 'Meaning index updated', 'Index update stopped or failed. See the log.'],
+  remove: ['Removing the playlist from YourTube…', 'Playlist removed from YourTube', 'Removing the playlist failed. See the log.'],
 };
 const DETAIL_LABEL = { done: 'Transcript', no_captions: 'No captions', music: 'Music, no transcript', unavailable: 'Unavailable', failed: 'Failed, will retry' };
 
@@ -1098,7 +1099,10 @@ async function startSummary(ids) {
     for (const batch of batches) await queued(await api('/api/summarize', { ids: batch }), batch.length === 1 ? 'Summarising' : 'Summaries');
   } catch (e) { toast(e.message, true); }
 }
-function playAt(id, t) { openDrawer(id); if (t) seek(t); }
+function playAt(id, t) {
+  if (!byId(id)) return toast('This video was removed from YourTube with its playlist', true);   // old answers can cite it
+  openDrawer(id); if (t) seek(t);
+}
 
 /* ---------------- playlists ---------------- */
 function viewSources() {
@@ -1155,7 +1159,8 @@ function viewSources() {
         <td class="r">${fmt(p.duration_seconds)}</td>
         <td class="muted">${esc(fmtDate(p.updated_at))}</td>
         <td class="r" style="white-space:nowrap">${isSingle(p.id) ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>' : `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}">Sync</button>`}
-          ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}</td>
+          ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}
+          <button class="btn-text" data-act="pl-remove" data-id="${esc(p.id)}" data-job-btn aria-label="Remove ${esc(p.title)} from YourTube">Remove</button></td>
       </tr>`).join('')}</tbody></table></div>` : `<p class="note">${S.lib && S.data.playlists.length ? `No playlists in ${esc(libName(S.lib))} yet. Add one above, or move one here from another library.` : 'No playlists yet. Add one above.'}</p>`}
   </section>
   ${viewLibraries()}`;
@@ -1337,9 +1342,9 @@ async function pollJob() {
 }
 async function taskFinished(t) {
   const text = JOB_TEXT[t.kind] || JOB_TEXT.sync;
-  if (['details', 'sync', 'asr', 'visual'].includes(t.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
-  if (t.kind === 'summarize') S.summaryCache = {};
-  if (t.kind === 'summarize' || t.kind === 'knowledge') { S.knowledge.list = null; S.knowledge.pages = {}; }
+  if (['details', 'sync', 'asr', 'visual', 'remove'].includes(t.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
+  if (t.kind === 'summarize' || t.kind === 'remove') S.summaryCache = {};
+  if (['summarize', 'knowledge', 'remove'].includes(t.kind)) { S.knowledge.list = null; S.knowledge.pages = {}; }
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
   S.flash = { id: t.id, until: Date.now() + 15000 };
@@ -2779,6 +2784,20 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'resync': runResync(el.dataset.id); break;
+    case 'pl-remove': {
+      const pid = el.dataset.id, name = playlistName(pid);
+      try {
+        const plan = await api(`/api/playlists/remove?id=${encodeURIComponent(pid)}`);
+        const noted = S.data.videos.filter(v => v.sources.length === 1 && v.sources[0].id === pid && (v.notes || '').trim());
+        const lines = [`${plural(plan.removed, 'video')} will be removed with their subtitles, ratings and summaries.`,
+          plan.kept_notes && `${plural(plan.kept_notes, 'video')} with your notes ${plan.kept_notes === 1 ? 'keeps its' : 'keep their'} notes (downloaded first as a .zip).`,
+          plan.shared && `${plural(plan.shared, 'video')} also in other playlists ${plan.shared === 1 ? 'stays' : 'stay'}.`, 'Nothing changes on YouTube.'].filter(Boolean);
+        if (!confirm(`Remove “${name}” from YourTube?\n\n${lines.join('\n')}`)) break;
+        if (noted.length) await exportNotes(noted.map(v => v.video_id));
+        await queued(await api('/api/playlists/remove', { id: pid }), `Removing ${name}`);
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'sug-accept': case 'sug-dismiss': case 'sug-accept-list': case 'sug-dismiss-list': case 'sug-accept-sure': case 'sug-accept-sel': {
       const accept = act.startsWith('sug-accept');
       const ids = act === 'sug-accept-sel' ? [...S.sel] : act.endsWith('-list') || act === 'sug-accept-sure' ? S.visible.map(v => v.video_id) : [id];

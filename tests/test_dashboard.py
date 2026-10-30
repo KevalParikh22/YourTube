@@ -2,6 +2,7 @@
 import json
 import os
 import io
+import tempfile
 import contextlib
 import threading
 import unittest
@@ -222,6 +223,28 @@ class DashboardTest(unittest.TestCase):
         self.assertIn("SubCat A", state["ai"]["presets"])
         self.assertIn("SubCat B", state["ai"]["presets"])
         self.assertEqual(state["ai"]["category_notes"]["SubCat A"], "Topic A")
+
+    def test_remove_playlist_endpoints(self):
+        storage.save_playlist(playlist("PL_RM"), [video("rm_solo", "Gone soon"), video("a", "Pasta recipe", category="Cooking")])
+        self.assertEqual(self.call("/api/playlists/remove?id=PL_RM"), (200, {"removed": 1, "kept_notes": 0, "shared": 1}))
+        self.assertEqual(self.call("/api/playlists/remove?id=NOPE")[0], 404)
+        self.assertEqual(self.call("/api/playlists/remove", {"id": "NOPE"})[0], 404)
+        self.assertEqual(self.call("/api/playlists/remove", {"id": "PL_RM"}, {"X-YTKB": "0"})[0], 403)
+        started = []
+        with mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None: started.append((kind, fn)) or {"id": 999, "position": 0}):
+            self.assertEqual(self.call("/api/playlists/remove", {"id": "PL_RM"})[0], 200)
+        kind, fn = started[0]
+        self.assertEqual(kind, "remove")
+        with tempfile.TemporaryDirectory() as frames, mock.patch.object(dashboard, "FRAMES_DIR", frames):
+            os.makedirs(os.path.join(frames, "rm_solo"))
+            os.makedirs(os.path.join(frames, "a"))
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertTrue(fn())
+            self.assertEqual(sorted(os.listdir(frames)), ["a"])   # only the removed video's thumbnails go
+        self.assertIn("Nothing changes on YouTube", out.getvalue())
+        ids = {v["video_id"] for v in storage.get_library()}
+        self.assertNotIn("rm_solo", ids)
+        self.assertIn("a", ids)
 
     def test_split_per_library(self):
         s = llm.load_settings()

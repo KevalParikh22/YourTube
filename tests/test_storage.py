@@ -299,3 +299,67 @@ class IndexVersionTest(unittest.TestCase):
         storage.save_details("iv", {"status": "done", "segments": [{"start": 0, "text": "plain talk"}, {"start": 40, "text": "more plain talk"}]}, db_path=db)
         self.assertNotEqual(storage.index_version(db), before)            # row ids were reused; the counter still moved
         self.assertNotIn("iv", storage.visual_hints(db_path=db))          # so the cached phrase scan was refreshed
+
+
+class RemovePlaylistTest(unittest.TestCase):
+    def setUp(self):
+        self.db = temp_db()
+        storage.save_playlist(playlist("GONE"), [video("solo", "Lonely talk"), video("noted", "Noted talk"), video("both", "Shared talk")],
+                              db_path=self.db)
+        storage.save_playlist(playlist("STAY"), [video("both", "Shared talk"), video("other", "Other talk")], db_path=self.db)
+        storage.update_videos(["noted"], status="completed", notes="my noted thoughts", db_path=self.db)
+        for vid in ("solo", "noted", "both"):
+            storage.save_details(vid, {"status": "done", "description": f"about {vid}",
+                                       "segments": [{"start": 0, "text": f"spoken words of {vid}"}]}, db_path=self.db)
+            storage.save_rating(vid, {"score": 7, "verdict": "watch", "reason": "good"}, db_path=self.db)
+            storage.save_summary(vid, {"tldr": f"summary of {vid}"}, db_path=self.db)
+        storage.save_embeddings("m", [(h, 1, b"\0\0\0\0") for (h,) in sqlite3.connect(self.db).execute("SELECT hash FROM search_docs")],
+                                db_path=self.db)
+
+    def rows(self, table, vid):
+        with sqlite3.connect(self.db) as c:
+            return c.execute(f"SELECT COUNT(*) FROM {table} WHERE video_id = ?", (vid,)).fetchone()[0]
+
+    def test_plan_counts_match_the_removal_and_change_nothing(self):
+        plan = storage.remove_playlist_plan("GONE", db_path=self.db)
+        self.assertEqual(plan, {"removed": 1, "kept_notes": 1, "shared": 1})
+        self.assertEqual(self.rows("video_details", "solo"), 1)
+        done = storage.remove_playlist("GONE", db_path=self.db)
+        self.assertEqual({k: done[k] for k in plan}, plan)
+        self.assertEqual(sorted(done["cleared"]), ["noted", "solo"])
+
+    def test_only_this_playlists_videos_lose_their_data(self):
+        storage.remove_playlist("GONE", db_path=self.db)
+        lib = {v["video_id"]: v for v in storage.get_library(db_path=self.db)}
+        self.assertNotIn("solo", lib)
+        for table in storage.VIDEO_DATA_TABLES + ("search_docs", "playlist_items"):
+            self.assertEqual(self.rows(table, "solo"), 0, table)
+        # notes, status and the notes search survive; transcripts, ratings and summaries don't
+        self.assertEqual((lib["noted"]["notes"], lib["noted"]["status"], lib["noted"]["sources"]), ("my noted thoughts", "completed", []))
+        for table in ("video_details", "transcript_segments", "video_ratings", "video_summaries"):
+            self.assertEqual(self.rows(table, "noted"), 0, table)
+        self.assertEqual([r["video_id"] for r in storage.search("noted thoughts", db_path=self.db)["results"]], ["noted"])
+        self.assertEqual(storage.search("spoken words of noted", db_path=self.db)["results"], [])
+        # a video also in another playlist keeps everything
+        self.assertEqual([s["id"] for s in lib["both"]["sources"]], ["STAY"])
+        for table in ("video_details", "transcript_segments", "video_ratings", "video_summaries"):
+            self.assertEqual(self.rows(table, "both"), 1, table)
+        self.assertEqual([p["id"] for p in storage.get_playlists(db_path=self.db)], ["STAY"])
+
+    def test_removal_survives_a_restart_and_orphan_vectors_go(self):
+        storage.remove_playlist("GONE", db_path=self.db)
+        storage.init_db(self.db)   # the legacy playlist_id backfill must not bring the items back
+        self.assertEqual(self.rows("playlist_items", "noted"), 0)
+        with sqlite3.connect(self.db) as c:
+            orphans = c.execute("SELECT COUNT(*) FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs)").fetchone()[0]
+        self.assertEqual(orphans, 0)
+
+    def test_kept_videos_are_not_fetched_or_rated_again(self):
+        storage.update_videos(["noted"], status="unwatched", db_path=self.db)
+        storage.remove_playlist("GONE", db_path=self.db)
+        self.assertNotIn("noted", [v["video_id"] for v in storage.videos_needing_details(db_path=self.db)])
+        self.assertNotIn("noted", [v["video_id"] for v in storage.videos_for_rating(db_path=self.db)])
+
+    def test_unknown_playlist(self):
+        with self.assertRaises(ValueError):
+            storage.remove_playlist_plan("NOPE", db_path=self.db)

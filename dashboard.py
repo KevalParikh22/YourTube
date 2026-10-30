@@ -21,6 +21,7 @@ import threading
 from http.cookies import SimpleCookie
 import webbrowser
 import contextlib
+import shutil
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -216,6 +217,21 @@ def _sync(url, browser, cookies_file, library=1):
     return ok
 
 AFTER_SYNC_DETAILS_LIMIT = 50
+
+def _remove_playlist(playlist_id, title):
+    """Removes a playlist from YourTube only (storage.remove_playlist); the YouTube playlist is never touched."""
+    print(f'Removing "{title}" from YourTube. Nothing changes on YouTube.')
+    done = storage.remove_playlist(playlist_id)
+    for vid in done["cleared"]:
+        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
+            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
+    n = lambda k, word: f"{done[k]} {word}{'' if done[k] == 1 else 's'}"
+    print(f"   {n('removed', 'video')} removed with their subtitles, ratings and summaries.")
+    if done["kept_notes"]:
+        print(f"   {n('kept_notes', 'video')} with your notes kept their notes.")
+    if done["shared"]:
+        print(f"   {n('shared', 'video')} also in other playlists stayed.")
+    return True
 
 def _add_video(video_id, library=1):
     """Adds one video by its link to the 'Added one by one' source, sorts it by keywords and fetches its details."""
@@ -507,6 +523,11 @@ class Handler(BaseHTTPRequestHandler):
             name = safe_filename(v["title"]) + ".md"
             return self._send(200, video_markdown(v, storage.get_details(vid), storage.get_summary(vid)), "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
+        if url.path == "/api/playlists/remove":
+            try:
+                return self._json(storage.remove_playlist_plan((qs.get("id") or [""])[0]))
+            except ValueError as e:
+                return self._error(str(e), 404)
         if url.path == "/api/retrieve":
             import retrieval
             q = (qs.get("q") or [""])[0][:500]
@@ -672,6 +693,14 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     return self._error("Unknown action")
                 return self._json({"ok": True, "libraries": storage.get_libraries()})
+
+            if path == "/api/playlists/remove":
+                pid = _clean(body.get("id")) or ""
+                found = storage.get_playlist(pid)
+                if found is None:
+                    return self._error("Unknown playlist", 404)
+                return self._queued(JOB.start("remove", f"Remove playlist: {found['title']}",
+                                              lambda: _remove_playlist(pid, found["title"]), key=pid))
 
             if path == "/api/playlists/library":
                 target = body.get("library")

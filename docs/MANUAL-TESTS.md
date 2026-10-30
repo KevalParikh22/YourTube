@@ -92,6 +92,17 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S11.6 | Split | Categories → Split with AI on your biggest category → untick any you don't want → Create and sort → Library → AI suggestions | Specific new categories; suggestions move the right videos (even hand-placed ones) only when you accept | |
 | S11.7 | Dropdowns | Look at every page in light and dark, desktop and phone | Same size dropdowns and fields, none inside headings, nothing misaligned | |
 
+### S13 checks (remove a playlist from YourTube, 2026-10-31)
+
+Try it on a small playlist you can sync again, or on a copy of the library.
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S13.1 | Counts | Add a note to one video of a small playlist → Playlists → **Remove** on it → read the dialog → Cancel | The dialog counts videos removed, kept for notes and shared with other playlists; Cancel changes nothing | |
+| S13.2 | Remove | Remove again → OK | A notes .zip downloads; the playlist disappears; Library shows the noted video without a playlist, notes intact; other videos of that playlist are gone; nothing changed on YouTube | |
+| S13.3 | Old answers | Open an old Ask answer that cited a removed video and click the citation | A message says the video was removed instead of an empty panel | |
+| S13.4 | Add it back | Sync the same playlist again | Its videos come back (details, ratings and summaries are made again when you ask) | |
+
 ### S12 checks (run anywhere: restart, graphics cards, Docker, 2026-10-30)
 
 Do the rows that match the computer in front of you, and note which computer (OS, graphics card) in the Result column.

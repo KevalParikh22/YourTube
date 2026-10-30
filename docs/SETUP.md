@@ -294,6 +294,7 @@ Shortcuts are ignored while you type in a field.
 | Task | Dashboard | Command line |
 |---|---|---|
 | Sync a playlist | Playlists → Sync | `.venv/bin/python main.py <ID> --browser auto` |
+| Remove a playlist from YourTube | Playlists → **Remove** on its row. The dialog counts what happens first. Videos only in that playlist are removed with their subtitles, transcripts, ratings, summaries and slides; ones with your notes keep their notes, title and status (and the notes are downloaded as a .zip first); videos also in other playlists stay. Nothing changes on YouTube. Sync it again later to add it back (its fetched data starts over) | — |
 | Add one video | Playlists → paste the video link → Sync. It goes to the source *Added one by one*, which only grows; its details are fetched right away | — |
 | Separate libraries (e.g. Tech, Health, Personal) | Playlists → **Libraries** → Create; move playlists with the Library column; switch at the top of the page. Each library has its own categories, interests, time left, ratings and answers | — |
 | See or manage running tasks | The status button in the header: what runs, what waits (Remove), recent results. Starting a task while another runs puts it in the queue | — |

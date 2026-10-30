@@ -515,6 +515,53 @@ def get_playlist(playlist_id: str, db_path: str = DB_PATH) -> Optional[Dict[str,
         row = conn.execute("SELECT * FROM playlists WHERE id = ?", (playlist_id,)).fetchone()
         return dict(row) if row else None
 
+# Everything YourTube fetched or made for a video; removing a playlist clears these for its own videos
+VIDEO_DATA_TABLES = ("video_details", "transcript_segments", "visual_segments", "media_jobs", "video_ratings",
+                     "video_summaries", "category_suggestions")
+
+def _removal_groups(cursor: sqlite3.Cursor, playlist_id: str) -> Dict[str, List[str]]:
+    """The playlist's videos: 'shared' (in another playlist too), 'kept_notes' (only here, with notes), 'removed'."""
+    if not cursor.execute("SELECT 1 FROM playlists WHERE id = ?", (playlist_id,)).fetchone():
+        raise ValueError("Unknown playlist")
+    groups: Dict[str, List[str]] = {"removed": [], "kept_notes": [], "shared": []}
+    for vid, shared, notes in cursor.execute("""
+            SELECT i.video_id,
+                   EXISTS(SELECT 1 FROM playlist_items o WHERE o.video_id = i.video_id AND o.playlist_id != i.playlist_id),
+                   TRIM(COALESCE(v.notes, '')) != ''
+            FROM playlist_items i LEFT JOIN videos v ON v.video_id = i.video_id WHERE i.playlist_id = ?""", (playlist_id,)):
+        groups["shared" if shared else "kept_notes" if notes else "removed"].append(vid)
+    return groups
+
+def remove_playlist_plan(playlist_id: str, db_path: str = DB_PATH) -> Dict[str, int]:
+    """What remove_playlist would do, as counts {'removed', 'kept_notes', 'shared'}; changes nothing."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return {k: len(v) for k, v in _removal_groups(conn.cursor(), playlist_id).items()}
+
+def remove_playlist(playlist_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
+    """
+    Removes a playlist from YourTube (never from YouTube), in one transaction. Videos also in another playlist
+    only lose this membership. Videos only in this one lose everything fetched or made for them; the ones with
+    notes keep their row (title, status, notes), the rest are deleted. Returns the counts plus 'cleared':
+    the ids whose data was deleted (the caller removes their frames/ folders).
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        groups = _removal_groups(cursor, playlist_id)
+        cleared = groups["removed"] + groups["kept_notes"]
+        for table in VIDEO_DATA_TABLES:
+            cursor.execute(f"DELETE FROM {table} WHERE video_id IN (SELECT value FROM json_each(?))", (json.dumps(cleared),))
+        cursor.execute("DELETE FROM playlist_items WHERE playlist_id = ?", (playlist_id,))
+        # init_db backfills memberships from this legacy column, which would bring the playlist's items back
+        cursor.execute("UPDATE videos SET playlist_id = NULL WHERE playlist_id = ?", (playlist_id,))
+        cursor.execute("DELETE FROM videos WHERE video_id IN (SELECT value FROM json_each(?))", (json.dumps(groups["removed"]),))
+        cursor.execute("DELETE FROM playlists WHERE id = ?", (playlist_id,))
+        _reindex(cursor, cleared)
+        cursor.execute("DELETE FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs WHERE hash IS NOT NULL)")
+        conn.commit()
+    return {**{k: len(v) for k, v in groups.items()}, "cleared": cleared}
+
 def update_videos(
     video_ids: Iterable[str],
     status: Optional[str] = None,
@@ -772,7 +819,8 @@ def videos_needing_details(
     db_path: str = DB_PATH
 ) -> List[Dict[str, Any]]:
     """
-    Videos with no details yet, or whose last fetch failed fewer than max_tries times.
+    Videos with no details yet, or whose last fetch failed fewer than max_tries times (only videos still in
+    a playlist: a video kept for its notes after its playlist was removed is not fetched again).
     With video_ids, those videos are fetched again whatever their state (an explicit request).
     Not-done videos come first, oldest first.
     """
@@ -787,7 +835,8 @@ def videos_needing_details(
                                 (json.dumps(list(video_ids)),)).fetchall()
         else:
             rows = conn.execute(sql + """
-                WHERE d.video_id IS NULL OR (d.status = 'failed' AND d.tries < ?)
+                WHERE (d.video_id IS NULL OR (d.status = 'failed' AND d.tries < ?))
+                  AND EXISTS (SELECT 1 FROM playlist_items i WHERE i.video_id = v.video_id)
                 ORDER BY CASE WHEN v.status IN ('completed', 'skipped') THEN 1 ELSE 0 END, v.added_at, v.rowid
             """, (max_tries,)).fetchall()
         return [dict(r) for r in rows]
@@ -857,7 +906,7 @@ def get_details(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
 def videos_for_rating(video_ids: Optional[Iterable[str]] = None, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     """
     Videos to rate with what the rater needs (details may be missing).
-    Without video_ids: videos not yet done and not yet rated. With video_ids: exactly those (re-rate).
+    Without video_ids: videos not yet done and not yet rated, still in a playlist. With video_ids: exactly those (re-rate).
     """
     init_db(db_path)
     sql = """
@@ -873,6 +922,7 @@ def videos_for_rating(video_ids: Optional[Iterable[str]] = None, db_path: str = 
             rows = conn.execute(sql + """
                 WHERE v.status NOT IN ('completed', 'skipped')
                   AND v.video_id NOT IN (SELECT video_id FROM video_ratings)
+                  AND EXISTS (SELECT 1 FROM playlist_items i WHERE i.video_id = v.video_id)
                 ORDER BY v.added_at, v.rowid
             """).fetchall()
         out = []

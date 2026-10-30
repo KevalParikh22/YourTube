@@ -1,6 +1,6 @@
 # Plan: Remove a playlist from YourTube
 
-**Status: future plan (2026-10-30). Do not implement until the user says so.** Kept in `docs/` (tracked) so it can be read on other systems.
+**Status: built 2026-10-31 (branch feat/remove-playlist).** The open questions kept their assumptions: a kept video keeps its watched status; no trash. The confirm is the browser's own dialog, and the notes download happens whenever the playlist has notes (no checkbox). Kept in `docs/` (tracked) so it can be read on other systems.
 
 **Goal:** the user can remove a playlist they no longer want to follow. It disappears from YourTube, along with the videos that came only from it and everything YourTube fetched or made for them. **Their notes are kept.**
 
