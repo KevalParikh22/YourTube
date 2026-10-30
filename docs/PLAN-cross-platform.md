@@ -61,6 +61,8 @@ There are three places, and only one is a hard limit:
 - Tests use fake command outputs for each vendor.
 
 ### C. Transcription on AMD, Intel and Apple (choose after research)
+**Decided after R1 (2026-10-30), see `spikes/asr-engines.md` and T3:** AMD Radeon → faster-whisper on CTranslate2's ROCm build; Apple Silicon → mlx-whisper; everything else → faster-whisper on the CPU. whisper.cpp and the `asr_engine` setting are dropped. The table below is the pre-research list.
+
 Options, best first. **Each needs a research spike before choosing (task R1), because support changes often:**
 
 | Option | AMD | Apple | Intel | Effort | Notes |
@@ -120,7 +122,7 @@ Options, best first. **Each needs a research spike before choosing (task R1), be
 
 ### R1: Research spike: transcription on non-NVIDIA cards
 - **worker:** controller
-- **status:** todo
+- **status:** done (`spikes/asr-engines.md`)
 - **files:** `spikes/asr-engines.md` (and a throwaway script under `spikes/`)
 - **steps:**
   1. Check current CTranslate2 ROCm support (wheels, cards, Windows).
@@ -136,7 +138,7 @@ Options, best first. **Each needs a research spike before choosing (task R1), be
 
 ### T1: `service.sh restart` + `update`, `service.ps1 -Restart`
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **files:** `scripts/service.sh`, `scripts/service.ps1`
 - **steps:**
   1. `service.sh`: add `restart` and `update` to the argument `case`, the usage lines and the header comment.
@@ -150,7 +152,7 @@ Options, best first. **Each needs a research spike before choosing (task R1), be
 
 ### T2: Detect AMD, Intel and Apple graphics in the machine check
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **files:** `local_setup.py`, `tests/test_local.py`
 - **steps:**
   1. `gpu(system: Optional[str] = None, drm: str = "/sys/class/drm") -> Dict` (`system` defaults to `platform.system()`; `drm` lets tests point at a temp folder). Returns `{ok, vendor, name, vram_mb, used_mb?, ollama_gpu, detail}`; `vendor` is `nvidia` / `amd` / `intel` / `apple` / `None`. Order, first answer wins:
@@ -169,16 +171,32 @@ Options, best first. **Each needs a research spike before choosing (task R1), be
   - [ ] the Local AI card in `web/index.html` needs no change (it shows `detail`)
 - **verify:** `.venv/bin/python -m unittest`
 
-### T3: Transcription engine choice (after R1)
-- **worker:** controller (design after R1) + codex
+### T3: Transcription on Apple Silicon (mlx-whisper) and AMD (ROCm), from R1
+- **worker:** codex
 - **status:** todo
 - **depends on:** R1, T4
-- **files:** `local_asr.py`, `voice.py`, `requirements-local*.txt`, `scripts/setup.*`, tests
-- **steps:** written after R1, from its recommendation.
+- **files:** `local_asr.py`, `local_setup.py`, `requirements-local.txt`, `requirements-nvidia.txt` (new), `scripts/setup.sh`, `scripts/setup.ps1`, `scripts/service.sh`, `tests/test_asr.py`, `tests/test_local.py`
+- **design (R1, `spikes/asr-engines.md`):** NVIDIA unchanged. AMD Radeon uses faster-whisper on CTranslate2's ROCm build (same code path, `device="cuda"`; installed by hand from the guide for now). Apple Silicon uses mlx-whisper. Everything else stays on faster-whisper on the CPU. No `asr_engine` setting: the engine follows from the hardware.
+- **steps:**
+  1. `local_asr.device()`: return `"mlx"` when `sys.platform == "darwin"`, `platform.machine() == "arm64"` and `importlib.util.find_spec("mlx_whisper")` is found; otherwise as now. `MODELS["mlx"] = ("mlx-community/whisper-large-v3-turbo", "float16")`, `SPEED["mlx"] = 15.0`.
+  2. `choose_model(settings, "mlx")`: `asr_model` `auto`, or any name not starting with `mlx-community/`, gives the turbo repo; a name starting with `mlx-community/` is used as is. Other devices unchanged.
+  3. New `MlxTranscriber(name, dev, compute)` with the same `__call__(samples, progress) -> (segments, language)` as `Transcriber`: `mlx_whisper.transcribe(samples, path_or_hf_repo=name, verbose=None)`; result segments → `{"start": round(start, 2), "dur": round(end - start, 2), "text": stripped}` (skip empty text); call `progress(1.0)` at the end (mlx-whisper has no progress callback); return `result["language"]`.
+  4. `run_asr`: when `make_transcriber is Transcriber` and the device is `"mlx"`, use `MlxTranscriber`. Unload Ollama before loading when the device is `"cuda"` or `"mlx"` (mlx shares memory with Ollama). The start line says `the GPU` for both. Tests keep injecting `make_transcriber` (device stays `"cpu"` then).
+  5. `local_asr.available()` and `local_setup.whisper()`: also true when only `mlx_whisper` is installed; `whisper()` detail names the engine found.
+  6. `local_asr.gpu_temperature(drm="/sys/class/drm")`: when `nvidia-smi` is missing, return the highest `hwmon*/temp1_input` (millidegrees → °C) of any `card*/device` whose `vendor` is `0x1002`; `None` when nothing is readable. No change to `_cool_down`.
+  7. Requirements: move the two `nvidia-*` lines from `requirements-local.txt` to a new `requirements-nvidia.txt` (same markers, header comment). Add `mlx-whisper; sys_platform == "darwin" and platform_machine == "arm64"` to `requirements-local.txt`.
+  8. `local_setup.py` CLI: `--gpu-vendor` prints only `gpu()["vendor"]` (or `none`).
+  9. `scripts/setup.sh` / `setup.ps1` step 4b: install `requirements-local.txt`; then `requirements-nvidia.txt` only when `local_setup.py --gpu-vendor` prints `nvidia`. When it prints `amd`, print: `For transcription on a Radeon GPU, see "Graphics cards" in docs/SETUP.md (CTranslate2 ROCm build).` Size wording in the question: about 1.2 GB with the NVIDIA libraries, about 150 MB without. `scripts/service.sh update`: same rule for `requirements-nvidia.txt`.
+  10. Tests: `device()` → `"mlx"` (patch `sys.platform`, `platform.machine`, `importlib.util.find_spec`); `choose_model` for mlx; `MlxTranscriber` with a fake `mlx_whisper` module in `sys.modules`; `run_asr` picks `MlxTranscriber` when `device()` says mlx (patch `device` and `MlxTranscriber`); `gpu_temperature` from a temp `drm` folder (AMD card, none, unreadable); `--gpu-vendor`.
+- **acceptance:**
+  - [ ] on Linux/Windows with NVIDIA nothing changes (same models, same libraries installed)
+  - [ ] no new dependency outside Apple Silicon; mlx is optional and only imported on that path
+  - [ ] segments and language keep the `[{start, dur, text}]`, `str` shape
+- **verify:** `bash -n scripts/setup.sh && bash -n scripts/service.sh && .venv/bin/python -m unittest`
 
 ### T4: Optional Docker setup
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **files:** `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `.gitignore`, `dashboard.py`, `llm.py`, `storage.py`, `classifier.py`, `applog.py`, `local_asr.py`, `local_visual.py`, `voice.py`, `tests/test_docker_setup.py`
 - **steps:**
   1. **`YTKB_DATA_DIR`:** each module that builds a data path reads `os.environ.get("YTKB_DATA_DIR")` at import time (same pattern as `YTKB_DB`) and uses it as the parent folder instead of the repo folder when set. The specific variables still win. Affected: `storage.DB_PATH` (`yt_kb.db`), `llm.SETTINGS_PATH` (`settings.json`), `classifier.TAXONOMY_PATH` (`taxonomy.json`), `applog.LOG_DIR` (`logs`), `local_asr.CACHE` (`media_cache/asr`), `local_visual.CACHE` / `FRAMES`, `voice.VOICE_DIR` (`media_cache/voice`), `dashboard.FRAMES_DIR` (`frames`). Code paths (`WEB_DIR`, `DOWNLOADS` scripts and docs) stay in the repo. Unset = exactly today's paths.
@@ -206,7 +224,7 @@ Options, best first. **Each needs a research spike before choosing (task R1), be
 - **verify:** `.venv/bin/python -m unittest`
 
 ## Open questions for the user
-- None left for now. T3's design comes after R1.
+- None left for now.
 
 ## Review notes (2026-10-30)
 Checked against the code before any work started:
