@@ -42,7 +42,7 @@ DOWNLOADS = {
     "SETUP.md": (os.path.join(ROOT_DIR, "docs", "SETUP.md"), "text/markdown; charset=utf-8"),
     "yourtube.log": (applog.LOG_FILE, "text/plain; charset=utf-8"),
 }
-FRAMES_DIR = os.path.join(ROOT_DIR, "frames")
+FRAMES_DIR = os.path.join(os.environ.get("YTKB_DATA_DIR") or ROOT_DIR, "frames")
 _FRAME_PATH = re.compile(r"^/frames/([\w-]{1,32})/(\d{1,6})\.jpg$")   # only frames/<video id>/<second>.jpg
 ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
 ALLOWED_HOSTS = {"127.0.0.1", "localhost"}
@@ -1230,6 +1230,7 @@ def _probe_job(port, timeout=2.0):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="YourTube local dashboard")
     parser.add_argument("--port", type=int, default=8765)
+    parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--no-open", action="store_true", help="Do not open the dashboard in a browser")
     parser.add_argument("--print-url", action="store_true", help="Print the dashboard link (with its access token) and exit")
     args = parser.parse_args(argv)
@@ -1250,7 +1251,11 @@ def main(argv=None):
 
     import errno
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
+        if args.host not in ("127.0.0.1", "localhost", "::1"):
+            warning = f"Warning: listening on {args.host}; keep the port published to 127.0.0.1 only."
+            print(warning)
+            applog.get("dashboard").warning(warning)
+        server = ThreadingHTTPServer((args.host, args.port), Handler)
     except OSError as err:
         if err.errno == errno.EADDRINUSE:
             msg = (f"YourTube is already running on port {args.port} (or another program uses it). "

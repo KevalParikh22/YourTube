@@ -5,7 +5,7 @@ import uuid
 
 import local_asr
 
-VOICE_DIR = os.path.join(local_asr.ROOT, "media_cache", "voice")
+VOICE_DIR = os.path.join(os.environ.get("YTKB_DATA_DIR") or local_asr.ROOT, "media_cache", "voice")
 MAX_BYTES = 8_000_000
 MAX_SECONDS = 180
 MODEL = ("small", "int8")

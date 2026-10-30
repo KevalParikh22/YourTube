@@ -1,0 +1,13 @@
+services:
+  yourtube:
+    build: .
+    restart: unless-stopped
+    ports:
+      # Removing 127.0.0.1: exposes the dashboard to the local network.
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - "./data:/data"
+    environment:
+      YTKB_OLLAMA_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
