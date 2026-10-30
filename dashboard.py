@@ -1230,7 +1230,7 @@ def _probe_job(port, timeout=2.0):
 def main(argv=None):
     parser = argparse.ArgumentParser(description="YourTube local dashboard")
     parser.add_argument("--port", type=int, default=8765)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--host", default="127.0.0.1", help="Address to listen on (only Docker needs 0.0.0.0)")
     parser.add_argument("--no-open", action="store_true", help="Do not open the dashboard in a browser")
     parser.add_argument("--print-url", action="store_true", help="Print the dashboard link (with its access token) and exit")
     args = parser.parse_args(argv)

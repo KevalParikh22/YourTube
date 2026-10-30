@@ -57,16 +57,22 @@ print(json.dumps([storage.DB_PATH, llm.SETTINGS_PATH, classifier.TAXONOMY_PATH,
                     cwd=ROOT, env=env, check=True, capture_output=True, text=True)
                 self.assertEqual(result.stdout.strip(), expected)
 
-    def test_docker_host_option_parses(self):
+    def test_host_option_binds_and_warns(self):
+        import contextlib
+        import io
+        from unittest import mock
         import dashboard
-        from unittest.mock import patch
-        with patch.object(dashboard.applog, "setup"), patch.object(dashboard, "load_token", return_value="test"), \
-             patch.object(dashboard, "ThreadingHTTPServer") as server:
-            server.side_effect = OSError(98, "address in use")
-            with patch.object(dashboard, "_probe_job", return_value=True):
-                dashboard.main(["--host", "0.0.0.0", "--print-url"])
-        # --print-url exits before binding, so parse the accepted option through main.
-
+        self.addCleanup(setattr, dashboard, "TOKEN", dashboard.TOKEN)
+        for argv, address, warns in ((["--no-open"], "127.0.0.1", False),
+                                     (["--no-open", "--host", "0.0.0.0"], "0.0.0.0", True)):
+            fake_server = mock.MagicMock()
+            fake_server.serve_forever.side_effect = KeyboardInterrupt
+            buf = io.StringIO()
+            with mock.patch("dashboard.ThreadingHTTPServer", return_value=fake_server) as server, \
+                 contextlib.redirect_stdout(buf):
+                dashboard.main(argv)
+            self.assertEqual(server.call_args[0][0], (address, 8765))
+            self.assertEqual("Warning: listening on 0.0.0.0" in buf.getvalue(), warns)
 
 if __name__ == "__main__":
     unittest.main()
