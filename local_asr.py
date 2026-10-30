@@ -8,6 +8,8 @@ next to any captions; delete the audio. One GPU model at a time: Ollama is unloa
 Design numbers come from the spike (docs/PRD-Phase-2.5.md §3).
 """
 import glob
+import platform
+import sys
 import json
 import os
 import random
@@ -23,8 +25,9 @@ CACHE = os.path.join(_DATA_DIR, "media_cache", "asr")   # git-ignored; emptied a
 
 # Original track first (language_preference 10 on dubbed videos), else the smallest audio stream
 AUDIO_FORMAT = "wa[language_preference>=10][acodec!=none]/wa[format_note*=original]/worstaudio[acodec!=none]/bestaudio"
-MODELS = {"cuda": ("large-v3-turbo", "int8_float16"), "cpu": ("small", "int8")}   # spike: 22-26x / 5.8x real time
-SPEED = {"cuda": 20.0, "cpu": 5.0}   # conservative x real time, for estimates
+MODELS = {"cuda": ("large-v3-turbo", "int8_float16"), "cpu": ("small", "int8"),
+          "mlx": ("mlx-community/whisper-large-v3-turbo", "float16")}   # spike: 22-26x / 5.8x real time
+SPEED = {"cuda": 20.0, "cpu": 5.0, "mlx": 15.0}   # conservative x real time, for estimates
 DOWNLOAD_DELAY = 4                   # seconds between downloads, plus jitter
 COOL_DOWN_C, RESUME_C = 85, 78       # pause between videos while the GPU is this hot
 
@@ -35,7 +38,8 @@ class BotCheck(Exception):
 
 def available() -> bool:
     import importlib.util
-    return importlib.util.find_spec("faster_whisper") is not None and shutil.which("ffmpeg") is not None
+    return (importlib.util.find_spec("faster_whisper") is not None or
+            importlib.util.find_spec("mlx_whisper") is not None) and shutil.which("ffmpeg") is not None
 
 
 def preload_cuda_libs() -> int:
@@ -57,7 +61,14 @@ def preload_cuda_libs() -> int:
 
 
 def device() -> str:
-    """'cuda' when CTranslate2 sees a GPU (after loading the pip CUDA libraries), else 'cpu'."""
+    """Choose mlx on Apple Silicon, CUDA when CTranslate2 sees a GPU, else CPU."""
+    import importlib.util
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        try:
+            if importlib.util.find_spec("mlx_whisper") is not None:
+                return "mlx"
+        except (ImportError, ValueError):
+            pass
     try:
         preload_cuda_libs()
         import ctranslate2
@@ -70,6 +81,8 @@ def choose_model(settings: Dict[str, Any], dev: str) -> (str, str):
     """(model, compute type) from settings['asr_model'] ('auto' = the spike's pick for this device)."""
     name = settings.get("asr_model") or "auto"
     default_name, compute = MODELS[dev]
+    if dev == "mlx":
+        return (name if name.startswith("mlx-community/") else default_name), compute
     return (default_name if name == "auto" else name), compute
 
 
@@ -78,9 +91,23 @@ def estimate_minutes(audio_seconds: float, dev: str) -> float:
     return audio_seconds / SPEED[dev] / 60
 
 
-def gpu_temperature() -> Optional[int]:
+def gpu_temperature(drm: str = "/sys/class/drm") -> Optional[int]:
     if not shutil.which("nvidia-smi"):
-        return None
+        temps = []
+        for device_path in glob.glob(os.path.join(drm, "card*", "device")):
+            try:
+                with open(os.path.join(device_path, "vendor")) as f:
+                    if f.read().strip().lower() != "0x1002":
+                        continue
+                for sensor in glob.glob(os.path.join(device_path, "hwmon", "hwmon*", "temp1_input")):
+                    try:
+                        with open(sensor) as f:
+                            temps.append(int(f.read().strip()) // 1000)
+                    except (OSError, ValueError):
+                        pass
+            except OSError:
+                pass
+        return max(temps) if temps else None
     out = subprocess.run(["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
                          capture_output=True, text=True)
     try:
@@ -152,6 +179,24 @@ class Transcriber:
         return out, info.language
 
 
+class MlxTranscriber:
+    """Transcribe with mlx-whisper on Apple Silicon."""
+    def __init__(self, name: str, dev: str, compute: str):
+        import mlx_whisper
+        self.name = name
+        self.module = mlx_whisper
+
+    def __call__(self, samples, progress: Callable[[float], None] = lambda p: None) -> (List[Dict[str, Any]], str):
+        result = self.module.transcribe(samples, path_or_hf_repo=self.name, verbose=None)
+        out = []
+        for seg in result.get("segments", []):
+            text = str(seg.get("text") or "").strip()
+            if text:
+                out.append({"start": round(seg["start"], 2), "dur": round(seg["end"] - seg["start"], 2), "text": text})
+        progress(1.0)
+        return out, result["language"]
+
+
 def _clear_cache():
     if os.path.isdir(CACHE):
         shutil.rmtree(CACHE, ignore_errors=True)
@@ -182,8 +227,9 @@ def run_asr(
     _clear_cache()
     dev = device() if make_transcriber is Transcriber else "cpu"
     name, compute = choose_model(settings, dev)
+    transcriber_factory = MlxTranscriber if dev == "mlx" and make_transcriber is Transcriber else make_transcriber
     hours = sum(v.get("duration_seconds") or 0 for v in queue) / 3600
-    print(f"   {name} on {'the GPU' if dev == 'cuda' else 'the CPU'}. About {max(1, round(estimate_minutes(hours * 3600, dev)))} min "
+    print(f"   {name} on {'the GPU' if dev in ('cuda', 'mlx') else 'the CPU'}. About {max(1, round(estimate_minutes(hours * 3600, dev)))} min "
           f"for {hours:.1f} h of audio, plus downloads. Audio is deleted after each video.")
     for v in queue:
         storage.set_job(v["video_id"], "asr", status="queued", error=None, progress=0)
@@ -206,12 +252,12 @@ def run_asr(
                 samples = decode_audio(path)
                 timings["audio_s"] = round(len(samples) / 16000)
                 if transcriber is None:
-                    if dev == "cuda":
+                    if dev in ("cuda", "mlx"):
                         freed = unload_ollama(settings["providers"]["ollama"].get("base_url"))
                         if freed:
                             print(f"   Unloaded {', '.join(freed)} from the GPU to make room.")
                     print(f"   Loading {name} (the first time downloads it: ~1.6 GB for large-v3-turbo, ~0.5 GB for small)…")
-                    transcriber = make_transcriber(name, dev, compute)
+                    transcriber = transcriber_factory(name, dev, compute)
                 storage.set_job(vid, "asr", status="transcribing")
                 t = time.time()
                 last = [0.0]

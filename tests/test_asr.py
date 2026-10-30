@@ -137,5 +137,62 @@ class RunAsrTest(unittest.TestCase):
         self.assertEqual(local_asr.choose_model({"asr_model": "auto"}, "cpu"), ("small", "int8"))
         self.assertEqual(local_asr.choose_model({"asr_model": "medium"}, "cpu"), ("medium", "int8"))
 
+    def test_device_selects_mlx_on_apple_silicon(self):
+        from unittest import mock
+        with mock.patch("local_asr.sys.platform", "darwin"), \
+                mock.patch("local_asr.platform.machine", return_value="arm64"), \
+                mock.patch("importlib.util.find_spec", return_value=object()):
+            self.assertEqual(local_asr.device(), "mlx")
+
+    def test_gpu_temperature_from_amd_sysfs(self):
+        import os
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as drm:
+            dev = os.path.join(drm, "card0", "device")
+            hwmon = os.path.join(dev, "hwmon", "hwmon1")
+            os.makedirs(hwmon)
+            with open(os.path.join(dev, "vendor"), "w") as f:
+                f.write("0x1002")
+            with open(os.path.join(hwmon, "temp1_input"), "w") as f:
+                f.write("72500")
+            with mock.patch("local_asr.shutil.which", return_value=None):
+                self.assertEqual(local_asr.gpu_temperature(drm), 72)
+        with tempfile.TemporaryDirectory() as drm, mock.patch("local_asr.shutil.which", return_value=None):
+            self.assertIsNone(local_asr.gpu_temperature(drm))
+
+    def test_choose_model_mlx(self):
+        self.assertEqual(local_asr.choose_model({}, "mlx"), ("mlx-community/whisper-large-v3-turbo", "float16"))
+        self.assertEqual(local_asr.choose_model({"asr_model": "large-v3"}, "mlx"),
+                         ("mlx-community/whisper-large-v3-turbo", "float16"))
+        self.assertEqual(local_asr.choose_model({"asr_model": "mlx-community/custom"}, "mlx"),
+                         ("mlx-community/custom", "float16"))
+
+    def test_mlx_transcriber_normalizes_segments(self):
+        import sys
+        from unittest import mock
+        fake = type("Mlx", (), {"transcribe": lambda self, samples, **kw: {
+            "language": "en", "segments": [{"start": 1.234, "end": 2.678, "text": " hello "},
+                                               {"start": 3, "end": 4, "text": " "}]}})()
+        progress = []
+        with mock.patch.dict(sys.modules, {"mlx_whisper": fake}):
+            transcriber = local_asr.MlxTranscriber("mlx-community/model", "mlx", "float16")
+            result, language = transcriber([0], progress.append)
+        self.assertEqual(result, [{"start": 1.23, "dur": 1.44, "text": "hello"}])
+        self.assertEqual((language, progress), ("en", [1.0]))
+
+    def test_run_asr_uses_mlx_transcriber(self):
+        from unittest import mock
+        calls = []
+        def factory(name, dev, compute):
+            calls.append((name, dev, compute))
+            return lambda samples, progress: ([{"start": 0, "dur": 1, "text": "mlx"}], "en")
+        with mock.patch("local_asr.device", return_value="mlx"), \
+                mock.patch("local_asr.MlxTranscriber", side_effect=factory), \
+                mock.patch("local_asr.unload_ollama", return_value=[]):
+            ok, _ = self.run_quiet(make_transcriber=local_asr.Transcriber)
+        self.assertTrue(ok)
+        self.assertEqual(calls[0][1], "mlx")
+
 
 import unittest.mock  # noqa: E402  (used by RunAsrTest)
