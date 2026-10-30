@@ -218,14 +218,22 @@ Settings has a side menu: **General** (default playback speed and theme, kept in
 
 ### Getting around
 
-The top bar holds the main pages (Library, Knowledge, Plan, Triage, Playlists, Categories) and, on the right, Search, Settings and Help. **Ask** is the round chat button at the bottom right: it opens a small panel, and **Open full page** continues the same conversation on the Ask page. **Help** shows this guide, the downloads and the keyboard shortcuts.
+The top bar holds the main pages and, on the right, Search, Settings and Help:
+
+- **Home**: time left and your finish date (set minutes a day, days a week and speed), today's session, what you're watching, the AI's top picks, and what needs you (suggestions to review, videos to rate, a failed sync, out-of-date knowledge pages, unsorted videos). Opening the dashboard lands here.
+- **Library**: every video, with filters, search and actions. Sort by **AI score** and filter by **Watch / Skim / Skip / Not rated**; **Rate N unrated** and **Skip the N AI skips** (with Undo) appear above the list.
+- **Knowledge**: topic pages built from summaries. The first time, it shows how: per category **Summarise 5**, then **Build** once 3 videos are summarised.
+- **Playlists** and **Categories**.
+
+Old links to Plan and Triage open Home and the Library (sorted by AI score). **Ask** is the round chat button at the bottom right: it opens a small panel, and **Open full page** continues the same conversation on the Ask page. **Help** shows this guide, the downloads and the keyboard shortcuts.
 
 | Key | Action |
 |---|---|
 | `/` | Search |
 | `A` | Ask your library |
 | `?` | Show keyboard shortcuts |
-| `G` then `L` `K` `P` `T` `Y` `C` `S` `H` | Library, Knowledge, Plan, Triage, Playlists, Categories, Settings, Help |
+| `G` then `H` `L` `K` `Y` `C` `S` | Home, Library, Knowledge, Playlists, Categories, Settings |
+| `G` then `?` | Help |
 | `Esc` | Close the dialog, Ask panel or video panel |
 | `J` / `K` | Next / previous video in the video panel |
 
@@ -239,16 +247,17 @@ Shortcuts are ignored while you type in a field.
 |---|---|---|
 | Sync a playlist | Playlists → Sync | `.venv/bin/python main.py <ID> --browser auto` |
 | Add one video | Playlists → paste the video link → Sync. It goes to the source *Added one by one*, which only grows; its details are fetched right away | — |
-| Separate libraries (e.g. Tech, Health, Personal) | Playlists → **Libraries** → Create; move playlists with the Library column; switch at the top of the page. Each library has its own categories, interests, time left, triage and answers | — |
+| Separate libraries (e.g. Tech, Health, Personal) | Playlists → **Libraries** → Create; move playlists with the Library column; switch at the top of the page. Each library has its own categories, interests, time left, ratings and answers | — |
 | See or manage running tasks | The status button in the header: what runs, what waits (Remove), recent results. Starting a task while another runs puts it in the queue | — |
 | Fetch descriptions, chapters and captions | Playlists → Video details → Fetch | `.venv/bin/python main.py --details 200` |
-| Rate videos (Watch / Skim / Skip) | Triage → Rate | — |
+| Rate videos (Watch / Skim / Skip) | Library → **Rate N unrated** (or Home → Needs you), then sort by AI score | — |
 | Read slides, whiteboards and on-screen code | Mark videos (panel, category **Slides** switch, or suggestions), then Playlists → Read slides | — |
 | Transcribe videos without usable captions on this computer | Playlists → Transcribe N videos locally, or a video's panel | — |
 | Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment. Tick **By meaning** to also find the same idea in other words or another language | — |
 | Ask a question across your videos | **Ask** → type the question → click a number in the answer to play that moment. Ask follow-ups below the answer ("and where does he show the code?"); **+ New question** starts over. Past conversations stay in the list on the right; **Export note** saves one as Markdown | — |
 | Summarise a video | Open it → **Summarise** (or select videos → Summarise selected). About 1–2 minutes per video with a local model. You get a TL;DR, minutes with timestamps, key claims and quotes, check-yourself questions, takeaways, related moments in your other videos, and Learn more (prerequisites, deeper, other views, YouTube searches) | — |
-| Knowledge pages | **Knowledge** tab → Build (or Update) a topic once some of its videos are summarised → Open; every point links to the moment it comes from; **Export note** for Obsidian | — |
+| Make a category more specific | Categories → **Split with AI** on a category with 6+ videos → tick the proposed categories → **Create and sort**. The new categories are protected; the old category's videos (also ones you placed by hand) get suggestions you review in Library → AI suggestions | — |
+| Knowledge pages | **Knowledge** tab → **Summarise 5** for a category, then **Build** (or Update) once 3 are summarised → Open; every point links to the moment it comes from; **Export note** for Obsidian | — |
 | Ask about one video | Open the video → **Ask about this video** | — |
 | Category suggestions after sync | Settings → Sync and details → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |

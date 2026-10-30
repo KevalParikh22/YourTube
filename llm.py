@@ -86,6 +86,7 @@ def default_settings() -> Dict[str, Any]:
         "presets": [],            # category names the AI must keep as-is
         "category_notes": {},     # name -> one-line description used in prompts
         "proposal": None,         # pending AI-proposed category set awaiting review
+        "split": None,            # pending AI category split proposal awaiting review
         "transcripts": {},        # category -> fetch transcripts? (overrides the music-name default)
         "details_after_sync": False,
         "tasks": {},              # task -> provider, overriding the default for that job
@@ -120,10 +121,10 @@ def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
 
 # Settings each library has its own copy of (separate libraries). Library 1 keeps them at the top of
 # settings.json, as before libraries existed; library N keeps them under settings["libraries"]["N"].
-LIBRARY_KEYS = {"presets": list, "category_notes": dict, "proposal": lambda: None, "interests": str}
+LIBRARY_KEYS = {"presets": list, "category_notes": dict, "proposal": lambda: None, "interests": str, "split": lambda: None}
 
 def library_settings(settings: Dict[str, Any], library: Optional[int] = None) -> Dict[str, Any]:
-    """{'presets', 'category_notes', 'proposal', 'interests'} for a library."""
+    """{'presets', 'category_notes', 'proposal', 'interests', 'split'} for a library."""
     if not library or int(library) == 1:
         return {k: settings.get(k, make()) for k, make in LIBRARY_KEYS.items()}
     own = (settings.get("libraries") or {}).get(str(int(library))) or {}
@@ -179,6 +180,7 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
         "provider": settings["provider"], "auto_after_sync": settings["auto_after_sync"],
         "providers": providers, "presets": settings["presets"],
         "category_notes": settings["category_notes"], "proposal": settings["proposal"],
+        "split": settings.get("split"),
         "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS, "task_follows": TASK_FOLLOWS,
         "interests": settings["interests"], "language": settings["language"],
         "languages": LANGUAGES,

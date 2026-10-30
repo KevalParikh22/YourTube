@@ -336,6 +336,7 @@ def build_state(library=1):
         "use_descriptions": settings.get("use_descriptions", True) is not False,
         "platform": sys.platform,
         "voice": _VOICE_AVAILABLE,
+        "summarised": list(storage.summary_times()),   # video ids with a summary (Knowledge: Summarise 5)
     }
 
 class Handler(BaseHTTPRequestHandler):
@@ -653,7 +654,8 @@ class Handler(BaseHTTPRequestHandler):
 
             lib = _library(body.get("library"))
             if path in ("/api/taxonomy", "/api/categories/rename", "/api/categories/delete", "/api/reclassify",
-                        "/api/presets", "/api/ai/discover", "/api/ai/proposal/apply", "/api/ai/proposal/dismiss") and lib is None:
+                        "/api/presets", "/api/ai/discover", "/api/ai/proposal/apply", "/api/ai/proposal/dismiss",
+                        "/api/categories/split", "/api/categories/split/apply", "/api/categories/split/dismiss") and lib is None:
                 return self._error("Choose a library first: categories belong to one library")
 
             if path == "/api/libraries":
@@ -733,6 +735,63 @@ class Handler(BaseHTTPRequestHandler):
                     settings.get("visuals", {}).pop(name, None)
                 llm.save_settings(settings)
                 return self._json({"ok": True, "moved": n})
+
+            if path == "/api/categories/split":
+                from ai_classifier import run_split
+                name = _clean(body.get("name"))
+                if not name:
+                    return self._error("Category name is required")
+                libs = storage.video_libraries()
+                videos = [v for v in storage.get_library() if libs.get(v["video_id"], 1) == lib and v.get("category") == name]
+                if len(videos) < 6:
+                    return self._error("Too few videos to split")
+                if not llm.is_configured(llm.load_settings(), "categorize"):
+                    return self._error("Set up an AI provider in Settings → AI first")
+                started = JOB.start("split", f"Split category: {name}",
+                                    lambda: run_split(name, library=lib, should_stop=JOB.stop_requested), key=[lib, name])
+                return self._queued(started)
+
+            if path == "/api/categories/split/apply":
+                settings = llm.load_settings()
+                stored_split = llm.library_settings(settings, lib).get("split")
+                if not stored_split or not isinstance(stored_split, dict):
+                    return self._error("No split proposal to apply")
+                names = body.get("names")
+                if not isinstance(names, list):
+                    return self._error("names must be a list")
+                chosen_names = set(names)
+                chosen = [c for c in stored_split.get("categories", []) if isinstance(c, dict) and c.get("name") in chosen_names]
+                if not chosen:
+                    return self._error("No categories chosen")
+                tax = load_taxonomy(library=lib)
+                own = llm.library_settings(settings, lib)
+                notes = dict(own.get("category_notes") or {})
+                presets = list(own.get("presets") or [])
+                for c in chosen:
+                    cname = _clean(c.get("name"))
+                    if not cname:
+                        continue
+                    kws = sorted({str(k).strip().lower() for k in (c.get("keywords") or []) if str(k).strip()})
+                    tax[cname] = kws
+                    if c.get("description"):
+                        notes[cname] = str(c["description"]).strip()
+                    if cname not in presets:
+                        presets.append(cname)
+                save_taxonomy(tax, library=lib)
+                llm.set_library_settings(settings, lib, presets=presets, category_notes=notes, split=None)
+                llm.save_settings(settings)
+                old_cat = stored_split.get("category")
+                scope = f"category:{old_cat}"
+                from ai_classifier import run_suggest
+                started = JOB.start("suggest", f"Suggest categories: {old_cat}",
+                                    lambda: run_suggest(scope, library=lib, should_stop=JOB.stop_requested), key=[scope, lib])
+                return self._queued(started)
+
+            if path == "/api/categories/split/dismiss":
+                settings = llm.load_settings()
+                llm.set_library_settings(settings, lib, split=None)
+                llm.save_settings(settings)
+                return self._json({"ok": True})
 
             if path == "/api/reclassify":
                 changed = _reclassify(lib)

@@ -646,26 +646,36 @@ def videos_for_ai(scope: str = "unsorted", db_path: str = DB_PATH, no_match_key:
     'unsorted': unlocked videos in the fallback bucket that have no pending suggestion
     (and, with no_match_key, that the AI hasn't already found no category for among the same categories).
     'unlocked': every unlocked video (re-checks keyword-sorted ones too).
+    'category:<name>': videos currently in that category, including locked ones, with no pending suggestion.
     """
-    if scope not in ("unsorted", "unlocked"):
+    if scope not in ("unsorted", "unlocked") and not scope.startswith("category:"):
         raise ValueError(f"Invalid scope: {scope}")
     init_db(db_path)
-    sql = "SELECT video_id, title, channel, category FROM videos WHERE category_locked = 0"
-    if scope == "unsorted":
-        sql += (" AND category IN (?, 'Uncategorized')"
-                " AND video_id NOT IN (SELECT video_id FROM category_suggestions)")
-    params = (FALLBACK_CATEGORY,) if scope == "unsorted" else ()
-    if scope == "unsorted" and no_match_key:
-        sql += " AND (ai_no_match IS NULL OR ai_no_match != ?)"
-        params += (no_match_key,)
+    if scope.startswith("category:"):
+        cat_name = scope[len("category:"):]
+        if not cat_name:
+            raise ValueError("Category name is required")
+        sql = ("SELECT video_id, title, channel, category FROM videos "
+               "WHERE category = ? AND video_id NOT IN (SELECT video_id FROM category_suggestions)")
+        params = (cat_name,)
+    else:
+        sql = "SELECT video_id, title, channel, category FROM videos WHERE category_locked = 0"
+        if scope == "unsorted":
+            sql += (" AND category IN (?, 'Uncategorized')"
+                    " AND video_id NOT IN (SELECT video_id FROM category_suggestions)")
+        params = (FALLBACK_CATEGORY,) if scope == "unsorted" else ()
+        if scope == "unsorted" and no_match_key:
+            sql += " AND (ai_no_match IS NULL OR ai_no_match != ?)"
+            params += (no_match_key,)
     with get_connection(db_path) as conn:
         rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
-def save_suggestions(items: Iterable[Dict[str, Any]], model: str = "", db_path: str = DB_PATH) -> int:
+def save_suggestions(items: Iterable[Dict[str, Any]], model: str = "", db_path: str = DB_PATH,
+                     include_locked: bool = False) -> int:
     """
     Stores AI suggestions [{'video_id', 'category', 'confidence'}] for review.
-    Skips locked videos and suggestions that match the current category. Returns the number stored.
+    Skips locked videos (unless include_locked=True) and suggestions that match the current category. Returns the number stored.
     """
     init_db(db_path)
     stored = 0
@@ -674,7 +684,7 @@ def save_suggestions(items: Iterable[Dict[str, Any]], model: str = "", db_path: 
         for it in items:
             row = cursor.execute("SELECT category, category_locked FROM videos WHERE video_id = ?",
                                  (it['video_id'],)).fetchone()
-            if row is None or row['category_locked']:
+            if row is None or (row['category_locked'] and not include_locked):
                 continue
             if it['category'] == row['category']:
                 cursor.execute("DELETE FROM category_suggestions WHERE video_id = ?", (it['video_id'],))
