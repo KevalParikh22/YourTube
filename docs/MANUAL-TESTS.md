@@ -8,7 +8,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 
 | Session | Covers | Time | Before you start |
 |---|---|---|---|
-| **S1 · Ratings you can trust** | §2 (2.1–2.4), §7.6, §7.7, and S1 below | ~30 min | Settings → About you: write your interests. Ratings changed on 2026-10-24 (score breakdown, minutes), so re-rate 10–20 videos first: Triage → Rate |
+| **S1 · Ratings you can trust** | §2 (2.1–2.4), §7.6, §7.7, and S1 below | ~30 min | Settings → About you: write your interests. Ratings changed on 2026-10-24 (score breakdown, minutes), so re-rate 10–20 videos first: Library → Rate |
 | **S2 · Libraries and the task queue** | §7.1–7.5, §2.5–2.6 | ~20 min | Nothing |
 | **S3 · Ask your library** | §6 | ~20 min | Ollama running (Settings → Local AI shows it) |
 | **S4 · Local media** | §3 | ~30 min + waiting | Pick 3–5 videos without captions and 3–5 with slides; keep the laptop on power |
@@ -18,6 +18,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | **S8 · Navigation, Settings and shortcuts** | S8 below | ~15 min | Nothing |
 | **S9 · Failures, logs and always-on** | S9 below | ~15 min | Nothing |
 | **S10 · Speak your interests** | S10 below | ~10 min | A microphone; local AI set up |
+| **S11 · Home, Library ratings, Split** | S11 below | ~20 min | Local AI set up; a few rated videos |
 
 ### S1 extra checks (new ratings, 2026-10-24)
 
@@ -76,7 +77,19 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S10.2 | Your accent and terms | Say tool names and mixed Hindi/Gujarati/English if you use them | Text is close enough to fix by hand; note words it gets wrong | |
 | S10.3 | Draft | Write my interests with AI | Four lines (Learn, Level, Skip, Goal); nothing invented; your existing interests that still apply are kept | |
 | S10.4 | Use, not saved | Use this → leave the page without Save → come back | Interests are unchanged until you press Save | |
-| S10.5 | Better ratings | Save the new interests, re-rate 5 videos (Triage → Rate) | Scores and reasons match what you said better than before | |
+| S10.5 | Better ratings | Save the new interests, re-rate 5 videos (Library → Rate) | Scores and reasons match what you said better than before | |
+
+### S11 checks (Home, Library ratings, Knowledge guide, Split, 2026-10-30)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S11.1 | Home | Open the dashboard; change minutes a day, days a week and speed | Lands on Home; the finish date changes; today's session, continue watching, top picks and "needs you" make sense | |
+| S11.2 | Needs you | Click each link under Needs you | Each opens the right filtered view (suggestions, rating, playlists, knowledge, categories) | |
+| S11.3 | Library ratings | Library → sort AI score → Watch / Skim / Skip chips → Skip the AI skips → Undo | Best first; chips filter with right counts; skip then undo restores the statuses | |
+| S11.4 | Menu and old links | Use the five menu items; open `#/plan` and `#/triage`; press `G H`, `G ?` | Home and Library open; the shortcuts work | |
+| S11.5 | Knowledge guide | Knowledge → Summarise 5 on a category you study → Build when it shows | The guide explains the steps; Build appears after 3 summaries | |
+| S11.6 | Split | Categories → Split with AI on your biggest category → untick any you don't want → Create and sort → Library → AI suggestions | Specific new categories; suggestions move the right videos (even hand-placed ones) only when you accept | |
+| S11.7 | Dropdowns | Look at every page in light and dark, desktop and phone | Same size dropdowns and fields, none inside headings, nothing misaligned | |
 
 ## 1. Library at real size ✓ done 2026-10-24
 
@@ -92,7 +105,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
 | 2.1 | Interests | Settings → About you → write what you want to learn and what you don't → Save | Saved | |
-| 2.2 | Ratings spread | Triage → Rate (on a mixed playlist, after Fetch details) | A mix of Watch / Skim / Skip, not everything 8–9 | |
+| 2.2 | Ratings spread | Library → Rate (on a mixed playlist, after Fetch details) | A mix of Watch / Skim / Skip, not everything 8–9 | |
 | 2.3 | Skip verdicts | Read 5–10 Skip reasons, and open a couple of the videos | You agree they're skippable; note any you disagree with | |
 | 2.4 | Skim ranges | Click a Skim range on a few videos | It lands on the part the reason describes | |
 | 2.5 | Categories | Categories → Propose categories with AI → review → Apply; then Sort unsorted with AI → review suggestions | Sensible categories; suggestions mostly right; note the wrong ones | |
@@ -132,7 +145,7 @@ YTKB_LIVE=1 ANTHROPIC_API_KEY=... GEMINI_API_KEY=... .venv/bin/python -m unittes
 | 5.3 | Key from environment | Remove the saved key (Clear), start the dashboard with `ANTHROPIC_API_KEY=... .venv/bin/python dashboard.py` | The page says it uses the key from your environment | |
 | 5.4 | Wrong key | Save an invalid key → Save and test | A clear error, nothing crashes | |
 | 5.5 | Mixed routing | Which AI does what: Categories = local, Ratings = cloud, Questions = same as ratings | Each job uses the AI shown; Ask's hint names the cloud AI | |
-| 5.6 | Cost estimate | Triage → Rate a few videos with the cloud AI | The estimate appears before it starts and is in line with what the provider's billing page shows afterwards | |
+| 5.6 | Cost estimate | Library → Rate a few videos with the cloud AI | The estimate appears before it starts and is in line with what the provider's billing page shows afterwards | |
 | 5.7 | Cloud quality | Rate the same 5 videos with local and cloud; ask the same 3 questions with both | Note which is better: score spread, Skip reasons, answer accuracy and citations | |
 | 5.8 | Cloud categories | Categories → Propose with AI and Sort unsorted with the cloud AI | Sensible results; compare with local | |
 | 5.9 | Local only | AI → tick Local only | Cloud AIs show as blocked; rating or asking with a cloud AI gives a clear message; nothing is sent | |
@@ -141,7 +154,7 @@ YTKB_LIVE=1 ANTHROPIC_API_KEY=... GEMINI_API_KEY=... .venv/bin/python -m unittes
 
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
-| 7.1 | Create a library | Playlists → Libraries → type "Health" → Create; move one or two playlists to it with the Library column | The header switcher shows Health; Library, Plan, Triage, Search and Ask show only its videos | |
+| 7.1 | Create a library | Playlists → Libraries → type "Health" → Create; move one or two playlists to it with the Library column | The header switcher shows Health; Home, Library, Search and Ask show only its videos | |
 | 7.2 | Its own categories | In Health: Categories → Propose categories with AI → Apply; set Health interests in Settings → About you | Health categories don't appear in My library; ratings in Health judge against Health interests | |
 | 7.3 | Queue | Start a transcription, then click Rate | Rate says "queued"; the header shows the running task and "+1 waiting"; Rate runs after | |
 | 7.4 | Finished state | Let a sync finish | The header turns green "Finished: …" and the page shows a Finished banner; a failure shows red with the error | |
