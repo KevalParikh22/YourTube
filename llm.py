@@ -274,7 +274,7 @@ def _anthropic(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
     try:
         import anthropic
     except ImportError:
-        raise LLMError("The Claude provider needs the anthropic package: pip install anthropic") from None
+        raise LLMError("The Claude provider needs the anthropic package. Run: bash scripts/setup.sh") from None
     client = anthropic.Anthropic(api_key=key, timeout=TIMEOUT)
     model = cfg["model"]
     kwargs: Dict[str, Any] = dict(

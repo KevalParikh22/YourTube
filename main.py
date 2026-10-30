@@ -42,7 +42,7 @@ def run_pipeline(
         print(f"\nError: could not read the playlist: {e}")
         print("\nTroubleshooting Tips:")
         print("   1. If your playlist is private (or Watch Later), use a signed-in browser: --browser auto")
-        print("      On Linux, Chrome needs the 'secretstorage' package (pip install -r requirements.txt).")
+        print("      On Linux, Chrome needs the 'secretstorage' package (run: bash scripts/setup.sh).")
         print("      On Windows, Chrome/Edge cookies are app-bound encrypted and often can't be read;")
         print("      use Firefox or export a cookies.txt and pass --cookies cookies.txt instead.")
         print("   2. Or set the YouTube playlist visibility to 'Unlisted' so it requires no cookies.")

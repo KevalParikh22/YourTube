@@ -83,6 +83,13 @@ class AppLogTest(unittest.TestCase):
         self.assertEqual(applog.explain("ERROR: playlist does not exist"), (cause1, fix1))
         self.assertEqual(applog.explain("This playlist type is unviewable"), (cause1, fix1))
 
+        # Rows that contain "playlist does not exist" but happen with a sign-in come first
+        rotated = applog.explain("YouTube said: The playlist does not exist. YouTube rotated the chrome sign-in during the read")
+        self.assertIn("replaced the browser's sign-in", rotated[0])
+        nobody = applog.explain("none of the browsers signed in to YouTube can read this playlist. "
+                                "chrome: YouTube said: The playlist does not exist.")
+        self.assertIn("account that owns this playlist", nobody[0])
+
         # Row 2: Sign in to confirm you.?re not a bot
         cause2 = "YouTube asked for a sign-in check"
         fix2 = "Sync with your browser login, wait a few minutes, or update yt-dlp: .venv/bin/python -m pip install -U yt-dlp"

@@ -36,6 +36,17 @@ def redact(text):
 
 
 KNOWN = [
+    # Before "playlist does not exist": these messages contain it but happen with a sign-in
+    (
+        re.compile(r"rotated the \w+ sign-in", re.IGNORECASE),
+        "YouTube replaced the browser's sign-in while it was being read, so the private playlist looked missing",
+        "Open youtube.com in that browser, reload the page, wait a minute, then sync again; or use a cookies.txt export",
+    ),
+    (
+        re.compile(r"none of the browsers signed in to YouTube can read", re.IGNORECASE),
+        "No browser on this computer is signed in to the account that owns this playlist",
+        "Sign in to YouTube with that account (or switch to its channel) in one browser and sync again; or make the playlist Unlisted",
+    ),
     (
         re.compile(r"playlist does not exist|This playlist type is unviewable|Could not extract info from playlist", re.IGNORECASE),
         "The playlist ID is wrong, or the playlist is private and was read without your sign-in",

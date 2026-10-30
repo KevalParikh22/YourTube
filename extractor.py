@@ -4,6 +4,7 @@ Extracts video metadata and exact durations non-destructively without downloadin
 Supports public, unlisted, and private playlists (via browser cookies or cookies file).
 """
 import re
+import time
 
 import yt_dlp
 from typing import Dict, Any, List, Optional
@@ -11,7 +12,10 @@ from typing import Dict, Any, List, Optional
 WATCH_LATER_ALIASES = {"wl", "watch later", "watchlater", ":ytwatchlater"}
 # Order tried by browser="auto". Firefox first: its cookies never need a keyring.
 AUTO_BROWSERS = ("firefox", "chrome", "chromium", "brave", "edge", "vivaldi", "opera")
-_LOGIN_COOKIES = {"SID", "__Secure-3PSID", "LOGIN_INFO"}
+# yt-dlp only counts a session as signed in with LOGIN_INFO plus one of these (youtube _has_auth_cookies)
+_SAPISID_COOKIES = {"SAPISID", "__Secure-1PAPISID", "__Secure-3PAPISID"}
+# Pause before re-reading a browser's cookies after YouTube rotated them mid-read
+ROTATION_RETRY_SECONDS = 5
 
 class _QuietLogger:
     def debug(self, msg): pass
@@ -19,18 +23,41 @@ class _QuietLogger:
     def warning(self, msg, only_once=False): pass
     def error(self, msg): pass
 
-def detect_browser() -> Optional[str]:
-    """Returns the first installed browser that is signed in to YouTube, or None."""
+class _ErrorLogger(_QuietLogger):
+    """Keeps yt-dlp's errors, which ignoreerrors would otherwise swallow, and its warnings."""
+    def __init__(self):
+        self.errors: List[str] = []
+        self.warnings: List[str] = []
+    def warning(self, msg, only_once=False):
+        self.warnings.append(msg)
+    def error(self, msg):
+        self.errors.append(msg)
+    def cookies_rotated(self) -> bool:
+        return any("no longer valid" in w for w in self.warnings)
+
+def _clean_error(msg: str) -> str:
+    """'ERROR: [youtube:tab] PLx: YouTube said: ...' -> 'YouTube said: ...'"""
+    msg = re.sub(r"^ERROR:\s*", "", msg.strip())
+    return re.sub(r"^\[[^\]]+\]\s*(?:[\w-]+:\s+)?", "", msg)
+
+def signed_in_browsers() -> List[str]:
+    """Every installed browser that is signed in to YouTube, in AUTO_BROWSERS order."""
     from yt_dlp.cookies import extract_cookies_from_browser
+    found = []
     for browser in AUTO_BROWSERS:
         try:
             jar = extract_cookies_from_browser(browser, logger=_QuietLogger())
         except Exception:
             continue  # not installed, locked or undecryptable
         names = {c.name for c in jar if c.domain.endswith("youtube.com") and c.value}
-        if names & _LOGIN_COOKIES:
-            return browser
-    return None
+        if "LOGIN_INFO" in names and names & _SAPISID_COOKIES:
+            found.append(browser)
+    return found
+
+def detect_browser() -> Optional[str]:
+    """Returns the first installed browser that is signed in to YouTube, or None."""
+    browsers = signed_in_browsers()
+    return browsers[0] if browsers else None
 
 _VIDEO_URL = re.compile(r"(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/|embed/)|youtu\.be/)([\w-]{11})(?![\w-])")
 
@@ -94,35 +121,89 @@ def extract_playlist_metadata(
     
     :param playlist_url: YouTube playlist URL or ID.
     :param browser_cookies: Browser to read session cookies from ('firefox', 'chrome', ...),
-                            or 'auto' to use the first browser signed in to YouTube.
+                            or 'auto' to try each browser signed in to YouTube until one can read it.
     :param cookies_file: Path to a cookies.txt file if preferred.
     :return: Dictionary containing playlist info and parsed video list.
     """
+    playlist_url = normalize_playlist_url(playlist_url)
+    if browser_cookies and browser_cookies.lower() == 'auto':
+        browsers = signed_in_browsers()
+        if not browsers:
+            raise ValueError("No browser signed in to YouTube was found. Sign in to YouTube in "
+                             "Firefox or Chrome, or use a cookies.txt file.")
+        # Browsers may be signed in to different accounts; use the first one that can see the playlist
+        failures, empty = [], None
+        for browser in browsers:
+            try:
+                raw_info = _read_playlist(playlist_url, {'cookiesfrombrowser': (browser,)})
+            except ValueError as e:
+                failures.append(f"{browser}: {e}")
+                continue
+            if raw_info.get('entries'):
+                return _parse_playlist(raw_info, playlist_url, browser)
+            empty = empty or (raw_info, browser)
+        if empty:
+            return _parse_playlist(empty[0], playlist_url, empty[1])
+        raise ValueError("none of the browsers signed in to YouTube can read this playlist "
+                         "(they may be signed in to other accounts). " + "; ".join(failures))
+
+    cookie_opts: Dict[str, Any] = {}
+    if browser_cookies:
+        cookie_opts['cookiesfrombrowser'] = (browser_cookies.lower(),)
+    elif cookies_file:
+        cookie_opts['cookiefile'] = cookies_file
+    try:
+        raw_info = _read_playlist(playlist_url, cookie_opts)
+    except ValueError as e:
+        raise ValueError(f"Could not extract info from playlist URL: {playlist_url} ({e})") from e
+    return _parse_playlist(raw_info, playlist_url, browser_cookies)
+
+def _read_playlist(playlist_url: str, cookie_opts: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Runs the flat yt-dlp read; raises ValueError with YouTube's own reason on failure.
+    YouTube sometimes rotates a browser's sign-in mid-read, which makes a private playlist look missing;
+    the browser saves the new session soon after, so that case is read once more with fresh cookies.
+    """
+    browser = (cookie_opts.get('cookiesfrombrowser') or (None,))[0]
+    try:
+        return _read_playlist_once(playlist_url, cookie_opts)
+    except _RotatedCookies as e:
+        time.sleep(ROTATION_RETRY_SECONDS)
+        try:
+            return _read_playlist_once(playlist_url, cookie_opts)
+        except _RotatedCookies:
+            raise ValueError(f"{e.reason}. YouTube rotated the {browser} sign-in during the read: open youtube.com "
+                             f"in {browser}, reload the page, wait a minute, then sync again") from None
+
+class _RotatedCookies(ValueError):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+def _read_playlist_once(playlist_url: str, cookie_opts: Dict[str, Any]) -> Dict[str, Any]:
+    logger = _ErrorLogger()
     ydl_opts: Dict[str, Any] = {
         'extract_flat': 'in_playlist',
         'skip_download': True,
         'quiet': True,
         'no_warnings': True,
         'ignoreerrors': True,  # Skip deleted or unavailable videos without crashing
+        'logger': logger,
+        **cookie_opts,
     }
-    
-    if browser_cookies and browser_cookies.lower() == 'auto':
-        browser_cookies = detect_browser()
-        if not browser_cookies:
-            raise ValueError("No browser signed in to YouTube was found. Sign in to YouTube in "
-                             "Firefox or Chrome, or use a cookies.txt file.")
-    if browser_cookies:
-        ydl_opts['cookiesfrombrowser'] = (browser_cookies.lower(),)
-    elif cookies_file:
-        ydl_opts['cookiefile'] = cookies_file
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            raw_info = ydl.extract_info(playlist_url, download=False)
+    except Exception as e:
+        reason = _clean_error(str(e))
+    else:
+        if raw_info:
+            return raw_info
+        reason = _clean_error(logger.errors[-1]) if logger.errors else "YouTube returned nothing"
+    rotated = 'cookiesfrombrowser' in cookie_opts and logger.cookies_rotated()
+    raise (_RotatedCookies if rotated else ValueError)(reason)
 
-    playlist_url = normalize_playlist_url(playlist_url)
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        raw_info = ydl.extract_info(playlist_url, download=False)
-        
-    if not raw_info:
-        raise ValueError(f"Could not extract info from playlist URL: {playlist_url}")
-        
+def _parse_playlist(raw_info: Dict[str, Any], playlist_url: str, browser: Optional[str]) -> Dict[str, Any]:
     playlist_id = raw_info.get('id', 'unknown_playlist')
     playlist_title = raw_info.get('title', 'YouTube Playlist')
     raw_entries = raw_info.get('entries', []) or []
@@ -167,6 +248,6 @@ def extract_playlist_metadata(
         'url': playlist_url,
         'total_extracted': len(parsed_videos),
         'skipped_unavailable': skipped_unavailable,
-        'browser': browser_cookies,
+        'browser': browser,
         'videos': parsed_videos
     }

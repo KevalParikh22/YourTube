@@ -134,7 +134,7 @@ On the command line:
 - **Linux:** Chrome cookies need the `secretstorage` package (in requirements.txt) and an unlocked keyring; Firefox works without.
 - **Windows:** Chrome, Edge and Brave use app-bound encryption, so their cookies usually can't be read; use Firefox or a cookies.txt export. The setup script is `scripts\setup.ps1` (not yet tested on Windows).
 - **macOS:** reading Chrome cookies triggers a Keychain prompt; allow it, or use Firefox.
-- **Several Google accounts:** "Detect" uses the first browser signed in to YouTube. For another account, choose that browser, or export a `cookies.txt` while that account is active.
+- **Several Google accounts:** "Detect" tries each browser signed in to YouTube until one can read the playlist (one that returns it empty is used only if none returns videos). If the playlist belongs to an account not signed in to any browser, sign in with that account, or export a `cookies.txt` while it is active. Listing your playlists (`--list`) still uses the first signed-in browser. On the Playlists page, each playlist's own **Sync** button syncs that playlist again with the sign-in it last used; to add another playlist, paste its link in the box and use the main **Sync** button.
 - **Keep `cookies.txt` private.** It works like your password.
 
 ---
@@ -177,7 +177,7 @@ For videos with **no captions**, or captions in the **wrong script** (for exampl
 - **What happens:** only the original-language audio is downloaded, anonymously; the AI model is unloaded from the GPU; Whisper transcribes; and the audio is deleted.
 - **Speed (RTX 3050, 4 GB):** about 2.5 min per hour of audio on the GPU (`large-v3-turbo`), and about 10 min per hour on the CPU (`small`). Choose the model in Settings → Local AI (*Speech-to-text model*; Auto picks by device).
 - **Both kept:** when a video already has captions, both transcripts are stored. The video panel's *Transcript used for search, ratings and summaries* switch picks which one counts. After switching, use **Rate again** to refresh that video's rating.
-- **Needs:** `faster-whisper` (installed by `scripts/setup.sh --local-ai`, or `pip install -r requirements-local.txt`) and ffmpeg.
+- **Needs:** `faster-whisper` (installed by `scripts/setup.sh --local-ai`) and ffmpeg.
 
 ### Slides, whiteboards and on-screen code
 
@@ -339,6 +339,7 @@ main.py        --embed          # update the meaning-based search index
 git pull                                   # if you got YourTube with git
 bash scripts/setup.sh                      # refresh dependencies
 .venv/bin/python -m pip install -U yt-dlp  # when syncs suddenly fail: YouTube changed something
+# venv made --without-pip ("No module named pip"): python3 -m pip --python .venv/bin/python install -U yt-dlp
 ```
 
 Your database is upgraded automatically when the dashboard starts. Back up `yt_kb.db` before big updates.
@@ -354,12 +355,14 @@ When something fails, the task's card shows the cause and a fix. **Try again** r
 | A sync fails, and trying again fails too | Read the cause on the card, or in Help → Logs → Show recent problems. A playlist re-syncs with the access it was added with; for a private playlist or Watch Later choose your browser login before adding it. |
 | The dashboard doesn't open after a restart | `bash scripts/service.sh status`; if it isn't installed, start it with `.venv/bin/python dashboard.py` or install the service. |
 | "The playlist does not exist" | Wrong ID, or a private playlist read without a sign-in. Run `main.py --list`. |
+| "YouTube rotated the … sign-in during the read" (yt-dlp: "cookies are no longer valid") | YouTube replaced the browser's sign-in while YourTube was reading it, so the private playlist looked missing. YourTube already retries once. Open youtube.com in that browser, reload the page, wait a minute, then sync again; or use a `cookies.txt` exported from a private window. |
 | Private playlist has 0 videos | The chosen browser isn't signed in to YouTube. Try **Detect**, or another browser. |
 | "Confirm you're not a bot" during Fetch details | YouTube is rate-limiting. Wait an hour or two; progress is kept. |
 | Ollama "not running" | Run `ollama serve` (or `systemctl start ollama`). |
 | Local model very slow | The model doesn't fit in GPU memory. Pick a smaller one, or lower the context size. |
 | AI returns errors | Settings → Cloud AI or Local AI → **Save and test** shows the exact error. |
-| Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai`, or `.venv/bin/python -m pip install -r requirements-local.txt` |
+| `pip install` says "externally-managed-environment" | Don't install into the system Python. Run `bash scripts/setup.sh`, or `python3 -m pip --python .venv/bin/python install -r requirements.txt` |
+| Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai` |
 | Local transcription very slow | It runs on the CPU: check the GPU line in Settings → Local AI; with an NVIDIA GPU, reinstall `requirements-local.txt` for the CUDA libraries. |
 | Answers say "keywords only" | The meaning index is off: download the embedding model (`ollama pull qwen3-embedding:0.6b`), then run `.venv/bin/python main.py --embed`. |
 | An answer misses something you know is in a video | Fetch details (or transcribe) for that video first. Try other words: the small local model links meanings well but not always (it misses "offline" for "running locally"). |

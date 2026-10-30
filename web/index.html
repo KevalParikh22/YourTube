@@ -1133,7 +1133,7 @@ function viewSources() {
       <input id="i-cookies" type="text" data-input="i-cookies" value="${esc(g.cookies)}" placeholder="C:\\Users\\you\\cookies.txt" style="width:100%"></div>` : ''}
     <p class="hint">${winChromium
       ? '<span class="warn-text">On Windows, Chrome-based browsers usually block reading their login.</span> If the sync fails, use Firefox or a cookies.txt export.'
-      : `Sign-in help ${tip('Private playlists and Watch Later need a sign-in. Detect uses the first browser signed in to YouTube. Syncing again keeps statuses, notes and categories.')}`}
+      : `Sign-in help ${tip('Private playlists and Watch Later need a sign-in. Detect tries each browser signed in to YouTube until one can read the playlist. The Sync button on a playlist row syncs that playlist again with the sign-in it last used; to add another playlist, paste its link above. Syncing again keeps statuses, notes and categories.')}`}
       ${S.data.ai.ready_for.categorize && S.data.ai.auto_after_sync ? '<br>After each sync, the AI suggests categories for new unsorted videos.' : ''}</p>
     ${syncFailureCard(job)}
     <div id="job"></div>
@@ -1367,7 +1367,7 @@ async function runIngest(url) {
   const g = S.ingest;
   const browser = BROWSERS.some(([k]) => k === g.access) ? g.access : null;
   try {
-    await queued(await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies, library: g.lib || S.lib || 1 }), 'Sync');
+    await queued(await api('/api/ingest', { url, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies, library: g.lib || S.lib || 1 }), `Sync of ${url}`);
   } catch (e) { toast(e.message, true); }
 }
 async function runResync(playlistId) {
@@ -1375,7 +1375,7 @@ async function runResync(playlistId) {
   const browser = BROWSERS.some(([k]) => k === g.access) ? g.access : null;
   // playlists synced before access was stored use the form's choice once; the server then remembers it
   const body = p?.access ? { playlist_id: playlistId } : { playlist_id: playlistId, access: browser ? 'browser' : g.access, browser, cookies_file: g.cookies };
-  try { await queued(await api('/api/ingest', body), 'Sync'); await load(); }
+  try { await queued(await api('/api/ingest', body), `Sync of ${p?.title || playlistId}`); await load(); }
   catch (e) { toast(e.message, true); }
 }
 
