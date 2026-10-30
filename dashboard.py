@@ -336,6 +336,7 @@ def build_state(library=1):
         "use_descriptions": settings.get("use_descriptions", True) is not False,
         "platform": sys.platform,
         "voice": _VOICE_AVAILABLE,
+        "summarised": list(storage.summary_times()),   # video ids with a summary (Knowledge: Summarise 5)
     }
 
 class Handler(BaseHTTPRequestHandler):

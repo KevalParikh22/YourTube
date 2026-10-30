@@ -535,7 +535,7 @@
 <a class="skip-link" href="#view">Skip to content</a>
 <header class="bar">
   <div class="bar-in">
-    <a class="logo" href="#/">YourTube</a>
+    <a class="logo" href="#/home">YourTube</a>
     <span id="libpick"></span>
     <nav class="tabs" id="tabs"></nav>
     <div class="bar-right">
@@ -560,8 +560,8 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['', 'Library'], ['knowledge', 'Knowledge'], ['plan', 'Plan'], ['triage', 'Triage'], ['sources', 'Playlists'], ['categories', 'Categories']];
-const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then P', 'Plan'], ['G then T', 'Triage'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then H', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
+const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories']];
+const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
 const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
@@ -717,6 +717,7 @@ const clock = sec => { sec = Math.floor(sec || 0); const h = Math.floor(sec / 36
 const route = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || '');
 const routeParam = name => new URLSearchParams(location.hash.split('?')[1] || '').get(name);
 async function load() {
+  if (!location.hash || location.hash === '#') location.replace('#/home');
   try {
     S.data = await api(`/api/state?library=${S.lib}`);
     if (S.data.library !== S.lib) { S.lib = S.data.library; store.set('ytkb.lib', S.lib); }   // e.g. a deleted library
@@ -755,13 +756,14 @@ function renderBar() {
 function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
 function renderView() {
   const r = route(), v = $('#view');
+  if (r === 'plan') { location.replace('#/home'); return; }
+  if (r === 'triage') { S.view.sort = 'score'; S.view.status = 'todo'; S.view.verdict = ''; location.replace('#/'); return; }
   if (r === 'ai') { location.replace('#/settings/cloud'); return; }
   if (r === 'setup') { location.replace('#/help'); return; }
   if (r === 'home') {
     v.innerHTML = videos().length ? viewHome() : emptyState();
     if (!S.knowledge.list && !S.knowledge.loadingList) loadKnowledgeList();
   }
-  else if (r === 'plan') v.innerHTML = videos().length ? viewPlan() : emptyState();
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
   else if (r === 'settings' || r.startsWith('settings/')) {
@@ -972,55 +974,6 @@ function selBar() {
   </div>`;
 }
 
-/* ---------------- plan ---------------- */
-function viewPlan() {
-  const p = S.plan, perDay = Math.max(5, p.mins) * 60, days = Math.min(7, Math.max(1, p.days));
-  const finish = sd => {
-    if (!sd) return 'Done';
-    const d = new Date();
-    d.setDate(d.getDate() + Math.ceil((sd / days) * 7));
-    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  };
-  const rows = categoryNames().map(c => ({ c, st: stats(videos().filter(v => v.category === c)) }))
-    .filter(r => r.st.n).map(r => ({ ...r, sd: Math.ceil(r.st.rem / S.speed / perDay) })).sort((a, b) => a.st.rem - b.st.rem);
-  const all = stats(videos()), allDays = Math.ceil(all.rem / S.speed / perDay);
-  const s = buildSession(), used = s.picked.reduce((a, v) => a + v.duration_seconds / S.speed, 0);
-  return `
-  <section>
-    <div class="eyebrow">Plan</div>
-    <h1 class="display">${allDays ? `Done by ${finish(allDays)}` : 'All watched'}<em>${allDays ? plural(allDays, 'study day') : ''}</em></h1>
-    <p class="sentence">Minutes/day <input type="number" min="5" step="5" value="${p.mins}" data-change="p-mins" aria-label="Minutes per day"> · Days/week
-      <input type="number" min="1" max="7" value="${p.days}" data-change="p-days" aria-label="Days per week"> · Speed
-      <select data-change="speed" aria-label="Speed">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select></p>
-  </section>
-
-  <section class="section">
-    <h2 class="h">By category</h2>
-    <p class="note">Time by category ${tip('Each category is estimated separately. Completion dates count from today.')}</p>
-    <div class="tbl-wrap"><table class="tbl">
-      <thead><tr><th>Category</th><th class="r">Left</th><th class="r">Time at ${sx(S.speed)}</th><th class="r">Study days</th><th class="r">Done by</th></tr></thead>
-      <tbody>${rows.map(({ c, st, sd }) => `<tr><td><a href="#/" data-act="v-cat" data-v="${esc(c)}">${esc(c)}</a></td>
-        <td class="r">${st.left}</td><td class="r">${fmt(st.rem / S.speed)}</td><td class="r">${sd || '–'}</td><td class="r">${finish(sd)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td>Everything</td><td class="r">${all.left}</td><td class="r">${fmt(all.rem / S.speed)}</td><td class="r">${allDays}</td><td class="r">${finish(allDays)}</td></tr></tfoot>
-    </table></div>
-  </section>
-
-  <section class="section">
-    <h2 class="h">Today's session</h2>
-    <p class="sentence">Session (min) <input type="number" min="5" step="5" value="${S.session.mins}" data-change="s-mins" aria-label="Session minutes"> · Category
-      <select data-change="s-cat" aria-label="Category"><option value="">Any category</option>${categoryNames().map(c => `<option value="${esc(c)}" ${S.session.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-      · Order <select data-change="s-order" aria-label="Order">${[['order', 'Playlist order'], ['shortest', 'Shortest first'], ['longest', 'Longest first'], ['progress', 'Unfinished first']]
-        .map(([k, l]) => `<option value="${k}" ${S.session.order === k ? 'selected' : ''}>${l}</option>`).join('')}</select></p>
-    <div style="margin-top:20px">
-      <div class="note">${plural(s.picked.length, 'video')} · ${fmt(used)} of ${S.session.mins}m</div>
-      <div class="meter"><i style="width:${Math.min(100, (used / (S.session.mins * 60)) * 100)}%"></i></div>
-      ${s.picked.length ? `<ul class="rows">${s.picked.map(row).join('')}</ul>
-        <div class="actions">${playLinks(s.picked, 'Play session')}
-          <button class="btn btn-sm" data-act="session-done" data-ids="${esc(s.picked.map(v => v.video_id).join(','))}">Mark all watched</button></div>`
-        : `<p class="note" style="margin-top:12px">${s.pool ? 'No single video fits. Try more minutes or a faster speed.' : 'Nothing left to watch here.'}</p>`}
-    </div>
-  </section>`;
-}
 function viewHome() {
   const p = S.plan, perDay = Math.max(5, p.mins) * 60, days = Math.min(7, Math.max(1, p.days));
   const finish = studyDays => {
@@ -1852,10 +1805,11 @@ function viewKnowledgeList() {
                 <td>${statusBadge}${builtDate}</td>
                 <td class="r">
                   <div style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">
+                    <button class="btn btn-sm" data-act="knowledge-summarize-five" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize || c.summarised >= c.videos ? 'disabled' : ''}>Summarise 5</button>
                     ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}">Open</a>` : ''}
                     ${isStale ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Update knowledge page'}">Update</button>`
                       : isReady ? `<button class="btn btn-sm btn-text" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Rebuild knowledge page'}">Rebuild</button>`
-                      : `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Build knowledge page'}">Build</button>`}
+                      : c.summarised >= 3 ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize ? 'disabled' : ''} title="Build knowledge page">Build</button>` : ''}
                   </div>
                   ${!c.summarised && !hasPage ? `<div class="faint" style="font-size:11.5px;margin-top:4px">Summarise videos first</div>` : ''}
                 </td>
@@ -1863,7 +1817,21 @@ function viewKnowledgeList() {
             }).join('')}
           </tbody>
         </table></div>`}
-  </section>`;
+  </section>
+  ${list.length ? (list.some(c => c.page && c.page !== 'none')
+    ? `<details class="section"><summary class="h" style="cursor:pointer">How this works</summary><ol class="note"><li>Pick a category you're studying.</li><li>Summarise at least 3 of its videos.</li><li>Build its page.</li></ol></details>`
+    : `<section class="section card"><h2 class="h">Start here</h2><ol class="note"><li>Pick a category you're studying.</li><li>Summarise at least 3 of its videos.</li><li>Build its page.</li></ol></section>`)
+    : ''}`;
+}
+
+async function summarizeKnowledgeFive(category) {
+  try {
+    const candidates = videos().filter(v => v.category === category && !isDone(v)).sort((a, b) => (a.status === 'unwatched' ? 0 : 1) - (b.status === 'unwatched' ? 0 : 1));
+    const done = new Set(S.data.summarised || []);
+    const selected = candidates.filter(v => !done.has(v.video_id)).slice(0, 5).map(v => v.video_id);
+    if (!selected.length) { toast('No unsummarised unwatched videos in this category'); return; }
+    await startSummary(selected);
+  } catch (e) { toast(e.message, true); }
 }
 
 function viewKnowledgePage(cat) {
@@ -2742,6 +2710,7 @@ document.addEventListener('click', async e => {
     case 'summarize-sel': startSummary([...S.sel]); break;
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
+    case 'knowledge-summarize-five': summarizeKnowledgeFive(el.dataset.cat); break;
     case 'details-fetch': case 'details-one': {
       try {
         const res = await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : {});
@@ -3131,8 +3100,9 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'g') { S.goAt = Date.now(); return; }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && S.goAt && Date.now() - S.goAt < 1500 && e.key === '?') { S.goAt = 0; e.preventDefault(); location.hash = '#/help'; return; }
   if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && S.goAt && Date.now() - S.goAt < 1500) {
-    const routes = { l: '#/', k: '#/knowledge', p: '#/plan', t: '#/triage', y: '#/sources', c: '#/categories', s: '#/settings', h: '#/help' };
+    const routes = { h: '#/home', l: '#/', k: '#/knowledge', y: '#/sources', c: '#/categories', s: '#/settings' };
     const dest = routes[e.key.toLowerCase()]; S.goAt = 0;
     if (dest) { e.preventDefault(); location.hash = dest; return; }
   }
@@ -3162,7 +3132,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); }
   if (e.key === 'Enter' && e.target.id === 'new-cat-name' && !e.isComposing) { e.preventDefault(); saveNewCategory(); }
 });
-addEventListener('hashchange', () => { if (S.about.recording) stopAboutRecording(); if (S.data) { S.sel.clear(); S.addingCat = false; renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
+addEventListener('hashchange', () => { if (!location.hash || location.hash === '#') { location.replace('#/home'); return; } if (S.about.recording) stopAboutRecording(); if (S.data) { S.sel.clear(); S.addingCat = false; renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
 
 applyTheme();
 load();
