@@ -42,10 +42,12 @@ if ($LocalAI) {
   & .venv\Scripts\python.exe -c "import faster_whisper" 2>$null
   $engineMissing = $LASTEXITCODE -ne 0
   if ($engineMissing) { & .venv\Scripts\python.exe -c "import mlx_whisper" 2>$null; $engineMissing = $LASTEXITCODE -ne 0 }
-  if ($engineMissing -and (Ask "Install local transcription (about 400 MB, plus about 1 GB of NVIDIA libraries with an NVIDIA GPU)?")) {
+  # The NVIDIA libraries are only installed (and only mentioned) on NVIDIA computers
+  $asrSize = if ($gpuVendor -eq "nvidia") { "about 400 MB, plus about 1 GB of NVIDIA libraries for your graphics card" } else { "about 400 MB" }
+  if ($engineMissing -and (Ask "Install local transcription ($asrSize)?")) {
     & .venv\Scripts\python.exe -m pip install -q -r requirements-local.txt
     if ($gpuVendor -eq "nvidia") { & .venv\Scripts\python.exe -m pip install -q -r requirements-nvidia.txt }
-    if ($gpuVendor -eq "amd") { Write-Host '  For transcription on a Radeon GPU, see "Graphics cards" in docs/SETUP.md (CTranslate2 ROCm build).' }
+    if ($gpuVendor -eq "amd") { Write-Host '  It runs on the CPU. With a Radeon RX 6000 or newer it can use the GPU: see "Graphics cards" in docs/SETUP.md.' }
   }
 
   Write-Host "`n5. Model sized for this computer" -ForegroundColor White
