@@ -173,7 +173,7 @@ Options, best first. **Each needs a research spike before choosing (task R1), be
 
 ### T3: Transcription on Apple Silicon (mlx-whisper) and AMD (ROCm), from R1
 - **worker:** codex
-- **status:** todo
+- **status:** done
 - **depends on:** R1, T4
 - **files:** `local_asr.py`, `local_setup.py`, `requirements-local.txt`, `requirements-nvidia.txt` (new), `scripts/setup.sh`, `scripts/setup.ps1`, `scripts/service.sh`, `tests/test_asr.py`, `tests/test_local.py`
 - **design (R1, `spikes/asr-engines.md`):** NVIDIA unchanged. AMD Radeon uses faster-whisper on CTranslate2's ROCm build (same code path, `device="cuda"`; installed by hand from the guide for now). Apple Silicon uses mlx-whisper. Everything else stays on faster-whisper on the CPU. No `asr_engine` setting: the engine follows from the hardware.
@@ -214,7 +214,7 @@ Options, best first. **Each needs a research spike before choosing (task R1), be
 
 ### T5: Docs and manual tests
 - **worker:** controller
-- **status:** todo
+- **status:** done
 - **depends on:** T1, T2, T3, T4
 - **files:** `docs/SETUP.md`, `README.md`, `docs/MANUAL-TESTS.md`, `CLAUDE.md`
 - **steps:**

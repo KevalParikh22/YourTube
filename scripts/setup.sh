@@ -81,7 +81,7 @@ if [ "$LOCAL_AI" = 1 ]; then
   say "4b. Local transcription"
   GPU_VENDOR="$(.venv/bin/python local_setup.py --gpu-vendor)"
   if .venv/bin/python -c 'import faster_whisper' 2>/dev/null || .venv/bin/python -c 'import mlx_whisper' 2>/dev/null; then ok "Local transcription engine installed"
-  elif ask "Install local transcription (about 1.2 GB with NVIDIA libraries, about 150 MB without)?"; then
+  elif ask "Install local transcription (about 400 MB, plus about 1 GB of NVIDIA libraries with an NVIDIA GPU)?"; then
     if .venv/bin/python -m pip --version >/dev/null 2>&1; then
       .venv/bin/python -m pip install -q -r requirements-local.txt
       [ "$GPU_VENDOR" != nvidia ] || .venv/bin/python -m pip install -q -r requirements-nvidia.txt

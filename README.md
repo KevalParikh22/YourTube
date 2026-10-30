@@ -14,7 +14,9 @@ Everything runs on your computer. AI can be local (Ollama) or a cloud provider y
 bash scripts/setup.sh --local-ai --service   # Windows: scripts\setup.ps1 -LocalAI -Service
 ```
 
-That sets everything up, starts the dashboard in the background (and again at every login), and opens it at http://127.0.0.1:8765. Without `--service`, start it yourself with `.venv/bin/python dashboard.py`. Undo with `bash scripts/service.sh uninstall`.
+That sets everything up, starts the dashboard in the background (and again at every login), and opens it at http://127.0.0.1:8765. Without `--service`, start it yourself with `.venv/bin/python dashboard.py`. Undo with `bash scripts/service.sh uninstall`. After an update: `bash scripts/service.sh update` (pulls, refreshes dependencies, restarts).
+
+Local AI uses NVIDIA, AMD Radeon or Apple Silicon graphics when it can, and the CPU otherwise. Prefer containers? There is an optional Docker setup (`docker compose up -d`; cloud AI, Ollama on the host and public playlists, or a `cookies.txt` for private ones); see "Docker (optional)" in the setup guide.
 
 - Setup and configuration: [docs/SETUP.md](docs/SETUP.md) (also in the app: the Help page, ? icon)
 - Security: [SECURITY.md](SECURITY.md)
