@@ -188,8 +188,11 @@ def ollama(base_url: str) -> Dict[str, Any]:
             "detail": f"version {version}, {len(models)} model{'s' if len(models) != 1 else ''} downloaded"}
 
 def whisper() -> Dict[str, Any]:
-    ok = importlib.util.find_spec("faster_whisper") is not None
-    return {"ok": ok, "detail": "Installed" if ok else "Not installed yet. Comes with local transcription (Phase 2.5 L1)."}
+    faster = importlib.util.find_spec("faster_whisper") is not None
+    mlx = importlib.util.find_spec("mlx_whisper") is not None
+    engine = "mlx-whisper" if mlx and not faster else "faster-whisper"
+    ok = faster or mlx
+    return {"ok": ok, "detail": f"Installed ({engine})" if ok else "Not installed yet. Comes with local transcription (Phase 2.5 L1)."}
 
 def recommend(vram_mb: int) -> List[Dict[str, Any]]:
     """Recommended models marked with whether they fit fully on this GPU; the best fit is marked 'best'."""
@@ -274,11 +277,15 @@ def main() -> None:
     import argparse
     parser = argparse.ArgumentParser(description="Check and set up local AI for YourTube")
     parser.add_argument("--pull", metavar="MODEL", help="download a model into Ollama")
+    parser.add_argument("--gpu-vendor", action="store_true", help="print only the detected GPU vendor")
     parser.add_argument("--recommended", action="store_true", help="print only the best-fit model name")
     parser.add_argument("--use", metavar="MODEL", help="make this Ollama model YourTube's default AI")
     parser.add_argument("--embed-model", action="store_true", help="print only the embedding model YourTube uses")
     parser.add_argument("--use-embed", metavar="MODEL", help="make this Ollama model YourTube's embedding model")
     args = parser.parse_args()
+    if args.gpu_vendor:
+        print(gpu().get("vendor") or "none")
+        return
 
     if args.embed_model:
         import embedder
@@ -301,7 +308,7 @@ def main() -> None:
         return
     mark = lambda ok: "" if ok else "Warning: "
     print("YourTube local AI check")
-    for key, label in (("gpu", "GPU"), ("memory", "Memory"), ("ffmpeg", "ffmpeg"), ("ollama", "Ollama"), ("whisper", "faster-whisper")):
+    for key, label in (("gpu", "GPU"), ("memory", "Memory"), ("ffmpeg", "ffmpeg"), ("ollama", "Ollama"), ("whisper", "local transcription")):
         print(f"  {mark(st[key]['ok'])} {label:<15} {st[key]['detail']}")
     for m in st["ollama"].get("models", []):
         print(f"       · {m['name']} ({m['size_gb']} GB)")

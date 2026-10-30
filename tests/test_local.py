@@ -217,6 +217,17 @@ class SetupTest(unittest.TestCase):
                 mock.patch("local_setup.glob.glob", return_value=[]):
             self.assertFalse(local_setup.gpu(system="Linux")["ok"])
 
+    def test_gpu_vendor_cli(self):
+        import contextlib
+        import io
+        import sys
+        output = io.StringIO()
+        with mock.patch("local_setup.gpu", return_value={"vendor": "amd"}), \
+                mock.patch.object(sys, "argv", ["local_setup.py", "--gpu-vendor"]), \
+                contextlib.redirect_stdout(output):
+            local_setup.main()
+        self.assertEqual(output.getvalue(), "amd\n")
+
     def test_status_keeps_cpu_recommendations_for_intel(self):
         intel = {"ok": True, "vendor": "intel", "ollama_gpu": False, "vram_mb": 24000}
         with mock.patch("local_setup.gpu", return_value=intel), \

@@ -37,10 +37,15 @@ if ($LocalAI) {
   try { Invoke-RestMethod http://localhost:11434/api/version -TimeoutSec 3 | Out-Null }
   catch { Start-Process ollama -ArgumentList serve -WindowStyle Hidden; Start-Sleep 5 }
 
-  Write-Host "`n4b. Local transcription (faster-whisper)" -ForegroundColor White
+  Write-Host "`n4b. Local transcription" -ForegroundColor White
+  $gpuVendor = & .venv\Scripts\python.exe local_setup.py --gpu-vendor
   & .venv\Scripts\python.exe -c "import faster_whisper" 2>$null
-  if ($LASTEXITCODE -and (Ask "Install local transcription (faster-whisper, about 1.2 GB with NVIDIA libraries)?")) {
+  $engineMissing = $LASTEXITCODE -ne 0
+  if ($engineMissing) { & .venv\Scripts\python.exe -c "import mlx_whisper" 2>$null; $engineMissing = $LASTEXITCODE -ne 0 }
+  if ($engineMissing -and (Ask "Install local transcription (about 1.2 GB with NVIDIA libraries, about 150 MB without)?")) {
     & .venv\Scripts\python.exe -m pip install -q -r requirements-local.txt
+    if ($gpuVendor -eq "nvidia") { & .venv\Scripts\python.exe -m pip install -q -r requirements-nvidia.txt }
+    if ($gpuVendor -eq "amd") { Write-Host '  For transcription on a Radeon GPU, see "Graphics cards" in docs/SETUP.md (CTranslate2 ROCm build).' }
   }
 
   Write-Host "`n5. Model sized for this computer" -ForegroundColor White

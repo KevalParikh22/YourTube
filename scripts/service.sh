@@ -216,11 +216,18 @@ EOF
     else
       python3 -m pip --python "$PY" install -q -r "$ROOT/requirements.txt"
     fi
-    if "$PY" -c "import faster_whisper" >/dev/null 2>&1; then
+    if "$PY" -c "import faster_whisper" >/dev/null 2>&1 || "$PY" -c "import mlx_whisper" >/dev/null 2>&1; then
       if "$PY" -m pip --version >/dev/null 2>&1; then
         "$PY" -m pip install -q -r "$ROOT/requirements-local.txt"
       else
         python3 -m pip --python "$PY" install -q -r "$ROOT/requirements-local.txt"
+      fi
+      if [ "$("$PY" "$ROOT/local_setup.py" --gpu-vendor)" = nvidia ]; then
+        if "$PY" -m pip --version >/dev/null 2>&1; then
+          "$PY" -m pip install -q -r "$ROOT/requirements-nvidia.txt"
+        else
+          python3 -m pip --python "$PY" install -q -r "$ROOT/requirements-nvidia.txt"
+        fi
       fi
     fi
     if service_installed; then

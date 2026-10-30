@@ -1,0 +1,3 @@
+# NVIDIA libraries for GPU speech-to-text (CTranslate2 needs CUDA 12 cuBLAS and cuDNN 9)
+nvidia-cublas-cu12; sys_platform != "darwin"
+nvidia-cudnn-cu12==9.*; sys_platform != "darwin"
