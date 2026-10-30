@@ -18,7 +18,8 @@ import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.path.join(ROOT, "media_cache", "asr")   # git-ignored; emptied at the start of each run
+_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or ROOT
+CACHE = os.path.join(_DATA_DIR, "media_cache", "asr")   # git-ignored; emptied at the start of each run
 
 # Original track first (language_preference 10 on dubbed videos), else the smallest audio stream
 AUDIO_FORMAT = "wa[language_preference>=10][acodec!=none]/wa[format_note*=original]/worstaudio[acodec!=none]/bestaudio"

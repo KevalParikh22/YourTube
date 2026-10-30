@@ -20,8 +20,9 @@ import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-CACHE = os.path.join(ROOT, "media_cache", "visual")   # temporary video and raw frames
-FRAMES = os.path.join(ROOT, "frames")                 # kept thumbnails: frames/<video_id>/<second>.jpg (git-ignored)
+_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or ROOT
+CACHE = os.path.join(_DATA_DIR, "media_cache", "visual")   # temporary video and raw frames
+FRAMES = os.path.join(_DATA_DIR, "frames")                 # kept thumbnails: frames/<video_id>/<second>.jpg (git-ignored)
 
 SCENE = 0.25        # ffmpeg scene-change threshold
 EVERY = 30          # also a frame at least this often

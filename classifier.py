@@ -9,7 +9,8 @@ from typing import List, Dict, Any, Optional
 
 FALLBACK_CATEGORY = "General / Other"
 # User-edited taxonomy (written by the dashboard); DEFAULT_TAXONOMY is used when absent
-TAXONOMY_PATH = os.environ.get("YTKB_TAXONOMY") or os.path.join(os.path.dirname(__file__), "taxonomy.json")
+_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(__file__)
+TAXONOMY_PATH = os.environ.get("YTKB_TAXONOMY") or os.path.join(_DATA_DIR, "taxonomy.json")
 
 # Default category taxonomy and signature keyword rules
 DEFAULT_TAXONOMY: Dict[str, List[str]] = {
