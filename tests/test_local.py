@@ -139,6 +139,19 @@ class SetupTest(unittest.TestCase):
                 gpu = local_setup.gpu(system="Linux", drm=drm)
         self.assertEqual(gpu["vendor"], "amd")
 
+    def test_gpu_prefers_discrete_amd_over_apu_on_linux(self):
+        with tempfile.TemporaryDirectory() as drm:
+            for card, size in (("card0", 512 * 1024 ** 2), ("card1", 16 * 1024 ** 3)):
+                device = os.path.join(drm, card, "device")
+                os.makedirs(device)
+                with open(os.path.join(device, "vendor"), "w") as f:
+                    f.write("0x1002")
+                with open(os.path.join(device, "mem_info_vram_total"), "w") as f:
+                    f.write(str(size))
+            with mock.patch("shutil.which", return_value=None):
+                gpu = local_setup.gpu(system="Linux", drm=drm)
+        self.assertEqual(gpu["vram_mb"], 16 * 1024)
+
     def test_gpu_intel_linux(self):
         with tempfile.TemporaryDirectory() as drm:
             device = os.path.join(drm, "card0", "device")

@@ -41,6 +41,11 @@ def _run(cmd: List[str], timeout: int = 5) -> Optional[str]:
         return None
     return out.stdout.strip() if out.returncode == 0 else None
 
+def _best_card(cards: List[Dict[str, Any]]) -> Dict[str, Any]:
+    # An AMD APU also reports a small VRAM carve-out, so a discrete card next to it must win on memory
+    usable = [c for c in cards if c["ollama_gpu"]]
+    return max(usable, key=lambda c: c["vram_mb"]) if usable else cards[0]
+
 def gpu(system: Optional[str] = None, drm: str = "/sys/class/drm") -> Dict[str, Any]:
     system = system or platform.system()
     if shutil.which("nvidia-smi"):
@@ -83,7 +88,7 @@ def gpu(system: Optional[str] = None, drm: str = "/sys/class/drm") -> Dict[str, 
             except (OSError, ValueError):
                 continue
         if cards:
-            return next((card for card in cards if card["vendor"] == "amd"), cards[0])
+            return _best_card(cards)
 
     if system == "Windows":
         out = _run(["powershell", "-NoProfile", "-Command",
@@ -110,10 +115,9 @@ def gpu(system: Optional[str] = None, drm: str = "/sys/class/drm") -> Dict[str, 
                     elif vendor == "nvidia":
                         total_mb = int(controller.get("AdapterRAM") or 0) // (1024 * 1024)
                         cards.append({"ok": True, "vendor": vendor, "ollama_gpu": True, "name": name,
-                                      "vram_mb": total_mb, "detail": f"{name}, {total_mb} MB; Ollama will use this GPU."})
+                                      "vram_mb": total_mb, "detail": f"{name}, at least {total_mb} MB; Ollama will use this GPU."})
                 if cards:
-                    return next((card for card in cards if card["vendor"] == "amd"),
-                                next((card for card in cards if card["vendor"] == "nvidia"), cards[0]))
+                    return _best_card(cards)
         except (AttributeError, TypeError, ValueError):
             pass
 
