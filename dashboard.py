@@ -748,7 +748,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not llm.is_configured(llm.load_settings(), "categorize"):
                     return self._error("Set up an AI provider in Settings → AI first")
                 started = JOB.start("split", f"Split category: {name}",
-                                    lambda: run_split(name, library=lib, should_stop=JOB.stop_requested), key=name)
+                                    lambda: run_split(name, library=lib, should_stop=JOB.stop_requested), key=[lib, name])
                 return self._queued(started)
 
             if path == "/api/categories/split/apply":
