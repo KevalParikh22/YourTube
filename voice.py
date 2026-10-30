@@ -5,7 +5,7 @@ import uuid
 
 import local_asr
 
-VOICE_DIR = os.path.join(local_asr.ROOT, "media_cache", "voice")
+VOICE_DIR = os.path.join(os.environ.get("YTKB_DATA_DIR") or local_asr.ROOT, "media_cache", "voice")
 MAX_BYTES = 8_000_000
 MAX_SECONDS = 180
 MODEL = ("small", "int8")
@@ -16,7 +16,9 @@ _whisper = None
 
 
 def available() -> bool:
-    return local_asr.available()
+    # Voice notes always use faster-whisper on the CPU, so mlx-whisper alone (Apple Silicon) is not enough
+    import importlib.util
+    return local_asr.available() and importlib.util.find_spec("faster_whisper") is not None
 
 
 def _model():

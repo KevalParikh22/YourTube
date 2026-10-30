@@ -78,12 +78,25 @@ if [ "$LOCAL_AI" = 1 ]; then
   curl -fsS -m 3 http://localhost:11434/api/version >/dev/null 2>&1 || { warn "Ollama is not answering. Start it with: ollama serve"; exit 1; }
   ok "Ollama is running"
 
-  say "4b. Local transcription (faster-whisper)"
-  if .venv/bin/python -c 'import faster_whisper' 2>/dev/null; then ok "faster-whisper installed"
-  elif ask "Install local transcription (faster-whisper; about 1.2 GB with the NVIDIA libraries)?"; then
-    if .venv/bin/python -m pip --version >/dev/null 2>&1; then .venv/bin/python -m pip install -q -r requirements-local.txt
-    else "$PY" -m pip --python .venv/bin/python install -q -r requirements-local.txt; fi
-    ok "faster-whisper installed (the speech model downloads on first use: ~1.6 GB)"
+  say "4b. Local transcription"
+  GPU_VENDOR="$(.venv/bin/python local_setup.py --gpu-vendor)"
+  # The NVIDIA libraries are only installed (and only mentioned) on NVIDIA computers
+  case "$GPU_VENDOR" in
+    nvidia) ASR_SIZE="about 400 MB, plus about 1 GB of NVIDIA libraries for your graphics card" ;;
+    apple)  ASR_SIZE="about 400 MB, with mlx-whisper for the Apple GPU" ;;
+    *)      ASR_SIZE="about 400 MB" ;;
+  esac
+  if .venv/bin/python -c 'import faster_whisper' 2>/dev/null || .venv/bin/python -c 'import mlx_whisper' 2>/dev/null; then ok "Local transcription engine installed"
+  elif ask "Install local transcription ($ASR_SIZE)?"; then
+    if .venv/bin/python -m pip --version >/dev/null 2>&1; then
+      .venv/bin/python -m pip install -q -r requirements-local.txt
+      [ "$GPU_VENDOR" != nvidia ] || .venv/bin/python -m pip install -q -r requirements-nvidia.txt
+    else
+      "$PY" -m pip --python .venv/bin/python install -q -r requirements-local.txt
+      [ "$GPU_VENDOR" != nvidia ] || "$PY" -m pip --python .venv/bin/python install -q -r requirements-nvidia.txt
+    fi
+    [ "$GPU_VENDOR" != amd ] || echo '  It runs on the CPU. With a Radeon RX 6000 or newer it can use the GPU: see "Graphics cards" in docs/SETUP.md.'
+    ok "Local transcription installed (the speech model downloads on first use: ~1.6 GB)"
   else warn "Skipped. Videos without captions can't be transcribed locally until you install it."; fi
 
   say "5. Model sized for this computer"

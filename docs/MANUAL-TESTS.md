@@ -19,6 +19,7 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | **S9 · Failures, logs and always-on** | S9 below | ~15 min | Nothing |
 | **S10 · Speak your interests** | S10 below | ~10 min | A microphone; local AI set up |
 | **S11 · Home, Library ratings, Split** | S11 below | ~20 min | Local AI set up; a few rated videos |
+| **S12 · Run anywhere** (one session per computer you have) | S12 below | ~20 min each | The computer to test; for S12.6–S12.8 Docker installed |
 
 ### S1 extra checks (new ratings, 2026-10-24)
 
@@ -90,6 +91,21 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S11.5 | Knowledge guide | Knowledge → Summarise 5 on a category you study → Build when it shows | The guide explains the steps; Build appears after 3 summaries | |
 | S11.6 | Split | Categories → Split with AI on your biggest category → untick any you don't want → Create and sort → Library → AI suggestions | Specific new categories; suggestions move the right videos (even hand-placed ones) only when you accept | |
 | S11.7 | Dropdowns | Look at every page in light and dark, desktop and phone | Same size dropdowns and fields, none inside headings, nothing misaligned | |
+
+### S12 checks (run anywhere: restart, graphics cards, Docker, 2026-10-30)
+
+Do the rows that match the computer in front of you, and note which computer (OS, graphics card) in the Result column.
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S12.1 | Restart (Linux, macOS) | `bash scripts/service.sh install`, then `bash scripts/service.sh restart`, then `status` | Restarts without errors; the dashboard opens again with `open`. Before `install`, `restart` says the service isn't installed | |
+| S12.2 | Restart (Windows) | `scripts\service.ps1 -Install`, then `-Restart`, then `-Status` | "YourTube dashboard restarted."; the dashboard opens with `-Open` | |
+| S12.3 | Update | In a git checkout with the service installed: `bash scripts/service.sh update` | Pulls, refreshes dependencies, restarts; your library is unchanged | |
+| S12.4 | Graphics card shown | Settings → Local AI → *Local AI on this computer* | The GPU line names your card (NVIDIA / Radeon / Apple M-chip / Intel) and the recommended model fits it. Intel and small laptop graphics say models run on the CPU | |
+| S12.5 | Transcription on the GPU | `bash scripts/setup.sh --local-ai` (NVIDIA: CUDA libraries installed; Mac: mlx-whisper; AMD: follow "Graphics cards" in the guide), then transcribe one video without captions | The task's first line says "on the GPU" (on Intel and older laptops: "on the CPU"); the transcript looks right | |
+| S12.6 | Docker start | `mkdir data && docker compose up -d --build`, then `docker compose exec yourtube python dashboard.py --print-url` and open the link | The dashboard opens; `data/` holds `yt_kb.db`, `settings.json` and `logs/` | |
+| S12.7 | Docker playlists and AI | Add a public playlist; then a private one with `data/cookies.txt` (path `/data/cookies.txt`); rate a video with Ollama running on the host | Both sync; the rating uses the host's Ollama without typing an address (Linux: Ollama set to listen on Docker's bridge address, see Troubleshooting) | |
+| S12.8 | Docker stays private | From another device on your network, open `http://<this computer's IP>:8765` | It doesn't connect | |
 
 ## 1. Library at real size ✓ done 2026-10-24
 

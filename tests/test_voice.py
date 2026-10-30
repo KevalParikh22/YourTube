@@ -34,6 +34,11 @@ class VoiceClipTest(unittest.TestCase):
         self.assertEqual(result["language"], "en")
         self.assertFalse(any(name.endswith(".m4a") for name in os.listdir(self.tmp.name)))
 
+    def test_unavailable_with_mlx_whisper_only(self):
+        with mock.patch.object(voice.local_asr, "available", return_value=True), \
+             mock.patch("importlib.util.find_spec", side_effect=lambda name: None if name == "faster_whisper" else object()):
+            self.assertFalse(voice.available())
+
     def test_temp_file_removed_after_transcriber_failure(self):
         with mock.patch.object(voice.local_asr, "decode", return_value=[0.0] * 16000):
             with self.assertRaisesRegex(RuntimeError, "failed"):
@@ -76,6 +81,13 @@ class VoiceEndpointTest(unittest.TestCase):
     def test_state_has_voice_flag(self):
         with mock.patch.object(dashboard, "_VOICE_AVAILABLE", None), mock.patch.object(voice, "available", return_value=False):
             self.assertIs(dashboard.build_state()["voice"], False)
+
+    def test_voice_flag_turns_on_after_install_without_restart(self):
+        with mock.patch.object(dashboard, "_VOICE_AVAILABLE", None):
+            with mock.patch.object(voice, "available", return_value=False):
+                self.assertIs(dashboard.build_state()["voice"], False)
+            with mock.patch.object(voice, "available", return_value=True):
+                self.assertIs(dashboard.build_state()["voice"], True)
 
     def test_unavailable_and_bad_base64(self):
         with mock.patch.object(voice, "available", return_value=False):
