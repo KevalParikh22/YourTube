@@ -82,6 +82,13 @@ class VoiceEndpointTest(unittest.TestCase):
         with mock.patch.object(dashboard, "_VOICE_AVAILABLE", None), mock.patch.object(voice, "available", return_value=False):
             self.assertIs(dashboard.build_state()["voice"], False)
 
+    def test_voice_flag_turns_on_after_install_without_restart(self):
+        with mock.patch.object(dashboard, "_VOICE_AVAILABLE", None):
+            with mock.patch.object(voice, "available", return_value=False):
+                self.assertIs(dashboard.build_state()["voice"], False)
+            with mock.patch.object(voice, "available", return_value=True):
+                self.assertIs(dashboard.build_state()["voice"], True)
+
     def test_unavailable_and_bad_base64(self):
         with mock.patch.object(voice, "available", return_value=False):
             self.assertEqual(self.call("/api/voice/transcribe", "AA==")[0], 503)

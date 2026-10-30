@@ -318,7 +318,7 @@ def build_state(library=1):
     else:
         taxonomy = load_taxonomy(library=library)
     global _VOICE_AVAILABLE
-    if _VOICE_AVAILABLE is None:
+    if not _VOICE_AVAILABLE:   # only "yes" is kept: installing faster-whisper later must not need a restart
         _VOICE_AVAILABLE = voice.available()
     return {
         "library": library or 0,
