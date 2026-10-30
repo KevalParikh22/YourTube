@@ -12,12 +12,24 @@ Everything you need to install, configure and run YourTube on your own computer.
 | Python | 3.10 or newer | `python3 --version` |
 | Disk | About 300 MB for the app | Plus 2–7 GB per local AI model, if you use one |
 | ffmpeg | Optional | Needed later for local transcription and slide reading (Phase 2.5) |
-| GPU | Optional | An NVIDIA GPU with 4 GB or more makes local AI fast. Without one, local models run on the CPU, more slowly. |
+| GPU | Optional | A graphics card with 4 GB or more makes local AI fast: NVIDIA, AMD Radeon or Apple Silicon (see **Graphics cards** (section 5)). Without one, local models run on the CPU, more slowly. |
 | Browser | Firefox, Chrome, Chromium, Brave or Edge, signed in to YouTube | Only needed for private playlists and Watch Later |
 
 ---
 
 ## 2. Quick start
+
+### Choose how to run it
+
+| | Native (recommended) | Docker (optional) |
+|---|---|---|
+| Linux | `scripts/setup.sh` | Works; GPU only for the AI in Ollama on the host |
+| macOS | `scripts/setup.sh` | Works, but no Apple GPU inside Docker |
+| Windows | `scripts\setup.ps1` (not yet tested) | Works with Docker Desktop |
+| Private playlists and Watch Later | Reads your browser's sign-in | Needs a `cookies.txt` export (expires) |
+| Local transcription | Yes (GPU on NVIDIA, AMD Radeon, Apple Silicon) | No (the image stays small) |
+
+Pick **native** unless you don't want Python on your computer, or you only use cloud AI and public playlists. Docker is described in **Docker (optional)** (section 3).
 
 Download the setup script from the dashboard (**Help** page, ? icon) or use the copy in `scripts/`, then run it **inside the YourTube folder** (the one containing `dashboard.py`).
 
@@ -52,9 +64,11 @@ bash scripts/service.sh install      # Linux (systemd user service) and macOS (L
 bash scripts/service.sh open         # open the dashboard with its access link
 bash scripts/service.sh status       # is it running?
 bash scripts/service.sh uninstall    # stop it and remove the service
+bash scripts/service.sh restart      # run the new code after an update
+bash scripts/service.sh update       # git pull, refresh dependencies, then restart
 ```
 
-Add `--port 8766` to `install` and `open` to use another port. On Windows: `powershell -ExecutionPolicy Bypass -File scripts\service.ps1 -Install` (also `-Open`, `-Status`, `-Uninstall`; not yet tested). After updating YourTube, restart the service so it runs the new code: `systemctl --user restart yourtube` (macOS: run `uninstall` then `install`).
+Add `--port 8766` to `install` and `open` to use another port. On Windows: `powershell -ExecutionPolicy Bypass -File scripts\service.ps1 -Install` (also `-Open`, `-Status`, `-Restart`, `-Uninstall`; not yet tested). After updating YourTube, restart the service so it runs the new code: `bash scripts/service.sh restart` on Linux and macOS, `scripts\service.ps1 -Restart` on Windows. `update` needs a git checkout and the service installed (without the service it only updates).
 
 Starting `dashboard.py` while it already runs prints "YourTube is already running on port 8765" and exits; open it with `bash scripts/service.sh open` or `.venv/bin/python dashboard.py --print-url`.
 
@@ -66,7 +80,7 @@ Starting `dashboard.py` while it already runs prints "YourTube is already runnin
 | 2. Environment | Creates `.venv` and installs `requirements.txt` (yt-dlp, anthropic, and secretstorage on Linux) | No (only inside the project folder) |
 | 3. ffmpeg | Checks that it is installed and tells you how to install it if not | — |
 | 4. Ollama *(local AI only)* | Installs Ollama with its official installer (Linux) or `winget` (Windows), then starts it | **Yes**. The installer may ask for your password |
-| 4b. Local transcription *(local AI only)* | Installs faster-whisper from `requirements-local.txt` (plus NVIDIA libraries on Linux/Windows; about 1.2 GB). The speech model downloads on first use (~1.6 GB) | **Yes** |
+| 4b. Local transcription *(local AI only)* | Installs faster-whisper from `requirements-local.txt` (about 400 MB; plus mlx-whisper on Apple Silicon). With an NVIDIA GPU also `requirements-nvidia.txt` (CUDA libraries, about 1 GB more). With an AMD GPU it points you to **Graphics cards** (section 5). The speech model downloads on first use (~1.6 GB) | **Yes** |
 | 5. Model *(local AI only)* | Downloads the model that fits your GPU and makes it YourTube's default AI | **Yes** |
 | 6. Embedding model *(local AI only)* | Downloads `qwen3-embedding:0.6b` (0.64 GB) for questions and search by meaning | **Yes** |
 | 7. Service *(`--service` only)* | Installs the background service (see "Keep it running") and opens the dashboard | No (only files in your user folder) |
@@ -105,6 +119,22 @@ ollama serve                                      # if it isn't already running 
 # 3. Run
 .venv/bin/python dashboard.py
 ```
+
+### Docker (optional)
+
+Install Docker (Docker Desktop on Windows and macOS), then inside the YourTube folder:
+
+```bash
+mkdir data                                  # your library, settings and logs live here
+docker compose up -d --build                # build and start; it restarts by itself
+docker compose exec yourtube python dashboard.py --print-url   # the access link to open
+```
+
+- **Your data** is in `./data` (database, settings, categories, logs, slide thumbnails). Back it up like `yt_kb.db`. Create the folder yourself before the first start. On Linux the container runs as user 1000; if your user ID is different, start it with `YTKB_UID=$(id -u) YTKB_GID=$(id -g) docker compose up -d`.
+- **Only this computer can open it:** the port is published as `127.0.0.1:8765`. Don't change it to `8765:8765`: that puts the dashboard on your network, where the localhost check doesn't protect it.
+- **Private playlists and Watch Later:** the container can't read your browser's sign-in. Export a `cookies.txt` for youtube.com with a browser extension, save it as `data/cookies.txt`, and choose *cookies.txt file* with the path **`/data/cookies.txt`** when adding the playlist. The export expires after a while; export it again when syncs fail. Public playlists need nothing.
+- **Local AI:** run Ollama on the computer itself, not in Docker. The container reaches it at `host.docker.internal:11434` automatically (`YTKB_OLLAMA_URL`); an address you saved in Settings → Local AI wins. Local transcription is not in the image.
+- **Update:** `git pull && docker compose up -d --build`. **Stop:** `docker compose down` (your data stays in `./data`).
 
 ---
 
@@ -175,9 +205,27 @@ For videos with **no captions**, or captions in the **wrong script** (for exampl
 
 - **Run it:** Playlists → *Video details and transcripts* → **Transcribe N videos locally** (shows the audio length and an estimate), or **Transcribe locally** in a video's panel.
 - **What happens:** only the original-language audio is downloaded, anonymously; the AI model is unloaded from the GPU; Whisper transcribes; and the audio is deleted.
-- **Speed (RTX 3050, 4 GB):** about 2.5 min per hour of audio on the GPU (`large-v3-turbo`), and about 10 min per hour on the CPU (`small`). Choose the model in Settings → Local AI (*Speech-to-text model*; Auto picks by device).
+- **Speed:** on an RTX 3050 (4 GB) about 2.5 min per hour of audio on the GPU (`large-v3-turbo`); on the CPU (`small`) about 10–16 min per hour (16 min measured on a Ryzen 7 7730U laptop). Choose the model in Settings → Local AI (*Speech-to-text model*; Auto picks by device).
 - **Both kept:** when a video already has captions, both transcripts are stored. The video panel's *Transcript used for search, ratings and summaries* switch picks which one counts. After switching, use **Rate again** to refresh that video's rating.
-- **Needs:** `faster-whisper` (installed by `scripts/setup.sh --local-ai`) and ffmpeg.
+- **Needs:** `faster-whisper` (installed by `scripts/setup.sh --local-ai`) and ffmpeg. Which graphics cards it uses: see **Graphics cards** (section 5).
+
+### Graphics cards
+
+| Card | Local AI (Ollama) | Local transcription | Slide reading |
+|---|---|---|---|
+| **NVIDIA** | GPU | GPU (faster-whisper, CUDA; `requirements-nvidia.txt`) | GPU (through Ollama) |
+| **AMD Radeon** RX 6000 / 7000 / 9000 | GPU (ROCm; on Windows RX 7000 only, others through Vulkan) | GPU after a manual step (below); otherwise CPU | GPU (through Ollama) |
+| **Apple Silicon** (M1 and later) | GPU (Metal) | GPU (mlx-whisper, installed automatically) | GPU (through Ollama) |
+| **Intel** Arc / integrated | Usually CPU (Ollama's Intel support is unofficial, through Vulkan) | CPU | Follows Ollama |
+| Older AMD laptop graphics (e.g. Vega in Ryzen 5000) | CPU | CPU | CPU |
+| No graphics card | CPU | CPU | CPU |
+
+Settings → Local AI → *Local AI on this computer* shows the card YourTube found and sizes the recommended model to it. Apple Silicon shares memory with the system, so about 65 % of it counts as graphics memory.
+
+**AMD: transcription on the GPU (manual, not yet tested).** faster-whisper runs on AMD cards through CTranslate2's ROCm build:
+1. Install AMD's ROCm 7.2 runtime (Linux: AMD's `amdgpu-install`; Windows: the ROCm 7.2 wheels from AMD, since the 7.1.1 HIP SDK installer doesn't work with it).
+2. Download `rocm-python-wheels-Linux.zip` or `rocm-python-wheels-Windows.zip` from the latest release at https://github.com/OpenNMT/CTranslate2/releases, unzip it, and install the wheel for your Python version: `.venv/bin/python -m pip install --force-reinstall --no-deps ctranslate2-*.whl`.
+3. Restart YourTube. The next transcription job's first line says it runs on the GPU.
 
 ### Slides, whiteboards and on-screen code
 
@@ -270,6 +318,8 @@ Shortcuts are ignored while you type in a field.
 
 ### Files (all in the YourTube folder, none committed to git)
 
+With `YTKB_DATA_DIR` set (Docker sets it to `/data`), all of these except `.venv/` live in that folder instead.
+
 | File | Contents | Safe to delete? |
 |---|---|---|
 | `yt_kb.db` | Your library: playlists, videos, statuses, notes, transcripts, ratings, questions and answers | **No**. This is your data; back it up |
@@ -302,7 +352,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `rating_formula` | `{}` | Overrides for how scores are computed: `depth`, `value`, `freshness` (weights 0–1), `interest_penalty` (0–5, default 2), `interest_bonus` (0–2, default 0.5) |
 | `use_descriptions` | `true` | Search video descriptions and send them to the AI (they are fetched with the captions either way) |
 | `embed_model` | `"qwen3-embedding:0.6b"` | Ollama model for meaning-based search and questions (Phase 2) |
-| `asr_model` | `"auto"` | Local speech-to-text model: `auto` (large-v3-turbo on a GPU, small on the CPU), `large-v3-turbo`, `small` or `medium` |
+| `asr_model` | `"auto"` | Local speech-to-text model: `auto` (large-v3-turbo on a GPU, small on the CPU), `large-v3-turbo`, `small` or `medium`. On Apple Silicon `auto` uses `mlx-community/whisper-large-v3-turbo`; another `mlx-community/...` name is used as given |
 | `interests` | `""` | What you want to learn (used by ratings) |
 | `language` | `"English"` | Language for summaries and reasons |
 | `auto_after_sync` | `false` | Suggest categories after each sync |
@@ -318,16 +368,21 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `YTKB_TAXONOMY` | Use another categories file |
 | `YTKB_SETTINGS` | Use another settings file |
 | `YTKB_LOG_DIR` | Write `yourtube.log` to another folder |
+| `YTKB_DATA_DIR` | Keep the database, settings, categories, logs, slide thumbnails and temporary media in this folder (Docker: `/data`). The variables above still win |
+| `YTKB_OLLAMA_URL` | Ollama address to use while the saved one is the default `http://localhost:11434` (Docker: `http://host.docker.internal:11434`) |
+| `YTKB_UID`, `YTKB_GID` | Docker only: the user the container runs as (default 1000), so it can write to `./data` |
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | API keys, used when no key is saved in Settings → Cloud AI |
 | `YTKB_MODEL` | Model the setup script downloads instead of the recommendation |
 
 ### Command-line reference
 
 ```text
-dashboard.py   [--port 8765] [--no-open] [--print-url]   # --print-url: show the access link and exit
+dashboard.py   [--port 8765] [--host 127.0.0.1] [--no-open] [--print-url]   # --print-url: show the access link and exit
+               # --host 0.0.0.0 only inside Docker (the published port stays on 127.0.0.1)
 main.py        [URL|ID|WL] [--browser auto|firefox|chrome|chromium|brave|edge] [--cookies FILE]
                [--ai] [--list] [--details [N]]
-local_setup.py [--pull MODEL] [--use MODEL] [--recommended] [--embed-model] [--use-embed MODEL]
+local_setup.py [--pull MODEL] [--use MODEL] [--recommended] [--embed-model] [--use-embed MODEL] [--gpu-vendor]
+scripts/service.sh {install|uninstall|status|open|restart|update} [--port N]
 main.py        --embed          # update the meaning-based search index
 ```
 
@@ -336,8 +391,11 @@ main.py        --embed          # update the meaning-based search index
 ## 8. Updating
 
 ```bash
+bash scripts/service.sh update             # git pull, refresh dependencies, restart the service
+# or by hand:
 git pull                                   # if you got YourTube with git
 bash scripts/setup.sh                      # refresh dependencies
+bash scripts/service.sh restart            # if you use the background service (Windows: scripts\service.ps1 -Restart)
 .venv/bin/python -m pip install -U yt-dlp  # when syncs suddenly fail: YouTube changed something
 # venv made --without-pip ("No module named pip"): python3 -m pip --python .venv/bin/python install -U yt-dlp
 ```
@@ -362,8 +420,10 @@ When something fails, the task's card shows the cause and a fix. **Try again** r
 | Local model very slow | The model doesn't fit in GPU memory. Pick a smaller one, or lower the context size. |
 | AI returns errors | Settings → Cloud AI or Local AI → **Save and test** shows the exact error. |
 | `pip install` says "externally-managed-environment" | Don't install into the system Python. Run `bash scripts/setup.sh`, or `python3 -m pip --python .venv/bin/python install -r requirements.txt` |
-| Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai` |
-| Local transcription very slow | It runs on the CPU: check the GPU line in Settings → Local AI; with an NVIDIA GPU, reinstall `requirements-local.txt` for the CUDA libraries. |
+| Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai`, or `.venv/bin/python -m pip install -r requirements-local.txt` |
+| Local transcription very slow | It runs on the CPU: check the GPU line in Settings → Local AI. NVIDIA: `.venv/bin/python -m pip install -r requirements-nvidia.txt`. AMD: see **Graphics cards** (section 5). Intel GPUs and older laptop graphics always use the CPU. |
+| Docker: the dashboard can't reach Ollama | Ollama must run on the computer itself. Docker Desktop (Windows, macOS) reaches it as is. On Linux Ollama listens only on 127.0.0.1, which containers can't reach: set `OLLAMA_HOST=172.17.0.1` (Docker's bridge address, see `ip addr show docker0`) in Ollama's service with `sudo systemctl edit ollama`. Avoid `0.0.0.0` unless a firewall blocks port 11434, since that opens Ollama to your network. |
+| Docker: "Permission denied" under `/data` | Create `./data` before the first start, and start with `YTKB_UID=$(id -u) YTKB_GID=$(id -g) docker compose up -d`. |
 | Answers say "keywords only" | The meaning index is off: download the embedding model (`ollama pull qwen3-embedding:0.6b`), then run `.venv/bin/python main.py --embed`. |
 | An answer misses something you know is in a video | Fetch details (or transcribe) for that video first. Try other words: the small local model links meanings well but not always (it misses "offline" for "running locally"). |
 | The dashboard says "Open your dashboard link" | Open the link printed when it started, or get it with `.venv/bin/python dashboard.py --print-url`. Each browser needs the link once. |
@@ -377,7 +437,7 @@ When something fails, the task's card shows the cause and a fix. **Try again** r
 - **YouTube:** read-only. Playlists are read with your browser sign-in, and per-video details are read **without** it.
 - **Cookies:** read locally and sent only to youtube.com; never stored or logged by YourTube.
 - **AI:** only titles, descriptions and transcripts are sent, and only to the AI you choose. A question sends the question and about 8 matching excerpts. With **Local only**, nothing leaves your computer.
-- **Dashboard:** listens only on 127.0.0.1 and refuses requests from other websites. It has no password, so on a shared computer other local users could open it.
+- **Dashboard:** listens only on 127.0.0.1 (in Docker the port is published on 127.0.0.1 only) and refuses requests from other websites. It has no password, so on a shared computer other local users could open it.
 - **API keys:** stored in `settings.json`, which is created readable only by you. On NTFS/FAT drives that protection doesn't apply, so prefer environment variables there.
 
 ## 11. Uninstall

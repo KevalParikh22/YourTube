@@ -1,0 +1,15 @@
+services:
+  yourtube:
+    build: .
+    restart: unless-stopped
+    # Run as the owner of ./data so the container can write to it (Linux bind mounts keep host ownership)
+    user: "${YTKB_UID:-1000}:${YTKB_GID:-1000}"
+    ports:
+      # Removing 127.0.0.1: exposes the dashboard to the local network.
+      - "127.0.0.1:8765:8765"
+    volumes:
+      - "./data:/data"
+    environment:
+      YTKB_OLLAMA_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

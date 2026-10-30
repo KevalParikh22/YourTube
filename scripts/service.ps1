@@ -3,6 +3,7 @@
 #   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 -Uninstall
 #   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 -Status
 #   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 -Open
+#   powershell -ExecutionPolicy Bypass -File scripts\service.ps1 -Restart
 param(
     [Parameter(Position=0)]
     [string]$Action,
@@ -10,6 +11,7 @@ param(
     [switch]$Uninstall,
     [switch]$Status,
     [switch]$Open,
+    [switch]$Restart,
     [int]$Port = 8765
 )
 $ErrorActionPreference = "Stop"
@@ -55,7 +57,16 @@ elseif ($Open -or $Action -match '^(?i)open$') {
         Start-Process $url.Trim()
     }
 }
+elseif ($Restart -or $Action -match '^(?i)restart$') {
+    if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+        Write-Warning "YourTube service is not installed. Run scripts\service.ps1 -Install"
+        exit 1
+    }
+    Stop-ScheduledTask -TaskName $taskName
+    Start-ScheduledTask -TaskName $taskName
+    Write-Host "YourTube dashboard restarted."
+}
 else {
-    Write-Host "Usage: powershell -ExecutionPolicy Bypass -File scripts\service.ps1 {-Install|-Uninstall|-Status|-Open} [-Port 8765]"
+    Write-Host "Usage: powershell -ExecutionPolicy Bypass -File scripts\service.ps1 {-Install|-Uninstall|-Status|-Open|-Restart} [-Port 8765]"
     exit 2
 }

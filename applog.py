@@ -5,7 +5,8 @@ import re
 from logging.handlers import RotatingFileHandler
 
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_DIR = os.environ.get("YTKB_LOG_DIR") or os.path.join(ROOT_DIR, "logs")
+_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or ROOT_DIR
+LOG_DIR = os.environ.get("YTKB_LOG_DIR") or os.path.join(_DATA_DIR, "logs")
 LOG_FILE = os.path.join(LOG_DIR, "yourtube.log")
 _secrets = set()
 

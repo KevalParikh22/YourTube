@@ -18,7 +18,8 @@ import urllib.request
 import urllib.error
 from typing import Any, Callable, Dict, List, Optional
 
-SETTINGS_PATH = os.environ.get("YTKB_SETTINGS") or os.path.join(os.path.dirname(__file__), "settings.json")
+_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(__file__)
+SETTINGS_PATH = os.environ.get("YTKB_SETTINGS") or os.path.join(_DATA_DIR, "settings.json")
 
 PROVIDERS: Dict[str, Dict[str, Any]] = {
     "anthropic": {
@@ -117,6 +118,9 @@ def load_settings(path: str = SETTINGS_PATH) -> Dict[str, Any]:
     # Older settings pointed Ollama at its OpenAI-compatible /v1 path
     ollama = s["providers"]["ollama"]
     ollama["base_url"] = ollama_base(ollama.get("base_url"))
+    env_url = os.environ.get("YTKB_OLLAMA_URL")
+    if env_url and ollama["base_url"] in ("http://localhost:11434", "http://127.0.0.1:11434"):
+        ollama["base_url"] = ollama_base(env_url)
     return s
 
 # Settings each library has its own copy of (separate libraries). Library 1 keeps them at the top of
