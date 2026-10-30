@@ -278,15 +278,13 @@
   .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; }
   .check input { margin: 3px 0 0; accent-color: var(--ink); }
 
-  /* ---------- triage ---------- */
+  /* ---------- rating and search results ---------- */
   .chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
   .chip { all: unset; cursor: pointer; height: 30px; padding: 0 12px; border-radius: 15px; border: 1px solid var(--line-strong); font-size: 13px; font-weight: 500; color: var(--ink-2); display: inline-flex; align-items: center; gap: 6px; }
   .chip:hover { border-color: var(--ink-3); color: var(--ink); }
   .chip.on { background: var(--ink); border-color: var(--ink); color: var(--bg); }
   .chip .c { font-variant-numeric: tabular-nums; opacity: .7; }
-  .tri-bar { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 28px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-  .tri-row { display: grid; grid-template-columns: 168px minmax(0, 1fr) auto; gap: 18px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
-  .tri-row.is-skipped .tri-meta { color: var(--ink-2); }
+  .verdict-bar { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
   .tri-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
   .tri-title { all: unset; cursor: pointer; font-weight: 600; font-size: 15px; line-height: 1.35; display: block; margin-top: 6px; }
   .tri-title:hover { text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--ink-3); }
@@ -295,7 +293,6 @@
   .ranges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
   .range { all: unset; cursor: pointer; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--skim); background: var(--skim-bg); border-radius: 4px; padding: 2px 7px; }
   .range:hover { text-decoration: underline; }
-  .tri-acts { display: flex; flex-direction: column; gap: 6px; align-items: stretch; min-width: 108px; }
   .score-big { font-size: 30px; line-height: 1; font-variant-numeric: tabular-nums; }
   .rate-box { border-radius: 8px; padding: 14px 16px; background: var(--sunken); }
   .score-factors { display: grid; gap: 9px; margin-top: 12px; }
@@ -515,8 +512,6 @@
     .prop-row { grid-template-columns: 24px minmax(0, 1fr); }
     .prop-row > :last-child { grid-column: 2; }
     .ai-grid { grid-template-columns: minmax(0, 1fr); }
-    .tri-row { grid-template-columns: 120px minmax(0, 1fr); gap: 14px; }
-    .tri-acts { grid-column: 1 / -1; flex-direction: row; flex-wrap: wrap; min-width: 0; }
     .route { grid-template-columns: minmax(0, 1fr); gap: 4px; }
     .ask { grid-template-columns: minmax(0, 1fr); gap: 20px; }
     .ask-box .btn { padding: 0 14px; }
@@ -599,7 +594,7 @@ const S = {
   session: { cat: '', mins: 45, order: 'order' },
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
-  triage: { verdict: 'all', cat: '', undo: [], limit: 50 },
+  statusUndo: [],
   drawer: null, polling: false, detailCache: {}, summaryCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
@@ -676,6 +671,7 @@ function orderKey(v, src) {
 function sortList(list, sort, src) {
   const by = {
     order: (a, b) => orderKey(a, src) - orderKey(b, src),
+    score: (a, b) => (b.rating?.score ?? -1) - (a.rating?.score ?? -1) || orderKey(a, src) - orderKey(b, src),
     shortest: (a, b) => (a.duration_seconds || 1e9) - (b.duration_seconds || 1e9),
     longest: (a, b) => (b.duration_seconds || 0) - (a.duration_seconds || 0),
     title: (a, b) => a.title.localeCompare(b.title),
@@ -713,10 +709,6 @@ const thumb = v => `<img class="thumb" src="https://i.ytimg.com/vi/${encodeURICo
 const badge = v => v.rating
   ? `<span class="vb vb-${v.rating.verdict}"><b>${v.rating.score.toFixed(1)}</b>${VERDICT_LABEL[v.rating.verdict]}</span>`
   : '<span class="vb vb-none">Not rated</span>';
-const skimSeconds = v => (v.rating?.skim || []).reduce((a, r) => a + (r.end - r.start), 0) || (v.duration_seconds || 0) / 2;
-// Time to get through a list if you follow the ratings: watch fully, skim the ranges, skip the rest; unrated count fully
-const followSeconds = list => list.reduce((a, v) => a + (isDone(v) ? 0 : !v.rating ? v.duration_seconds || 0
-  : v.rating.verdict === 'watch' ? v.duration_seconds || 0 : v.rating.verdict === 'skim' ? skimSeconds(v) : 0), 0);
 const wantsTranscript = v => S.data.transcripts[v.category] !== false;
 const needsDetails = v => wantsTranscript(v) && (!v.details || (v.details.status === 'failed' && v.details.tries < 3));
 const clock = sec => { sec = Math.floor(sec || 0); const h = Math.floor(sec / 3600), m = Math.floor(sec % 3600 / 60), x = String(sec % 60).padStart(2, '0'); return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`; };
@@ -770,7 +762,6 @@ function renderView() {
     if (!S.knowledge.list && !S.knowledge.loadingList) loadKnowledgeList();
   }
   else if (r === 'plan') v.innerHTML = videos().length ? viewPlan() : emptyState();
-  else if (r === 'triage') { v.innerHTML = videos().length ? viewTriage() : emptyState(); updateJob(); }
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
   else if (r === 'settings' || r.startsWith('settings/')) {
@@ -874,7 +865,7 @@ function viewLibrary() {
         <input type="search" id="q" placeholder="Titles, channels and notes" value="${esc(S.view.q)}" aria-label="Search">
         <label class="field-label" for="v-sort">Sort</label>
         <select id="v-sort" data-change="v-sort" aria-label="Sort">
-          ${[['order', 'Playlist order'], ['shortest', 'Shortest first'], ['longest', 'Longest first'], ['title', 'Title'], ['channel', 'Channel']]
+          ${[['order', 'Playlist order'], ['score', 'AI score'], ['shortest', 'Shortest first'], ['longest', 'Longest first'], ['title', 'Title'], ['channel', 'Channel']]
             .map(([k, l]) => `<option value="${k}" ${S.view.sort === k ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
       </div>
@@ -885,12 +876,15 @@ function viewLibrary() {
 function renderList() {
   const box = $('#list');
   if (!box) return;
-  const { status, src, cat, q, sort } = S.view;
+  const { status, src, cat, q, sort, verdict = '' } = S.view;
   let list = videos().filter(v => (!src || srcEntry(v, src)) && (!cat || v.category === cat) && statusFilter(v, status, src));
   if (q) {
     const needle = q.toLowerCase();
     list = list.filter(v => `${v.title} ${v.channel || ''} ${v.notes || ''}`.toLowerCase().includes(needle));
   }
+  const scoped = list;
+  if (verdict === 'unrated') list = list.filter(v => !v.rating);
+  else if (verdict) list = list.filter(v => v.rating?.verdict === verdict);
   list = sortList(list, sort, src);
   S.visible = list;
   const st = stats(list);
@@ -898,6 +892,14 @@ function renderList() {
     ${q.trim().length >= 3 ? `<p class="hint" style="margin:10px 0 0"><a href="#/search?q=${encodeURIComponent(q.trim())}">Search inside transcripts, chapters and summaries for “${esc(q.trim())}” →</a></p>` : ''}
     ${S.sel.size ? selBar() : status === 'suggested' ? sugSum(list) : `<div class="list-sum"><span>Showing ${Math.min(S.limit, list.length)} of ${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
       <span class="play-links">${list.length ? exportMenu() : ''}${playLinks(list)}</span></div>`}
+    ${scoped.some(v => v.rating || (!v.rating && !isDone(v))) ? `<div class="verdict-bar">${scoped.some(v => v.rating) ? `<div class="chips">${[['', 'All'], ['watch', 'Watch'], ['skim', 'Skim'], ['skip', 'Skip'], ['unrated', 'Not rated']].map(([k, label]) => {
+      const count = k === '' ? scoped.length : k === 'unrated' ? scoped.filter(v => !v.rating).length : scoped.filter(v => v.rating?.verdict === k).length;
+      return `<button class="chip ${verdict === k ? 'on' : ''}" data-act="v-verdict" data-v="${k}">${label}<span class="c">${count}</span></button>`;
+    }).join('')}</div>` : '<span></span>'}<div class="chips">
+      ${scoped.filter(v => !v.rating && !isDone(v)).length ? `<button class="btn btn-sm" data-act="rate-filtered" data-ids="${esc(scoped.filter(v => !v.rating && !isDone(v)).map(v => v.video_id).join(','))}" data-job-btn>Rate ${scoped.filter(v => !v.rating && !isDone(v)).length} unrated</button>` : ''}
+      ${scoped.some(v => v.status === 'unwatched' && v.rating?.verdict === 'skip') ? `<button class="btn btn-sm" data-act="accept-skips" data-ids="${esc(scoped.filter(v => v.status === 'unwatched' && v.rating?.verdict === 'skip').map(v => v.video_id).join(','))}">Skip the ${plural(scoped.filter(v => v.status === 'unwatched' && v.rating?.verdict === 'skip').length, 'AI skip')}</button>` : ''}
+    </div></div>` : ''}
+    ${S.statusUndo.length ? '<div class="chips" style="margin-top:10px"><button class="btn-text" data-act="status-undo">Undo last status change</button></div>' : ''}
     ${list.length ? `<ul class="rows ${S.sel.size ? 'selecting' : ''}">${list.slice(0, S.limit).map(row).join('')}</ul>`
       : `<div class="empty">Nothing here${q ? ' matches your search' : ''}.</div>`}
     ${list.length > S.limit ? `<div class="more"><button class="btn" data-act="more">Show ${Math.min(50, list.length - S.limit)} more</button></div>` : ''}`;
@@ -1104,80 +1106,13 @@ function buildSession() {
   return { picked, pool: pool.length };
 }
 
-/* ---------------- triage ---------------- */
-function triageList() {
-  const t = S.triage;
-  // Watched videos are out of triage; skipped ones stay visible so a skip can be undone
-  let list = videos().filter(v => v.status !== 'completed' && (!t.cat || v.category === t.cat));
-  if (t.verdict === 'unrated') list = list.filter(v => !v.rating);
-  else if (t.verdict !== 'all') list = list.filter(v => v.rating?.verdict === t.verdict);
-  return list.sort((a, b) => (b.rating?.score ?? -1) - (a.rating?.score ?? -1) || orderKey(a) - orderKey(b));
-}
-function viewTriage() {
-  const t = S.triage, ai = S.data.ai, running = !!S.data.job.running;
-  const scope = videos().filter(v => v.status !== 'completed' && (!t.cat || v.category === t.cat));
-  const open = scope.filter(v => !isDone(v));
-  const count = k => k === 'all' ? scope.length : k === 'unrated' ? scope.filter(v => !v.rating).length : scope.filter(v => v.rating?.verdict === k).length;
-  const unrated = open.filter(v => !v.rating).length;
-  const skippable = open.filter(v => v.rating?.verdict === 'skip' && v.status === 'unwatched');
-  const all = stats(open).rem, follow = followSeconds(open);
-  const list = triageList();
-  const cats = categoryNames().filter(c => scope.some(v => v.category === c));
-  return `
-  <section>
-    <div class="eyebrow">Triage${t.cat ? ` · ${esc(t.cat)}` : ''}</div>
-    <h1 class="display num">${fmt(follow / S.speed)}<em>if you follow the ratings, instead of ${fmt(all / S.speed)} for everything at ${sx(S.speed)}</em></h1>
-    <p class="lede">${open.length - unrated} of ${plural(open.length, 'unwatched video')} rated. Nothing changes until you act. ${tip('Ratings weigh depth, fit with your interests, time against value and freshness.')}</p>
-    ${!ai.ready_for.rate ? `<div class="banner"><span>Choose an AI for ratings to get a Watch / Skim / Skip verdict for every video.</span><a class="btn btn-sm" href="#/settings/routing">Set up AI</a></div>`
-      : unrated ? `<div class="banner"><span>${plural(unrated, 'video')} not rated yet${open.filter(v => !v.rating && v.details?.status !== 'done').length ? '. Videos without transcripts are rated from title and description only' : ''}.</span>
-        <button class="btn btn-dark btn-sm" data-act="rate-batch" data-job-btn>Rate ${plural(unrated, 'video')}</button></div>` : ''}
-    <div id="job"></div>
-  </section>
-  <div class="tri-bar">
-    <div class="chips">
-      ${[['all', 'All'], ['watch', 'Watch'], ['skim', 'Skim'], ['skip', 'Skip'], ['unrated', 'Not rated']].map(([k, l]) =>
-        `<button class="chip ${t.verdict === k ? 'on' : ''}" data-act="tri-verdict" data-v="${k}">${l}<span class="c">${count(k)}</span></button>`).join('')}
-      <label class="field-label" for="t-cat">Category</label><select id="t-cat" data-change="t-cat" aria-label="Category" style="height:30px"><option value="">All categories</option>${cats.map(c => `<option value="${esc(c)}" ${t.cat === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
-    </div>
-    <div class="chips">
-      ${t.undo.length ? `<button class="btn-text" data-act="tri-undo">Undo</button>` : ''}
-      ${S.data.ai.ready_for.summarize && list.length ? `<button class="btn-text" data-act="summarize-triage" data-job-btn>Summarise ${plural(list.length, 'video')}</button>` : ''}
-      ${skippable.length ? `<button class="btn btn-sm" data-act="accept-skips" data-ids="${esc(skippable.map(v => v.video_id).join(','))}">Accept ${plural(skippable.length, 'skip')}</button>` : ''}
-    </div>
-  </div>
-  ${list.length ? list.slice(0, t.limit).map(triRow).join('') : `<div class="empty">Nothing here.</div>`}
-  ${list.length > t.limit ? `<div class="more"><button class="btn" data-act="tri-more">Show ${Math.min(50, list.length - t.limit)} more</button></div>` : ''}`;
-}
-function triRow(v) {
-  const r = v.rating, d = v.duration_seconds || 0, skipped = v.status === 'skipped';
-  const timeText = !d ? 'length unknown' : r?.verdict === 'skim' ? `skim ${fmt(skimSeconds(v) / S.speed)} of ${fmt(d / S.speed)}` : `${fmt(d / S.speed)} at ${sx(S.speed)}`;
-  const firstAt = r?.verdict === 'skim' && r.skim.length ? r.skim[0].start : 0;
-  return `<div class="tri-row ${skipped ? 'is-skipped' : ''}">
-    <button class="thumb-btn" data-act="open" data-id="${esc(v.video_id)}" tabindex="-1" aria-hidden="true">${thumb(v)}</button>
-    <div style="min-width:0">
-      <div class="tri-head">${badge(v)}${skipped ? '<span class="vb vb-skip">Skipped</span>' : v.status === 'in_progress' ? '<span class="vb vb-none">In progress</span>' : ''}${r?.basis === 'metadata' ? '<span class="faint" style="font-size:12px">from title only</span>' : ''}</div>
-      <button class="tri-title" data-act="open" data-id="${esc(v.video_id)}">${esc(v.title)}</button>
-      <div class="tri-meta">${esc(v.channel || 'Unknown channel')} · <span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span> · ${timeText}</div>
-      ${r ? `<button class="btn-text" style="padding:0;height:auto;font-size:12px" data-act="open-why" data-id="${esc(v.video_id)}">Why?</button>${r.calc && Object.keys(r.breakdown || {}).length ? '' : `<span class="faint" style="font-size:12px"> · Rate again for a score breakdown</span>`}` : ''}
-      ${r?.reason ? `<div class="tri-reason">${esc(r.reason)}</div>` : ''}
-      ${r?.skim?.length ? `<div class="ranges">${r.skim.map(x => `<button class="range" data-act="play-at" data-id="${esc(v.video_id)}" data-t="${x.start}" title="${esc(x.why)}">${clock(x.start)}–${clock(x.end)}</button>`).join('')}</div>` : ''}
-    </div>
-    <div class="tri-acts">
-      ${skipped ? `<button class="btn btn-sm" data-act="tri-set" data-id="${esc(v.video_id)}" data-status="unwatched">Undo skip</button>`
-        : `${r?.verdict === 'skip' ? `<button class="btn btn-dark btn-sm" data-act="tri-set" data-id="${esc(v.video_id)}" data-status="skipped">Skip it</button>` : ''}
-           <button class="btn ${r && r.verdict !== 'skip' ? 'btn-dark ' : ''}btn-sm" data-act="play-at" data-id="${esc(v.video_id)}" data-t="${firstAt}">▶ ${r?.verdict === 'skim' && r.skim.length ? 'Skim' : 'Watch'}</button>
-           ${r?.verdict !== 'skip' ? `<button class="btn btn-sm" data-act="tri-set" data-id="${esc(v.video_id)}" data-status="skipped">Skip</button>` : ''}
-           ${!r && S.data.ai.ready_for.rate ? `<button class="btn-text" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate</button>` : ''}`}
-    </div>
-  </div>`;
-}
 async function setStatuses(ids, status) {
   const prev = ids.map(id => [id, byId(id)?.status]).filter(([, st]) => st);
-  S.triage.undo.push(prev);
+  S.statusUndo.push(prev);
   await update(ids, { status });
 }
-async function triageUndo() {
-  const last = S.triage.undo.pop();
+async function statusUndo() {
+  const last = S.statusUndo.pop();
   if (!last) return;
   const by = {};
   for (const [id, st] of last) (by[st] = by[st] || []).push(id);
@@ -1281,7 +1216,7 @@ function viewLibraries() {
   const libs = S.data.libraries;
   return `<section class="section card">
     <h2 class="h">Libraries</h2>
-    <p class="note">Libraries ${tip('Separate areas such as Tech, Health and Personal. Each has its own playlists, categories, rating interests, time left, triage and answers. Switch libraries at the top.')}</p>
+    <p class="note">Libraries ${tip('Separate areas such as Tech, Health and Personal. Each has its own playlists, categories, rating interests, time left and answers. Switch libraries at the top.')}</p>
     ${libs.map(l => `<div class="prov"><div style="display:flex;gap:8px;align-items:center;min-width:0">
         <input type="text" value="${esc(l.name)}" data-change="lib-rename" data-lib="${l.id}" aria-label="Library name" style="max-width:220px">
         <span class="faint" style="font-size:12.5px">${plural(l.playlists, 'playlist')}</span></div>
@@ -1419,11 +1354,10 @@ function updateJob() {
   const box = $('#job'), job = S.data.job;
   if (!box) return;
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
-    : route() === 'triage' ? job.kind === 'rate' && (job.running || !job.ok)
     : route().startsWith('settings') ? ['pull', 'embed'].includes(job.kind)
     : route() === 'knowledge' ? job.kind === 'knowledge'
     : ['sync', 'details', 'asr', 'visual'].includes(job.kind) || !job.kind;
-  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route() === 'triage' ? ['rate'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
+  const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
   if (!mine || (!job.log && !job.running) || (job.dismissed && !job.running)) { box.innerHTML = waitLine; return; }
@@ -2743,7 +2677,6 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'more': S.limit += 50; renderList(); break;
-    case 'tri-more': S.triage.limit += 50; refresh(); break;
     case 'search-more': S.search.limit += 50; renderSearchResults(); break;
     case 'seek': seek(+el.dataset.t); break;
     case 'ask-go': runAsk(); break;
@@ -2794,9 +2727,8 @@ document.addEventListener('click', async e => {
       } catch (err) { toast(err.message, true); }
       break;
     case 'export-notes': el.closest('details')?.removeAttribute('open'); exportNotes(el.dataset.scope === 'sel' ? [...S.sel] : S.visible.map(v => v.video_id)); break;
-    case 'tri-verdict': S.triage.verdict = el.dataset.v; S.triage.limit = 50; refresh(); break;
+    case 'v-verdict': S.view.verdict = el.dataset.v; S.limit = 150; refresh(); break;
     case 's-kind': S.search.kind = el.dataset.v; S.search.res = null; S.search.limit = 50; refresh(); runSearch(); break;
-    case 'tri-set': setStatuses([id], el.dataset.status); break;
     case 'accept-skips': {
       const ids = el.dataset.ids.split(',').filter(Boolean);
       await setStatuses(ids, 'skipped'); toast(`${plural(ids.length, 'video')} skipped. Undo is above the list.`);
@@ -2804,10 +2736,10 @@ document.addEventListener('click', async e => {
     }
     case 'play-at': playAt(id, +el.dataset.t); break;
     case 'rate-batch': startRate(null); break;
+    case 'rate-filtered': startRate(el.dataset.ids.split(',').filter(Boolean)); break;
     case 'rate-one': startRate([id]); break;
     case 'summarize-one': startSummary([id]); break;
     case 'summarize-sel': startSummary([...S.sel]); break;
-    case 'summarize-triage': startSummary(triageList().map(v => v.video_id)); break;
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
     case 'details-fetch': case 'details-one': {
@@ -2858,7 +2790,7 @@ document.addEventListener('click', async e => {
       catch (err) { toast(err.message, true); }
       break;
     }
-    case 'tri-undo': triageUndo(); break;
+    case 'status-undo': statusUndo(); break;
     case 'session-done': {
       const ids = el.dataset.ids.split(',').filter(Boolean);
       if (confirm(`Mark ${plural(ids.length, 'video')} as watched?`)) { await update(ids, { status: 'completed' }); toast('Session marked watched'); }
@@ -3088,7 +3020,6 @@ document.addEventListener('change', async e => {
     case 'ask-cat': S.ask.cat = el.value; break;
     case 'ask-src': S.ask.src = el.value; break;
     case 'ask-done': S.ask.done = el.checked; break;
-    case 't-cat': S.triage.cat = el.value; S.triage.limit = 50; refresh(); break;
     case 'i-access': S.ingest.access = el.value; store.set('ytkb.access', el.value); refresh(); break;
     case 'i-lib': S.ingest.lib = +el.value; break;
     case 'pl-lib':
