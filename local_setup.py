@@ -6,7 +6,10 @@ Everything here only reads local state (binaries, /proc, nvidia-smi, the local O
 server) except `pull_model`, which asks the local Ollama to download a model.
 """
 import importlib.util
+import glob
 import json
+import os
+import platform
 import re
 import shutil
 import subprocess
@@ -38,15 +41,96 @@ def _run(cmd: List[str], timeout: int = 5) -> Optional[str]:
         return None
     return out.stdout.strip() if out.returncode == 0 else None
 
-def gpu() -> Dict[str, Any]:
-    if not shutil.which("nvidia-smi"):
-        return {"ok": False, "detail": "No NVIDIA GPU found. Local models run on the CPU (slower)."}
-    out = _run(["nvidia-smi", "--query-gpu=name,memory.total,memory.used", "--format=csv,noheader,nounits"])
-    if not out:
-        return {"ok": False, "detail": "nvidia-smi is installed but did not answer."}
-    name, total, used = [x.strip() for x in out.splitlines()[0].split(",")]
-    return {"ok": True, "name": name, "vram_mb": int(float(total)), "used_mb": int(float(used)),
-            "detail": f"{name}, {round(int(float(total)) / 1024, 1)} GB"}
+def gpu(system: Optional[str] = None, drm: str = "/sys/class/drm") -> Dict[str, Any]:
+    system = system or platform.system()
+    if shutil.which("nvidia-smi"):
+        out = _run(["nvidia-smi", "--query-gpu=name,memory.total,memory.used", "--format=csv,noheader,nounits"])
+        try:
+            name, total, used = [x.strip() for x in out.splitlines()[0].split(",")]
+            total_mb, used_mb = int(float(total)), int(float(used))
+            return {"ok": True, "vendor": "nvidia", "ollama_gpu": True, "name": name,
+                    "vram_mb": total_mb, "used_mb": used_mb,
+                    "detail": f"{name}, {round(total_mb / 1024, 1)} GB; Ollama will use this GPU."}
+        except (AttributeError, IndexError, ValueError):
+            pass
+
+    if system == "Linux":
+        cards = []
+        for device in glob.glob(os.path.join(drm, "card*", "device")):
+            try:
+                with open(os.path.join(device, "vendor")) as f:
+                    vendor_id = f.read().strip().lower()
+                if vendor_id == "0x1002":
+                    with open(os.path.join(device, "mem_info_vram_total")) as f:
+                        total_mb = int(f.read().strip()) // (1024 * 1024)
+                    try:
+                        with open(os.path.join(device, "mem_info_vram_used")) as f:
+                            used_mb = int(f.read().strip()) // (1024 * 1024)
+                    except (OSError, ValueError):
+                        used_mb = None
+                    try:
+                        with open(os.path.join(device, "product_name")) as f:
+                            name = f.read().strip() or "AMD Radeon GPU"
+                    except OSError:
+                        name = "AMD Radeon GPU"
+                    cards.append({"ok": True, "vendor": "amd", "ollama_gpu": True, "name": name,
+                                  "vram_mb": total_mb, "used_mb": used_mb,
+                                  "detail": f"{name}, {round(total_mb / 1024, 1)} GB; Ollama will use this GPU."})
+                elif vendor_id == "0x8086":
+                    cards.append({"ok": True, "vendor": "intel", "ollama_gpu": False, "name": "Intel graphics",
+                                  "vram_mb": 0,
+                                  "detail": "Intel graphics found. Ollama may not use this GPU yet; models are sized for the CPU."})
+            except (OSError, ValueError):
+                continue
+        if cards:
+            return next((card for card in cards if card["vendor"] == "amd"), cards[0])
+
+    if system == "Windows":
+        out = _run(["powershell", "-NoProfile", "-Command",
+                    "Get-CimInstance Win32_VideoController | Select-Object Name,AdapterRAM | ConvertTo-Json"], timeout=10)
+        try:
+            controllers = json.loads(out)
+            if isinstance(controllers, dict):
+                controllers = [controllers]
+            if isinstance(controllers, list):
+                cards = []
+                for controller in controllers:
+                    name = str(controller.get("Name") or "")
+                    lowered = name.lower()
+                    vendor = ("nvidia" if "nvidia" in lowered else "amd" if "amd" in lowered or "radeon" in lowered
+                              else "intel" if "intel" in lowered else None)
+                    if vendor == "amd":
+                        total_mb = int(controller.get("AdapterRAM") or 0) // (1024 * 1024)
+                        cards.append({"ok": True, "vendor": vendor, "ollama_gpu": True, "name": name,
+                                      "vram_mb": total_mb, "detail": f"{name}, at least {total_mb} MB; Ollama will use this GPU."})
+                    elif vendor == "intel":
+                        cards.append({"ok": True, "vendor": vendor, "ollama_gpu": False, "name": name,
+                                      "vram_mb": 0,
+                                      "detail": f"{name} found. Ollama may not use this GPU yet; models are sized for the CPU."})
+                    elif vendor == "nvidia":
+                        total_mb = int(controller.get("AdapterRAM") or 0) // (1024 * 1024)
+                        cards.append({"ok": True, "vendor": vendor, "ollama_gpu": True, "name": name,
+                                      "vram_mb": total_mb, "detail": f"{name}, {total_mb} MB; Ollama will use this GPU."})
+                if cards:
+                    return next((card for card in cards if card["vendor"] == "amd"),
+                                next((card for card in cards if card["vendor"] == "nvidia"), cards[0]))
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+    if system == "Darwin" and platform.machine() == "arm64":
+        name = _run(["sysctl", "-n", "machdep.cpu.brand_string"])
+        size = _run(["sysctl", "-n", "hw.memsize"])
+        try:
+            total_mb = int(size) // (1024 * 1024)
+            usable_mb = int(total_mb * 0.65)
+            return {"ok": True, "vendor": "apple", "ollama_gpu": True, "name": name or "Apple Silicon",
+                    "vram_mb": usable_mb,
+                    "detail": f"{name or 'Apple Silicon'}, {round(total_mb / 1024, 1)} GB shared memory (about {round(usable_mb / 1024, 1)} GB usable for models); Ollama will use this GPU."}
+        except (TypeError, ValueError):
+            pass
+
+    return {"ok": False, "vendor": None, "ollama_gpu": False,
+            "detail": "No supported GPU found. Local models run on the CPU (slower)."}
 
 def memory() -> Dict[str, Any]:
     info = {}
@@ -109,7 +193,7 @@ def status() -> Dict[str, Any]:
     g = gpu()
     o = ollama(settings["providers"]["ollama"].get("base_url"))
     return {"gpu": g, "memory": memory(), "ffmpeg": ffmpeg(), "ollama": o, "whisper": whisper(),
-            "recommended": recommend(g.get("vram_mb", 0) if g["ok"] else 0), "embed": embed_status(settings, o)}
+            "recommended": recommend(g.get("vram_mb", 0) if g["ok"] and g.get("ollama_gpu") else 0), "embed": embed_status(settings, o)}
 
 
 def embed_status(settings: Dict[str, Any], ollama_state: Dict[str, Any]) -> Dict[str, Any]:
