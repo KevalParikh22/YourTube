@@ -43,8 +43,17 @@ def _run(cmd: List[str], timeout: int = 5) -> Optional[str]:
 
 def _best_card(cards: List[Dict[str, Any]]) -> Dict[str, Any]:
     # An AMD APU also reports a small VRAM carve-out, so a discrete card next to it must win on memory
-    usable = [c for c in cards if c["ollama_gpu"]]
-    return max(usable, key=lambda c: c["vram_mb"]) if usable else cards[0]
+    pool = [c for c in cards if c["ollama_gpu"]] or cards
+    return max(pool, key=lambda c: c["vram_mb"])
+
+def _amd_card(name: str, total_mb: int, used_mb: Optional[int] = None, at_least: bool = False) -> Dict[str, Any]:
+    size = f"at least {total_mb} MB" if at_least else f"{round(total_mb / 1024, 1)} GB"
+    # Older APUs (e.g. Vega graphics in Ryzen 5000 laptops) have a small carve-out and aren't on Ollama's ROCm list
+    if total_mb < min(r["vram_mb"] for r in RECOMMENDED):
+        return {"ok": True, "vendor": "amd", "ollama_gpu": False, "name": name, "vram_mb": total_mb, "used_mb": used_mb,
+                "detail": f"{name}, {size}: too little graphics memory for local models; they run on the CPU."}
+    return {"ok": True, "vendor": "amd", "ollama_gpu": True, "name": name, "vram_mb": total_mb, "used_mb": used_mb,
+            "detail": f"{name}, {size}; Ollama uses it if the card is supported (ROCm or Vulkan)."}
 
 def gpu(system: Optional[str] = None, drm: str = "/sys/class/drm") -> Dict[str, Any]:
     system = system or platform.system()
@@ -78,9 +87,7 @@ def gpu(system: Optional[str] = None, drm: str = "/sys/class/drm") -> Dict[str, 
                             name = f.read().strip() or "AMD Radeon GPU"
                     except OSError:
                         name = "AMD Radeon GPU"
-                    cards.append({"ok": True, "vendor": "amd", "ollama_gpu": True, "name": name,
-                                  "vram_mb": total_mb, "used_mb": used_mb,
-                                  "detail": f"{name}, {round(total_mb / 1024, 1)} GB; Ollama will use this GPU."})
+                    cards.append(_amd_card(name, total_mb, used_mb))
                 elif vendor_id == "0x8086":
                     cards.append({"ok": True, "vendor": "intel", "ollama_gpu": False, "name": "Intel graphics",
                                   "vram_mb": 0,
@@ -105,9 +112,7 @@ def gpu(system: Optional[str] = None, drm: str = "/sys/class/drm") -> Dict[str, 
                     vendor = ("nvidia" if "nvidia" in lowered else "amd" if "amd" in lowered or "radeon" in lowered
                               else "intel" if "intel" in lowered else None)
                     if vendor == "amd":
-                        total_mb = int(controller.get("AdapterRAM") or 0) // (1024 * 1024)
-                        cards.append({"ok": True, "vendor": vendor, "ollama_gpu": True, "name": name,
-                                      "vram_mb": total_mb, "detail": f"{name}, at least {total_mb} MB; Ollama will use this GPU."})
+                        cards.append(_amd_card(name, int(controller.get("AdapterRAM") or 0) // (1024 * 1024), at_least=True))
                     elif vendor == "intel":
                         cards.append({"ok": True, "vendor": vendor, "ollama_gpu": False, "name": name,
                                       "vram_mb": 0,

@@ -151,6 +151,20 @@ class SetupTest(unittest.TestCase):
             with mock.patch("shutil.which", return_value=None):
                 gpu = local_setup.gpu(system="Linux", drm=drm)
         self.assertEqual(gpu["vram_mb"], 16 * 1024)
+        self.assertTrue(gpu["ollama_gpu"])
+
+    def test_gpu_small_amd_apu_runs_models_on_cpu(self):
+        with tempfile.TemporaryDirectory() as drm:
+            device = os.path.join(drm, "card1", "device")
+            os.makedirs(device)
+            with open(os.path.join(device, "vendor"), "w") as f:
+                f.write("0x1002")
+            with open(os.path.join(device, "mem_info_vram_total"), "w") as f:
+                f.write(str(2 * 1024 ** 3))
+            with mock.patch("shutil.which", return_value=None):
+                gpu = local_setup.gpu(system="Linux", drm=drm)
+        self.assertEqual((gpu["vendor"], gpu["ollama_gpu"]), ("amd", False))
+        self.assertIn("run on the CPU", gpu["detail"])
 
     def test_gpu_intel_linux(self):
         with tempfile.TemporaryDirectory() as drm:
