@@ -54,6 +54,10 @@ STATIC = {
     "OFL.txt": (os.path.join(STATIC_DIR, "OFL.txt"), "text/plain"),
     "app.css": (os.path.join(STATIC_DIR, "app.css"), "text/css; charset=utf-8"),
     "app.js": (os.path.join(STATIC_DIR, "app.js"), "text/javascript; charset=utf-8"),
+    # swagger-ui-dist, pinned (web/static/swagger/VERSION.txt), for the /docs/api page
+    "swagger/swagger-ui-bundle.js": (os.path.join(STATIC_DIR, "swagger", "swagger-ui-bundle.js"), "text/javascript; charset=utf-8"),
+    "swagger/swagger-ui.css": (os.path.join(STATIC_DIR, "swagger", "swagger-ui.css"), "text/css; charset=utf-8"),
+    "swagger/LICENSE": (os.path.join(STATIC_DIR, "swagger", "LICENSE"), "text/plain; charset=utf-8"),
 }
 NO_CACHE_STATIC = {"app.css", "app.js"}   # change with every update; read from disk per request like index.html
 FRAMES_DIR = os.path.join(os.environ.get("YTKB_DATA_DIR") or ROOT_DIR, "frames")
@@ -577,6 +581,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error("Not found", 404)
             with open(path, "rb") as f:
                 return self._send(200, f.read(), "image/jpeg", extra_headers={"Cache-Control": "max-age=86400"})
+        if url.path == "/docs/api":
+            with open(os.path.join(STATIC_DIR, "api.html"), "rb") as f:
+                return self._send(200, f.read(), "text/html; charset=utf-8")
         if url.path.startswith("/download/") or url.path == "/docs/setup":
             name = "SETUP.md" if url.path == "/docs/setup" else url.path[len("/download/"):]
             if name not in DOWNLOADS:

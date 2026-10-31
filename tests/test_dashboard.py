@@ -414,7 +414,8 @@ class DashboardTest(unittest.TestCase):
     def test_static_files(self):
         # Allow-list contains only the approved assets with expected types
         self.assertEqual(set(dashboard.STATIC.keys()),
-                         {"inter.woff2", "source-serif-4.woff2", "icon.svg", "OFL.txt", "app.css", "app.js"})
+                         {"inter.woff2", "source-serif-4.woff2", "icon.svg", "OFL.txt", "app.css", "app.js",
+                          "swagger/swagger-ui-bundle.js", "swagger/swagger-ui.css", "swagger/LICENSE"})
         self.assertEqual(dashboard.STATIC["inter.woff2"][1], "font/woff2")
         self.assertEqual(dashboard.STATIC["source-serif-4.woff2"][1], "font/woff2")
         self.assertEqual(dashboard.STATIC["icon.svg"][1], "image/svg+xml")
@@ -428,6 +429,14 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual((code, headers["Cache-Control"]), (200, "no-cache"))
         self.assertTrue(body.startswith(b"'use strict'"))
 
+        # The API reference page loads the bundled Swagger UI and the spec, from this server only
+        code, _, body = self.raw("/docs/api")
+        self.assertEqual(code, 200)
+        self.assertIn(b"/static/swagger/swagger-ui-bundle.js", body)
+        self.assertIn(b"X-YTKB", body)
+        self.assertNotIn(b"https://", body)
+        self.assertEqual(self.raw("/static/swagger/swagger-ui.css")[0], 200)
+
         # icon.svg placeholder is served with content type and cache header
         code, headers, body = self.raw("/static/icon.svg")
         self.assertEqual(code, 200)
@@ -440,6 +449,7 @@ class DashboardTest(unittest.TestCase):
             test_static = {}
             for name, (_, ctype) in dashboard.STATIC.items():
                 p = os.path.join(tmp, name)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
                 with open(p, "wb") as f:
                     f.write(f"content-{name}".encode())
                 test_static[name] = (p, ctype)

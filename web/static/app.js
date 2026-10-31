@@ -1737,6 +1737,11 @@ function viewGeneral() {
       <span>Show descriptions in the video panel</span></label>
     <p class="hint">Descriptions are collapsed by default in each video panel.</p>
     <p class="hint">Display options ${tip('Watch times use this speed by default; the Plan page can change it too. Display settings are saved in this browser.')}</p>
+  </section>
+  <section class="section card">
+    <h2 class="h">API reference</h2>
+    <p class="note">Every endpoint the dashboard uses, with a Try it out button. It works offline and needs this same access.</p>
+    <div class="actions"><a class="btn btn-sm" href="/docs/api" target="_blank" rel="noopener">Open the API reference ↗</a></div>
   </section>`;
 }
 function viewScoring() {

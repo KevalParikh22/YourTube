@@ -7,8 +7,8 @@
   },
   "servers": [
     {
-      "url": "http://127.0.0.1:8765",
-      "description": "Local dashboard server"
+      "url": "/",
+      "description": "This dashboard (the address the page was opened on)"
     }
   ],
   "tags": [
