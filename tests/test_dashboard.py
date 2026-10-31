@@ -304,6 +304,31 @@ class DashboardTest(unittest.TestCase):
         self.assertNotIn("rm_solo", ids)
         self.assertIn("a", ids)
 
+    def test_cloud_estimates_and_index_switch(self):
+        code, r = self.call("/api/asr/plan")
+        self.assertEqual((code, r["engine"], r["cost"]), (200, "local", 0.0))
+        self.assertIn("Nothing is sent", r["sends"])
+        s = llm.load_settings()
+        s["providers"].setdefault("groq", {})["api_key"] = "gsk_test_key_123456789012345"
+        s["tasks"]["transcribe"] = "groq"
+        llm.save_settings(s)
+        try:
+            code, r = self.call("/api/asr/plan")
+            self.assertEqual(r["engine"], "groq")
+            self.assertIn("uploaded to Groq", r["sends"])
+            self.assertNotIn("gsk_test", json.dumps(r))
+            started = []
+            with mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None: started.append(kind) or {"id": 1, "position": 0}):
+                code, r = self.call("/api/embed/switch", {"provider": "local"})
+            self.assertEqual((code, started), (200, ["embed"]))
+            self.assertEqual(self.call("/api/embed/switch", {"provider": "nope"})[0], 400)
+        finally:
+            s = llm.load_settings()
+            s["tasks"].pop("transcribe", None)
+            s["tasks"].pop("embed", None)
+            s["providers"].get("groq", {}).pop("api_key", None)
+            llm.save_settings(s)
+
     def test_split_per_library(self):
         s = llm.load_settings()
         llm.set_library_settings(s, 1, split={"category": "Lib1Cat", "categories": []})

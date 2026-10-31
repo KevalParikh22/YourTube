@@ -632,11 +632,24 @@ class Handler(BaseHTTPRequestHandler):
             name = safe_filename("Q " + item["question"]) + ".md"
             return self._send(200, ask_markdown(storage.get_thread(item["id"])), "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
-        if url.path == "/api/embed/status":
+        if url.path in ("/api/embed/status", "/api/embed/estimate"):
             import embedder
             settings = llm.load_settings()
             model = embedder.model_name(settings)
-            return self._json({"model": model, "available": embedder.available(settings), **storage.embedding_status(model)})
+            status = storage.embedding_status(model)
+            if url.path == "/api/embed/status":
+                return self._json({"model": model, "available": embedder.available(settings), **status})
+            engine = llm.media_provider(settings, "embed")
+            missing = storage.docs_missing_embeddings(model)
+            if engine == "local":
+                cost, sends = 0.0, "Nothing is sent; indexed text is processed locally."
+            else:
+                price = llm.MEDIA_PRICES.get((engine, model.split(":", 1)[1]), 0.0)
+                tokens = sum(max(1, len(row.get("text", "")) // 4) for row in missing)
+                cost = round(tokens / 1_000_000 * price, 5)
+                sends = f"About {tokens:,} tokens of indexed text are sent to {llm.PROVIDERS[engine]['label']}."
+            return self._json({"model": model, "available": embedder.available(settings), "pieces": len(missing),
+                               "cost": cost, "sends": sends, **status})
         if url.path == "/api/visuals/plan":
             import local_visual
             settings = llm.load_settings()
@@ -644,15 +657,29 @@ class Handler(BaseHTTPRequestHandler):
             secs = sum(v.get("duration_seconds") or 0 for v in cands)
             model = local_visual.vision_model(settings)
             base = settings["providers"]["ollama"].get("base_url")
-            return self._json({"available": local_visual.available(), "model": model,
+            engine = llm.media_provider(settings, "slides")
+            frames = max(1, round(secs / 60 * local_visual.FRAMES_PER_MINUTE)) if cands else 0
+            if engine == "local":
+                cost, sends = 0.0, "Nothing is sent; video downloads and frame analysis run locally."
+            else:
+                cfg = settings["providers"][engine]
+                price = llm.PRICES.get(cfg.get("model"), (None, None))[0]
+                tokens = frames * llm.IMAGE_TOKENS.get(llm.PROVIDERS[engine]["kind"], 258)
+                cost = round(tokens / 1_000_000 * price, 5) if price is not None else None
+                sends = f"About {frames} slide frames are sent to {llm.PROVIDERS[engine]['label']}."
+            return self._json({"available": local_visual.available(), "model": model, "engine": engine,
                                "model_ok": bool(model) and local_visual.model_sees_images(base, model),
                                "videos": len(cands), "seconds": secs,
-                               "minutes": round(local_visual.estimate_minutes(secs) + len(cands) * 15 / 60, 1)})
+                               "minutes": round(local_visual.estimate_minutes(secs) + len(cands) * 15 / 60, 1),
+                               "frames": frames, "cost": cost, "sends": sends})
         if url.path in ("/api/asr/plan", "/api/asr/estimate"):
             import local_asr
             ids = (qs.get("ids") or [""])[0].split(",") if "ids" in qs else None
             ids = [i.strip() for i in ids if i.strip()] if ids else None
-            return self._json(local_asr.estimate(ids))
+            estimate = local_asr.estimate(ids)
+            estimate["sends"] = ("Nothing is sent; audio is processed locally." if estimate["engine"] == "local"
+                                  else f"Audio is uploaded to {llm.PROVIDERS[estimate['engine']]['label']} for transcription.")
+            return self._json(estimate)
         if url.path == "/api/search":
             q = (qs.get("q") or [""])[0][:200]
             kinds = [k for k in (qs.get("kinds") or [""])[0].split(",") if k in storage.SEARCH_KINDS] or None
@@ -989,7 +1016,10 @@ class Handler(BaseHTTPRequestHandler):
                 ids = body.get("ids")
                 if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
                     return self._error("ids must be a list of video IDs")
-                return self._json(local_asr.estimate(ids))
+                estimate = local_asr.estimate(ids)
+                estimate["sends"] = ("Nothing is sent; audio is processed locally." if estimate["engine"] == "local"
+                                      else f"Audio is uploaded to {llm.PROVIDERS[estimate['engine']]['label']} for transcription.")
+                return self._json(estimate)
 
             if path == "/api/asr":
                 import local_asr
@@ -1042,6 +1072,23 @@ class Handler(BaseHTTPRequestHandler):
                         print(f"Rebuilding the meaning index: cleared {storage.clear_embeddings(model)} vectors of {model}.")
                     return embedder.run_embed(should_stop=JOB.stop_requested)
                 return self._queued(JOB.start("embed", "Rebuild meaning index" if rebuild else "Update meaning index", run))
+
+            if path == "/api/embed/switch":
+                provider = body.get("provider")
+                if provider not in llm.MEDIA_TASKS["embed"]["providers"]:
+                    return self._error("Unknown embedding provider")
+                settings = llm.load_settings()
+                settings.setdefault("tasks", {})["embed"] = provider
+                llm.save_settings(settings)
+
+                def rebuild():
+                    import embedder
+                    model = embedder.model_name(llm.load_settings())
+                    print(f"Rebuilding the meaning index for {model}.")
+                    return embedder.run_embed(should_stop=JOB.stop_requested)
+
+                started = JOB.start("embed", f"Rebuild meaning index with {provider}", rebuild)
+                return self._json({"ok": True, "job": started, "ai": llm.public_settings(settings)})
 
             if path == "/api/visuals":
                 import local_visual
