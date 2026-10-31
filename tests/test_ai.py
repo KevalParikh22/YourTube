@@ -1,5 +1,6 @@
 import json
 import io
+import contextlib
 import re
 import os
 import tempfile
@@ -84,6 +85,75 @@ class DiscoverTest(unittest.TestCase):
     def test_empty_library(self):
         with self.assertRaises(LLMError):
             discover_categories([], fake("{}"))
+
+    def test_only_new_drops_existing_categories(self):
+        complete = fake(json.dumps({"categories": [
+            {"name": "Cooking", "keywords": ["pasta"]},
+            {"name": "New Topic", "keywords": ["new"]},
+        ]}))
+        cats = discover_categories(self.VIDEOS, complete, presets=["Cooking"], taxonomy={"Cooking": ["food"]},
+                                  only_new=True)
+        self.assertEqual([c["name"] for c in cats], ["New Topic"])
+        self.assertIn("These videos fit none of the existing categories. Propose only NEW categories", complete.calls[0])
+
+    def test_run_suggest_proposes_for_three_leftovers(self):
+        import ai_classifier
+        import storage
+        videos = [{"video_id": f"v{i}", "title": f"Topic {i}", "category": FALLBACK_CATEGORY} for i in range(3)]
+        settings = {"presets": [], "interests": "Science"}
+        with mock.patch("storage.video_libraries", return_value={f"v{i}": 1 for i in range(3)}), \
+             mock.patch("storage.videos_for_ai", return_value=videos), \
+             mock.patch("storage.get_libraries", return_value=[{"id": 1, "name": "Library"}]), \
+             mock.patch("llm.load_settings", side_effect=[{}, {}]), \
+             mock.patch("llm.for_library", return_value=settings), \
+             mock.patch("llm.describe", return_value="fake"), \
+             mock.patch("llm.make_completer", return_value=fake("{}")), \
+             mock.patch("llm.model_for", return_value="fake"), \
+             mock.patch("llm.context_chars", return_value=20_000), \
+             mock.patch("classifier.load_taxonomy", return_value={"Cooking": []}), \
+             mock.patch("storage.taxonomy_key", return_value="key"), \
+             mock.patch("storage.ai_context", return_value={}), \
+             mock.patch("ai_classifier.assign_categories", return_value={"suggestions": [
+                 {"video_id": f"v{i}", "category": FALLBACK_CATEGORY} for i in range(3)], "failed_batches": 0, "stopped": False}), \
+             mock.patch("storage.save_suggestions", return_value=0), \
+             mock.patch("storage.mark_no_match"), \
+             mock.patch("ai_classifier.discover_categories", return_value=[{"name": "New", "preset": False, "existing": False}]) as discover, \
+             mock.patch("llm.set_library_settings") as set_settings, mock.patch("llm.save_settings"):
+            self.assertTrue(ai_classifier.run_suggest("unsorted", library=1))
+        self.assertEqual(discover.call_args.kwargs["only_new"], True)
+        self.assertEqual(len(discover.call_args.args[0]), 3)
+        proposal = set_settings.call_args.kwargs["proposal"]
+        self.assertEqual(proposal["for_videos"], 3)
+        self.assertEqual([c["name"] for c in proposal["categories"]], ["New"])
+
+    def test_run_suggest_skips_proposal_below_threshold_and_warns_on_error(self):
+        import ai_classifier
+        def run(count, discover_result):
+            videos = [{"video_id": f"v{i}", "title": f"T{i}", "category": FALLBACK_CATEGORY} for i in range(count)]
+            settings = {"presets": []}
+            with mock.patch("storage.video_libraries", return_value={v["video_id"]: 1 for v in videos}), \
+                 mock.patch("storage.videos_for_ai", return_value=videos), \
+                 mock.patch("storage.get_libraries", return_value=[{"id": 1, "name": "Library"}]), \
+                 mock.patch("llm.load_settings", return_value={}), mock.patch("llm.for_library", return_value=settings), \
+                 mock.patch("llm.describe", return_value="fake"), mock.patch("llm.make_completer", return_value=fake("{}")), \
+                 mock.patch("llm.model_for", return_value="fake"), mock.patch("llm.context_chars", return_value=20_000), \
+                 mock.patch("classifier.load_taxonomy", return_value={"Cooking": []}), mock.patch("storage.taxonomy_key", return_value="key"), \
+                 mock.patch("storage.ai_context", return_value={}), \
+                 mock.patch("ai_classifier.assign_categories", return_value={"suggestions": [
+                     {"video_id": v["video_id"], "category": FALLBACK_CATEGORY} for v in videos], "failed_batches": 0, "stopped": False}), \
+                 mock.patch("storage.save_suggestions", return_value=0), mock.patch("storage.mark_no_match"), \
+                 mock.patch("ai_classifier.discover_categories", side_effect=discover_result) as discover, \
+                 mock.patch("llm.set_library_settings") as set_settings, mock.patch("llm.save_settings"), \
+                 contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertTrue(ai_classifier.run_suggest("unsorted", library=1))
+            return discover, set_settings, output.getvalue()
+        discover, set_settings, _ = run(2, [{"name": "New"}])
+        discover.assert_not_called()
+        set_settings.assert_not_called()
+        discover, set_settings, output = run(3, LLMError("proposal failed"))
+        discover.assert_called_once()
+        set_settings.assert_not_called()
+        self.assertIn("Warning:", output)
 
     def test_run_discover_stopped_before_model_call(self):
         import ai_classifier

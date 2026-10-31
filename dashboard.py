@@ -1301,6 +1301,8 @@ class Handler(BaseHTTPRequestHandler):
             if not llm.is_configured(llm.load_settings(), "categorize"):
                 return self._error("Set up an AI provider in Settings → AI first")
             if path == "/api/ai/discover":
+                if load_taxonomy(library=lib):
+                    return self._error("This library already has categories. Sort unsorted videos instead.")
                 started = JOB.start("discover", f"Propose categories: {_library_name(lib)}", lambda: run_discover(library=lib, should_stop=JOB.stop_requested), key=lib)
             else:
                 scope = body.get("scope") or "unsorted"

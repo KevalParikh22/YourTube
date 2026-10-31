@@ -182,6 +182,23 @@ class DashboardTest(unittest.TestCase):
         code, r = self.call("/api/ai/suggest", {"scope": "unsorted"})
         self.assertEqual(code, 400)
 
+    def test_discover_only_when_library_has_no_categories(self):
+        started = []
+        with mock.patch("llm.is_configured", return_value=True), \
+             mock.patch("dashboard.load_taxonomy", return_value={"Cooking": []}), \
+             mock.patch.object(dashboard.JOB, "start", side_effect=lambda *args, **kwargs: started.append(True)):
+            code, r = self.call("/api/ai/discover", {})
+        self.assertEqual(code, 400)
+        self.assertEqual(r["error"], "This library already has categories. Sort unsorted videos instead.")
+        self.assertEqual(started, [])
+        with mock.patch("llm.is_configured", return_value=True), \
+             mock.patch("dashboard.load_taxonomy", return_value={}), \
+             mock.patch.object(dashboard.JOB, "start", return_value={"id": 1, "position": 0}) as start:
+            code, r = self.call("/api/ai/discover", {})
+        self.assertEqual(code, 200)
+        self.assertTrue(r["ok"])
+        self.assertEqual(start.call_args.args[0], "discover")
+
     def test_presets_and_proposal_apply(self):
         self.call("/api/presets", {"name": "Cooking", "preset": True})
         s = llm.load_settings()

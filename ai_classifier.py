@@ -19,6 +19,7 @@ BATCH_SIZE = 50
 BATCH_CHARS = 60_000  # most text per suggestion batch (smaller for local models, see run_suggest)
 DESC_CHARS = 300      # description characters shown per video
 EXCERPT_CHARS = 1000  # opening transcript characters shown per video
+LEFTOVER_MIN = 3
 
 DISCOVER_SYSTEM = (
     "You organise a person's YouTube watch-later backlog into a small set of clear topic "
@@ -82,6 +83,7 @@ def discover_categories(
     max_categories: int = 12,
     max_chars: int = 60_000,
     interests: str = "",
+    only_new: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Proposes a category set: every preset kept verbatim, plus new categories the library needs, led by the
@@ -104,6 +106,8 @@ each topic they name that these videos cover, using their words where they fit:
 {interests.strip()}
 
 """ if (interests or "").strip() else "")
+    if only_new:
+        wants += "These videos fit none of the existing categories. Propose only NEW categories for them; do not repeat existing ones.\n\n"
     prompt = f"""{wants}Here are {len(sample)} videos (title | channel) from a library of {len(videos)}:
 
 {chr(10).join(_line(v) for v in sample)}
@@ -164,6 +168,8 @@ Reply with JSON:
         # Keep the user's own keywords alongside the model's; "added" is what the proposal would change
         c["added"] = sorted(set(c["keywords"]) - set(taxonomy.get(c["name"], []))) if c["existing"] else []
         c["keywords"] = sorted(set(c["keywords"]) | set(taxonomy.get(c["name"], [])))
+    if only_new:
+        return [c for c in out.values() if not c["existing"] and not c["preset"]]
     return list(out.values())
 
 
@@ -386,7 +392,24 @@ def _suggest_library(scope: str, library: int, libs: Dict[str, int],
         return True
     if no_match:
         print(f"   {len(no_match)} video{'' if len(no_match) == 1 else 's'} fit none of your {len(taxonomy)} categories "
-              f"and stay in {FALLBACK_CATEGORY}. To place them, add a category for them or use Propose categories with AI.")
+              f"and stay in {FALLBACK_CATEGORY}.")
+    if scope == "unsorted" and len(no_match) >= LEFTOVER_MIN and not should_stop():
+        print("   Asking the AI for new categories for them…")
+        leftover_videos = [v for v in videos if v["video_id"] in set(no_match)]
+        try:
+            budget = max(3_000, llm.context_chars(settings, "categorize") - 4_000)
+            cats = discover_categories(leftover_videos, complete, presets=settings.get("presets"),
+                                       taxonomy=taxonomy, interests=settings.get("interests") or "",
+                                       only_new=True, max_categories=5, max_chars=budget)
+            if cats and not should_stop():
+                settings = llm.load_settings()
+                llm.set_library_settings(settings, library,
+                                         proposal={"categories": cats, "model": llm.describe(settings, "categorize"),
+                                                   "for_videos": len(no_match)})
+                llm.save_settings(settings)
+                print(f"   Proposed {len(cats)} new categories. Review them on the Categories page.")
+        except LLMError as e:
+            print(f"Warning: Could not propose categories for the videos that fit none: {e}")
     if stored:
         print("   Nothing changes until you accept them (Library → AI suggestions).")
     return True
