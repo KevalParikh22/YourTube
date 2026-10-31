@@ -53,7 +53,7 @@ class LibrarySettingsTest(unittest.TestCase):
         llm.set_library_settings(s, 2, interests="Fitness", presets=["Nutrition"])
         self.assertEqual(llm.library_settings(s, 1)["interests"], "AI agents")
         self.assertEqual(llm.library_settings(s, 2), {"presets": ["Nutrition"], "category_notes": {}, "proposal": None,
-                                                      "interests": "Fitness", "split": None})
+                                                      "interests": "Fitness"})
         self.assertEqual(s["libraries"]["2"]["interests"], "Fitness")
         self.assertEqual(llm.public_settings(s, 2)["interests"], "Fitness")
         self.assertEqual(llm.library_settings(s, 3)["interests"], "AI agents")   # no interests of its own: library 1's
