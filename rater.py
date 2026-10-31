@@ -451,7 +451,7 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
         helper_label: _make_worker(helper_complete, helper_budget, helper_model, helper_tag),
     }
 
-    worker_counts = parallel.share(videos, workers, should_stop=should_stop, on_error=_on_error)
+    worker_counts = parallel.share(videos, workers, should_stop=should_stop, on_error=_on_error, retry_other=True)
     if should_stop():
         print("Stopped. Ratings so far are saved.")
 

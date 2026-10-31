@@ -248,8 +248,9 @@ class HelperSummarizeTest(unittest.TestCase):
 
         self.assertTrue(ok)
         output = out.getvalue()
-        self.assertIn("Summarised 2 videos: 0 by Local: Ollama · qwen3.5:4b, 2 by Claude (Anthropic) · claude-haiku-5-5.", output)
-        self.assertIn("3 failed", output)
+        # the videos ollama failed go to claude
+        self.assertIn("Summarised 5 videos: 0 by Local: Ollama · qwen3.5:4b, 5 by Claude (Anthropic) · claude-haiku-5-5.", output)
+        self.assertNotIn("3 failed", output)
 
     def test_estimate_with_helper(self):
         est = summarizer.estimate(["hs1", "hs2"])

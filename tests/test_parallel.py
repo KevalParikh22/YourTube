@@ -125,3 +125,28 @@ class ShareTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RetryOtherTest(unittest.TestCase):
+    def test_one_item_failed_by_one_worker_goes_to_the_other(self):
+        done, errors = [], []
+        def quota(x):
+            time.sleep(0.05)   # the other worker has found the queue empty by now and must wait
+            raise RuntimeError("HTTP 429 quota")
+        counts = parallel.share(["v1"], {"cloud": quota, "local": done.append},
+                                on_error=lambda n, i, e: errors.append(i), retry_other=True)
+        self.assertEqual((done, errors, counts), (["v1"], [], {"cloud": 0, "local": 1}))
+
+    def test_item_failed_by_every_worker_is_reported_once(self):
+        errors = []
+        def fail(x):
+            raise RuntimeError("down")
+        counts = parallel.share([1, 2], {"a": fail, "b": fail}, on_error=lambda n, i, e: errors.append(i), retry_other=True)
+        self.assertEqual((sorted(errors), counts), ([1, 2], {"a": 0, "b": 0}))
+
+    def test_without_retry_other_errors_are_reported_at_once(self):
+        errors, done = [], []
+        def fail(x):
+            raise RuntimeError("down")
+        parallel.share([1], {"a": fail}, on_error=lambda n, i, e: errors.append(i))
+        self.assertEqual(errors, [1])

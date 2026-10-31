@@ -346,9 +346,10 @@ class HelperRatingTest(unittest.TestCase):
 
         self.assertTrue(ok)
         output = out.getvalue()
-        # 3 errors stopped ollama, claude finished the remaining 2
-        self.assertIn("2 rated: 0 by Local: Ollama · qwen3.5:4b, 2 by Claude (Anthropic) · claude-haiku-5-5.", output)
-        self.assertIn("3 failed", output)
+        # ollama stops after 3 errors; the videos it failed go to claude, so nothing is lost
+        self.assertIn("5 rated: 0 by Local: Ollama · qwen3.5:4b, 5 by Claude (Anthropic) · claude-haiku-5-5.", output)
+        self.assertIn("trying the other AI", output)
+        self.assertNotIn("failed.", output.splitlines()[-1])
 
     def test_estimate_with_helper(self):
         est = rater.estimate(["hr1", "hr2"])

@@ -865,12 +865,19 @@ function renderJobs() {
   const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
       <span class="jl" title="${esc(t.label)}">${esc(t.label)}</span>${action}</div>`;
   const panel = S.jobsOpen ? `<div class="jobpanel" role="dialog" aria-label="Tasks">
-      ${active.length ? active.map(l => `<div><div class="faint" style="font-size:11.5px">${esc(({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[l.lane] || l.lane)}</div>${row(l, l.stopping ? 'stopping' : 'run', l.stopping ? '<button class="btn-text" disabled>Stopping…</button>' : `<button class="btn-text" data-act="job-stop-one" data-task="${l.id}">Stop</button>`)}<pre class="log">${esc(l.log || '')}</pre></div>`).join('') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
+      ${active.length ? active.map(l => `<div><div class="faint" style="font-size:11.5px">${esc(({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[l.lane] || l.lane)}</div>${row(l, l.stopping ? 'stopping' : 'run', l.stopping ? '<button class="btn-text" disabled>Stopping…</button>' : `<button class="btn-text" data-act="job-stop-one" data-task="${l.id}">Stop</button>`)}<pre class="log" data-task="${l.id}">${esc(l.log || '')}</pre></div>`).join('') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
       ${(job.queue || []).map(t => row({ ...t, label: `${({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[t.lane] || t.lane}: ${t.label}` }, 'wait', `<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button>`)).join('')}
       ${(job.recent || []).length ? `<div class="faint" style="font-size:11.5px;margin:10px 0 4px">Recent</div>` + job.recent.map(t => row(t, t.stopped ? 'stop' : t.ok ? 'ok' : 'bad',
         `<span class="faint" style="font-size:11.5px">${esc(fmtLocal(t.finished_at))}</span>`)).join('') : ''}
     </div>` : '';
-  box.innerHTML = pill + panel;
+  const html = pill + panel;
+  // Rebuilt on every update: keep where the reader was in the panel and in each task's log
+  const panelTop = $('.jobpanel', box)?.scrollTop;
+  const logs = {};
+  box.querySelectorAll('.log[data-task]').forEach(el => { logs[el.dataset.task] = { top: el.scrollTop, atBottom: el.scrollHeight - el.scrollTop - el.clientHeight < 24 }; });
+  box.innerHTML = html;
+  if (panelTop && $('.jobpanel', box)) $('.jobpanel', box).scrollTop = panelTop;
+  box.querySelectorAll('.log[data-task]').forEach(el => { const p = logs[el.dataset.task]; el.scrollTop = !p || p.atBottom ? el.scrollHeight : p.top; });
 }
 function updateLogJump(box) {
   const log = $('.log', box), btn = $('[data-act="log-latest"]', box);

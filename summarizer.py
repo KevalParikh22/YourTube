@@ -295,7 +295,7 @@ def run_summarize(video_ids: List[str], should_stop: Callable[[], bool] = lambda
         helper_label: _make_worker(helper_complete, helper_budget, helper_model, helper_tag, helper_label),
     }
 
-    parallel.share(videos, workers, should_stop=should_stop, on_error=_on_error)
+    parallel.share(videos, workers, should_stop=should_stop, on_error=_on_error, retry_other=True)
     if should_stop():
         print("Stopped. Summaries so far are saved.")
 
