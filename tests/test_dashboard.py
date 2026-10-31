@@ -377,6 +377,19 @@ class DashboardTest(unittest.TestCase):
         self.assertTrue(r["ai"]["local_only"])
         self.call("/api/ai/settings", {"local_only": False, "edit": "ollama", "config": {"num_ctx": 8192}})
 
+    def test_files_endpoints(self):
+        code, r = self.call("/api/files")
+        self.assertEqual(code, 200)
+        self.assertIn("areas", r)
+        self.assertEqual(self.raw("/files/exports/..%2fsettings.json")[0], 404)
+        self.assertEqual(self.call("/api/files/delete", {"area": "exports", "name": "../x"})[0], 400)
+        self.assertEqual(self.call("/api/files/clear", {"key": "db"})[0], 400)
+        self.assertEqual(self.call("/api/files/restore", {"name": "yourtube-20200101-000000.db"})[0], 404)
+        with mock.patch.dict(dashboard.JOB.lanes["youtube"].state, {"running": True}), \
+                mock.patch.object(dashboard.files, "restore") as restore:
+            self.assertEqual(self.call("/api/files/restore", {"name": "yourtube-20200101-000000.db"})[0], 409)
+            restore.assert_not_called()
+
     def raw(self, path):
         req = urllib.request.Request(self.base + path)
         try:

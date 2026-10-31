@@ -22,6 +22,7 @@ from http.cookies import SimpleCookie
 import webbrowser
 import contextvars
 import shutil
+import sqlite3
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -29,6 +30,7 @@ from urllib.parse import urlparse, parse_qs
 import storage
 import llm
 import applog
+import files
 import voice
 import interests_ai
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
@@ -92,7 +94,7 @@ _MEDIA_TASK = {"asr": "transcribe", "visual": "slides", "embed": "embed"}
 
 def lane_for(kind, settings):
     """The lane a task kind runs in: work on this computer, cloud AI, or everything else (YouTube reads, library)."""
-    if kind == "pull":
+    if kind in ("pull", "backup"):
         return "local"
     if kind in _MEDIA_TASK:
         return "local" if llm.media_provider(settings, _MEDIA_TASK[kind]) == "local" else "cloud"
@@ -588,6 +590,17 @@ class Handler(BaseHTTPRequestHandler):
                 data = f.read()
             headers = {"Content-Disposition": f'attachment; filename="{name}"'} if url.path.startswith("/download/") else None
             return self._send(200, data, ctype, extra_headers=headers)
+        if url.path == "/api/files":
+            return self._json({**files.usage(), "backups": files.list_backups(), "exports": files.list_exports()})
+        if url.path.startswith("/files/exports/"):
+            name = url.path[len("/files/exports/"):]
+            path = files.get_saved("exports", name)
+            if path is None:
+                return self._error("Not found", 404)
+            with open(path, "rb") as f:
+                data = f.read()
+            return self._send(200, data, "application/octet-stream",
+                              extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/state":
             return self._json(build_state(_library((qs.get("library") or ["1"])[0])))
         if url.path == "/api/job":
@@ -626,7 +639,9 @@ class Handler(BaseHTTPRequestHandler):
             if v is None:
                 return self._error("Unknown video", 404)
             name = safe_filename(v["title"]) + ".md"
-            return self._send(200, video_markdown(v, storage.get_details(vid), storage.get_summary(vid)), "text/markdown; charset=utf-8",
+            data = video_markdown(v, storage.get_details(vid), storage.get_summary(vid)).encode("utf-8")
+            files.save_export(name, data)
+            return self._send(200, data, "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/playlists/remove":
             try:
@@ -657,7 +672,9 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/ask/item":
                 return self._json({"thread": [asker.from_history(x) for x in storage.get_thread(item["id"])]})
             name = safe_filename("Q " + item["question"]) + ".md"
-            return self._send(200, ask_markdown(storage.get_thread(item["id"])), "text/markdown; charset=utf-8",
+            data = ask_markdown(storage.get_thread(item["id"])).encode("utf-8")
+            files.save_export(name, data)
+            return self._send(200, data, "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
         if url.path in ("/api/embed/status", "/api/embed/estimate"):
             import embedder
@@ -734,8 +751,11 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(found or {"page": None})
             if not found:
                 return self._error("No page for this category yet", 404)
-            return self._send(200, knowledge.page_markdown(category, found["page"], found["sources"]), "text/markdown; charset=utf-8",
-                              extra_headers={"Content-Disposition": _attachment(safe_filename(category) + ".md")})
+            name = safe_filename(category) + ".md"
+            data = knowledge.page_markdown(category, found["page"], found["sources"]).encode("utf-8")
+            files.save_export(name, data)
+            return self._send(200, data, "text/markdown; charset=utf-8",
+                              extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/summary":
             import summarizer
             vid = (qs.get("id") or [""])[0]
@@ -750,9 +770,14 @@ class Handler(BaseHTTPRequestHandler):
             videos = storage.get_all_videos(None if playlist == "all" else playlist, include_removed=True)
             stamp = datetime.now().strftime("%Y%m%d")
             if fmt == "json":
-                return self._send(200, json.dumps(videos, indent=2, default=str, ensure_ascii=False),
+                data = json.dumps(videos, indent=2, default=str, ensure_ascii=False).encode("utf-8")
+                name = f"yourtube_{stamp}.json"
+                files.save_export(name, data)
+                return self._send(200, data,
                                   extra_headers={"Content-Disposition": f'attachment; filename="yourtube_{stamp}.json"'})
-            return self._send(200, "﻿" + videos_to_csv(videos), "text/csv; charset=utf-8",
+            data = ("﻿" + videos_to_csv(videos)).encode("utf-8")
+            files.save_export(f"yourtube_{stamp}.csv", data)
+            return self._send(200, data, "text/csv; charset=utf-8",
                               extra_headers={"Content-Disposition": f'attachment; filename="yourtube_{stamp}.csv"'})
         return self._error("Not found", 404)
 
@@ -970,6 +995,41 @@ class Handler(BaseHTTPRequestHandler):
             if path.startswith("/api/ai/") or path == "/api/presets":
                 return self._ai(path, body, lib)
 
+            if path == "/api/files/backup":
+                return self._queued(JOB.start("backup", "Back up library", files.backup, lane="local"))
+            if path == "/api/files/restore":
+                name = body.get("name")
+                if not isinstance(name, str):
+                    return self._error("name is required")
+                with JOB.lock:   # nothing can start while the library is swapped
+                    if any(l.state["running"] or l.pending for l in JOB.lanes.values()):
+                        return self._error("Wait for the running tasks to finish, or stop them, then restore.", 409)
+                    try:
+                        safety = files.restore(name)
+                    except FileNotFoundError:
+                        return self._error("Backup not found", 404)
+                    except (ValueError, sqlite3.Error) as e:
+                        return self._error(f"Restore failed: {e}", 500)
+                return self._json({"ok": True, "safety": safety})
+            if path == "/api/files/clear":
+                key = body.get("key")
+                if not isinstance(key, str):
+                    return self._error("key is required")
+                try:
+                    removed = files.clear(key)
+                except ValueError as e:
+                    return self._error(str(e))
+                return self._json({"ok": True, "removed": removed})
+            if path == "/api/files/delete":
+                area, name = body.get("area"), body.get("name")
+                try:
+                    files.delete(area, name)
+                except ValueError as e:
+                    return self._error(str(e))
+                except FileNotFoundError:
+                    return self._error("File not found", 404)
+                return self._json({"ok": True})
+
             if path == "/api/export/markdown":
                 ids = body.get("ids")
                 if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
@@ -980,6 +1040,7 @@ class Handler(BaseHTTPRequestHandler):
                                     {v["video_id"]: summary for v in videos
                                      if (summary := storage.get_summary(v["video_id"])) is not None})
                 stamp = datetime.now().strftime("%Y%m%d")
+                files.save_export(f"yourtube_notes_{stamp}.zip", data)
                 return self._send(200, data, "application/zip",
                                   extra_headers={"Content-Disposition": f'attachment; filename="yourtube_notes_{stamp}.zip"'})
 
