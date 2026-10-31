@@ -242,3 +242,117 @@ class FormulaTest(unittest.TestCase):
         self.assertEqual(rater.formula_of({"rating_formula": {"interest_penalty": 99, "depth": "x"}})["interest_penalty"], 5.0)
         zero = rater.formula_of({"rating_formula": {"depth": 0, "value": 0, "freshness": 0}})
         self.assertEqual(zero["depth"], rater.DEFAULT_FORMULA["depth"])               # all-zero weights fall back
+
+
+class HelperRatingTest(unittest.TestCase):
+    def setUp(self):
+        import time
+        self.time = time
+        storage.save_playlist(playlist("PLH"), [video(f"hr{i}", f"Video {i}") for i in range(1, 7)])
+        for i in range(1, 7):
+            storage.save_details(f"hr{i}", {"status": "done", "segments": SEGS, "chapters": [], "upload_date": "20260101"})
+        s = llm.load_settings()
+        s.update(provider="ollama", tasks={"rate": None}, helpers={"rate": "anthropic"})
+        s["providers"]["ollama"]["model"] = "qwen3.5:4b"
+        s["providers"]["anthropic"] = {"model": "claude-haiku-5-5", "api_key": "fake-key", "base_url": ""}
+        llm.save_settings(s)
+
+    def tearDown(self):
+        with storage.get_connection() as conn:
+            conn.execute("DELETE FROM video_ratings")
+            conn.execute("DELETE FROM videos WHERE video_id LIKE 'hr%'")
+        s = llm.load_settings()
+        s["provider"] = "none"
+        s.get("helpers", {}).pop("rate", None)
+        llm.save_settings(s)
+
+    def test_rates_with_two_completers_one_slow_and_counts_line_per_worker(self):
+        def fake_make_completer(settings, task=None):
+            provider = llm.provider_for(settings, task)
+            if provider == "anthropic":
+                def slow_call(system, prompt):
+                    self.time.sleep(0.04)
+                    return json.dumps({"score": 8, "verdict": "watch", "reason": "cloud ok", "tldr": "t"})
+                return slow_call
+            else:
+                def fast_call(system, prompt):
+                    self.time.sleep(0.005)
+                    return json.dumps({"score": 5, "verdict": "skim", "reason": "local ok", "tldr": "t"})
+                return fast_call
+
+        out = io.StringIO()
+        with mock.patch("llm.make_completer", side_effect=fake_make_completer), contextlib.redirect_stdout(out):
+            ok = rater.run_rate([f"hr{i}" for i in range(1, 7)])
+        self.assertTrue(ok)
+
+        # Every video is rated exactly once
+        lib = {v["video_id"]: v for v in storage.get_library() if v["video_id"].startswith("hr")}
+        self.assertEqual(len(lib), 6)
+        models_used = set()
+        for i in range(1, 7):
+            self.assertIsNotNone(lib[f"hr{i}"]["rating"])
+            models_used.add(lib[f"hr{i}"]["rating"]["model"])
+
+        # Both workers do some
+        self.assertIn("qwen3.5:4b", models_used)
+        self.assertIn("claude-haiku-5-5", models_used)
+
+        # Progress lines carry short worker tags
+        output = out.getvalue()
+        self.assertIn("· qwen3.5:4b", output)
+        self.assertIn("· claude-haiku-5-5", output)
+
+        # Counts line per worker
+        self.assertIn("6 rated: ", output)
+        self.assertIn("by Local: Ollama · qwen3.5:4b", output)
+        self.assertIn("by Claude (Anthropic) · claude-haiku-5-5", output)
+
+    def test_helper_stop_halts_both(self):
+        stop_flag = False
+
+        def fake_make_completer(settings, task=None):
+            def call(system, prompt):
+                nonlocal stop_flag
+                stop_flag = True
+                self.time.sleep(0.02)
+                return json.dumps({"score": 7, "verdict": "watch", "reason": "r", "tldr": "t"})
+            return call
+
+        out = io.StringIO()
+        with mock.patch("llm.make_completer", side_effect=fake_make_completer), contextlib.redirect_stdout(out):
+            rater.run_rate([f"hr{i}" for i in range(1, 7)], should_stop=lambda: stop_flag)
+
+        self.assertIn("Stopped. Ratings so far are saved.", out.getvalue())
+        rated = [v for v in storage.get_library() if v["video_id"].startswith("hr") and v.get("rating")]
+        self.assertLess(len(rated), 6)
+
+    def test_three_errors_in_a_row_stops_one_worker_and_other_finishes(self):
+        def fake_make_completer(settings, task=None):
+            provider = llm.provider_for(settings, task)
+            if provider == "ollama":
+                def failing_call(system, prompt):
+                    self.time.sleep(0.005)
+                    raise LLMError("ollama quota")
+                return failing_call
+            else:
+                def healthy_call(system, prompt):
+                    self.time.sleep(0.01)
+                    return json.dumps({"score": 8, "verdict": "watch", "reason": "cloud", "tldr": "t"})
+                return healthy_call
+
+        out = io.StringIO()
+        with mock.patch("llm.make_completer", side_effect=fake_make_completer), contextlib.redirect_stdout(out):
+            ok = rater.run_rate([f"hr{i}" for i in range(1, 6)])
+
+        self.assertTrue(ok)
+        output = out.getvalue()
+        # 3 errors stopped ollama, claude finished the remaining 2
+        self.assertIn("2 rated: 0 by Local: Ollama · qwen3.5:4b, 2 by Claude (Anthropic) · claude-haiku-5-5.", output)
+        self.assertIn("3 failed", output)
+
+    def test_estimate_with_helper(self):
+        est = rater.estimate(["hr1", "hr2"])
+        self.assertEqual(est["videos"], 2)
+        self.assertIn("Ollama", est["uses"])
+        self.assertIn("Claude", est["uses"])
+        self.assertEqual(est["cost_note"], "less if the local model keeps up")

@@ -304,13 +304,21 @@ def _context(settings: Dict[str, Any], library: Optional[int] = None) -> Dict[st
 def _contexts(settings: Dict[str, Any]):
     """context(video) -> the rating context of the video's library, built once per library."""
     import storage
-    libs, cache = storage.video_libraries(), {}
+    libs = storage.video_libraries()
+    cache = {lib: _context(settings, lib) for lib in set(libs.values()) or {1}}
     def context(video):
         lib = libs.get(video["video_id"], 1)
         if lib not in cache:
             cache[lib] = _context(settings, lib)
         return cache[lib]
     return context
+
+def _rate_one(video: Dict[str, Any], complete: Callable[[str, str], str], budget: int, model: str, context: Dict[str, Any]) -> Dict[str, Any]:
+    """Rates a single video, saves to DB and returns the rating dict."""
+    import storage
+    rating = rate_video(video, storage.get_segments(video['video_id']), context, complete, budget=budget)
+    storage.save_rating(video['video_id'], rating, model=model)
+    return rating
 
 def estimate(video_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     """What a rating run would send: videos, approximate tokens and price for the chosen model."""
@@ -327,14 +335,31 @@ def estimate(video_ids: Optional[List[str]] = None) -> Dict[str, Any]:
         with_transcript += bool(segments)
         chars += len(build_prompt(v, segments, context(v), budget=budget)[0]) + len(SYSTEM)
     tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos)
-    return {"videos": len(videos), "with_transcript": with_transcript, "tokens_in": tokens_in, "tokens_out": tokens_out,
-            "cost": llm.estimate_cost(settings, "rate", tokens_in, tokens_out),
-            "uses": llm.describe(settings, "rate"), "ready": llm.is_configured(settings, "rate")}
+    cost = llm.estimate_cost(settings, "rate", tokens_in, tokens_out)
+    uses = llm.describe(settings, "rate")
+    helper = llm.helper_for(settings, "rate")
+    cost_note = None
+    if helper:
+        helper_settings = dict(settings, tasks={**settings.get("tasks", {}), "rate": helper})
+        cloud_cost = llm.estimate_cost(helper_settings, "rate", tokens_in, tokens_out)
+        uses = f"{uses} + {llm.describe(helper_settings, 'rate')}"
+        if cost == 0.0 and cloud_cost is not None:
+            cost = cloud_cost
+            cost_note = "less if the local model keeps up"
+        elif cloud_cost == 0.0 and cost is not None:
+            cost_note = "less if the local model keeps up"
+    out = {"videos": len(videos), "with_transcript": with_transcript, "tokens_in": tokens_in, "tokens_out": tokens_out,
+           "cost": cost, "uses": uses, "ready": llm.is_configured(settings, "rate")}
+    if cost_note:
+        out["cost_note"] = cost_note
+    return out
 
 
 def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bool] = lambda: False) -> bool:
     """Rates unrated, unwatched videos (or the given ones). Prints progress for the job log."""
+    import threading
     import llm
+    import parallel
     import storage
 
     settings = llm.load_settings()
@@ -354,24 +379,85 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     if no_transcript:
         print(f"   {no_transcript} have no transcript, so they are rated from title and description only. "
               "Fetch video details first for better ratings.")
+
+    helper = llm.helper_for(settings, "rate")
+    if not helper:
+        counts = {"watch": 0, "skim": 0, "skip": 0}
+        failed = 0
+        for n, v in enumerate(videos, 1):
+            if should_stop():
+                print("Stopped. Ratings so far are saved.")
+                break
+            try:
+                rating = _rate_one(v, complete, budget, model, context(v))
+            except LLMError as e:
+                failed += 1
+                print(f"   [{n}/{len(videos)}] Warning: {v['title'][:60]}: {e}")
+                if failed >= 3 and failed == n:
+                    print("Error: The first three ratings all failed. Check the AI settings.")
+                    return False
+                continue
+            counts[rating['verdict']] += 1
+            print(f"   [{n}/{len(videos)}] {rating['score']:>4} {rating['verdict'].upper():<5} {v['title'][:60]}")
+        print(f"{counts['watch']} watch, {counts['skim']} skim, {counts['skip']} skip"
+              + (f", {failed} failed" if failed else "") + ". Review them in Triage.")
+        return True
+
+    # Helper AI: two workers share the batch
+    helper_settings = dict(settings, tasks={**settings.get("tasks", {}), "rate": helper})
+    try:
+        helper_complete = llm.make_completer(helper_settings, "rate")
+    except LLMError as e:
+        print(f"Error: {e}")
+        return False
+    helper_budget = llm.context_chars(helper_settings, "rate", CHAR_BUDGET_REMOTE)
+    helper_model = llm.model_for(helper_settings, "rate")
+
+    main_label = llm.describe(settings, "rate")
+    helper_label = llm.describe(helper_settings, "rate")
+    if helper_label == main_label:
+        helper_label = f"{helper_label} (helper)"
+    main_tag = llm.model_for(settings, "rate")
+    helper_tag = llm.model_for(helper_settings, "rate")
+
+    progress_lock = threading.Lock()
+    progress = 0
     counts = {"watch": 0, "skim": 0, "skip": 0}
     failed = 0
-    for n, v in enumerate(videos, 1):
-        if should_stop():
-            print("Stopped. Ratings so far are saved.")
-            break
-        try:
-            rating = rate_video(v, storage.get_segments(v['video_id']), context(v), complete, budget=budget)
-        except LLMError as e:
+
+    def _make_worker(comp, bgt, mdl, tag):
+        def _worker(v):
+            nonlocal progress
+            rating = _rate_one(v, comp, bgt, mdl, context(v))
+            with progress_lock:
+                progress += 1
+                n = progress
+                counts[rating['verdict']] += 1
+                line = f"   [{n}/{len(videos)}] {rating['score']:>4} {rating['verdict'].upper():<5} {v['title'][:60]} · {tag}"
+            parallel.safe_print(line)
+        return _worker
+
+    def _on_error(worker_name, item, exc):
+        nonlocal progress, failed
+        with progress_lock:
+            progress += 1
+            n = progress
             failed += 1
-            print(f"   [{n}/{len(videos)}] Warning: {v['title'][:60]}: {e}")
-            if failed >= 3 and failed == n:
-                print("Error: The first three ratings all failed. Check the AI settings.")
-                return False
-            continue
-        storage.save_rating(v['video_id'], rating, model=model)
-        counts[rating['verdict']] += 1
-        print(f"   [{n}/{len(videos)}] {rating['score']:>4} {rating['verdict'].upper():<5} {v['title'][:60]}")
+            line = f"   [{n}/{len(videos)}] Warning: {item['title'][:60]}: {exc}"
+        parallel.safe_print(line)
+
+    workers = {
+        main_label: _make_worker(complete, budget, model, main_tag),
+        helper_label: _make_worker(helper_complete, helper_budget, helper_model, helper_tag),
+    }
+
+    worker_counts = parallel.share(videos, workers, should_stop=should_stop, on_error=_on_error)
+    if should_stop():
+        print("Stopped. Ratings so far are saved.")
+
+    total_rated = sum(worker_counts.values())
+    by_worker = ", ".join(f"{cnt} by {name}" for name, cnt in worker_counts.items())
+    print(f"{total_rated} rated: {by_worker}.")
     print(f"{counts['watch']} watch, {counts['skim']} skim, {counts['skip']} skip"
           + (f", {failed} failed" if failed else "") + ". Review them in Triage.")
-    return True
+    return failed == 0 or total_rated > 0
