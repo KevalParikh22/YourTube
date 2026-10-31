@@ -95,6 +95,7 @@ class DiscoverTest(unittest.TestCase):
                                   only_new=True)
         self.assertEqual([c["name"] for c in cats], ["New Topic"])
         self.assertIn("These videos fit none of the existing categories. Propose only NEW categories", complete.calls[0])
+        self.assertNotIn("Keep, rename, merge or drop", complete.calls[0])   # the existing set is not up for change
 
     def test_run_suggest_proposes_for_three_leftovers(self):
         import ai_classifier

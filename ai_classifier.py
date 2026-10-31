@@ -106,8 +106,14 @@ each topic they name that these videos cover, using their words where they fit:
 {interests.strip()}
 
 """ if (interests or "").strip() else "")
-    if only_new:
+    if only_new:   # videos that fit none: only new categories, the existing set is not up for change
         wants += "These videos fit none of the existing categories. Propose only NEW categories for them; do not repeat existing ones.\n\n"
+        task = (f"Categories that already exist (do not repeat or rename them):\n{current}\n\n"
+                f"Propose at most {max_categories} NEW categories that together cover most of these videos.")
+    else:
+        task = (f"Categories in use now. Keep, rename, merge or drop them as the videos suggest:\n{current}\n\n"
+                f"Propose at most {max_categories} categories in total, protected ones included, that together cover most of these videos.\n"
+                "Add new categories only for topics that none of the existing ones cover. To keep an existing category, use its name exactly.")
     prompt = f"""{wants}Here are {len(sample)} videos (title | channel) from a library of {len(videos)}:
 
 {chr(10).join(_line(v) for v in sample)}
@@ -116,11 +122,7 @@ Protected categories. Keep each one exactly as written; they already cover their
 category for the same topic (no near-copies such as "X Strategy" next to "X"):
 {preset_text}
 
-Categories in use now. Keep, rename, merge or drop them as the videos suggest:
-{current}
-
-Propose at most {max_categories} categories in total, protected ones included, that together cover most of these videos.
-Add new categories only for topics that none of the existing ones cover. To keep an existing category, use its name exactly.
+{task}
 Each category is ONE topic (for example "Fitness", "Mental Health", "Personal Finance", "Podcasts"). Never join two topics in
 one name with "&", "and" or a comma: "Health & Fitness" must be two categories. Never return a variant of an existing name.
 Do not include a catch-all such as "{FALLBACK_CATEGORY}"; it always exists.

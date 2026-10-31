@@ -1488,7 +1488,7 @@ function viewProposal(p, tax, counts) {
       </div>`).join('') : ''}
       ${same.length ? `<details style="margin-top:18px"><summary class="note" style="cursor:pointer">${plural(same.length, 'category')} unchanged</summary>
         <p class="note faint" style="margin-top:6px">${same.map(c => esc(c.name)).join(' · ')}</p></details>` : ''}
-      ${dropped.length ? `<div style="margin-top:20px"><span class="field-label">Categories the AI left out</span>
+      ${dropped.length && !p.for_videos ? `<div style="margin-top:20px"><span class="field-label">Categories the AI left out</span>
         ${dropped.map(n => `<label class="check" style="margin-top:8px"><input type="checkbox" class="p-drop" value="${esc(n)}">
           <span>Remove <b style="font-weight:500">${esc(n)}</b> <span class="faint">(${plural(counts[n] || 0, 'video')} go back to automatic sorting)</span></span></label>`).join('')}
         <p class="hint">Unticked ones stay as they are.</p></div>` : ''}
