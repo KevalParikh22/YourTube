@@ -7,7 +7,7 @@ Both functions take `complete(system, prompt) -> text` (see llm.make_completer),
 provider, or a fake in tests, can drive them.
 """
 import re
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from llm import LLMError, parse_json
 
@@ -85,9 +85,11 @@ def discover_categories(
     taxonomy: Optional[Dict[str, List[str]]] = None,
     max_categories: int = 12,
     max_chars: int = 60_000,
+    interests: str = "",
 ) -> List[Dict[str, Any]]:
     """
-    Proposes a category set: every preset kept verbatim, plus new categories the library needs.
+    Proposes a category set: every preset kept verbatim, plus new categories the library needs, led by the
+    user's learning interests (About you) when they are set.
     max_chars caps the video list so the prompt and the reply fit the model's context (a local model
     with an 8k context cut its reply off at 317 videos). Returns [{'name', 'description', 'keywords', 'preset', 'existing'}].
     """
@@ -101,7 +103,12 @@ def discover_categories(
         sample = _sample(videos, int(len(sample) * 0.85))   # an even spread across the whole library, just fewer
     preset_text = "\n".join(f"- {p}" for p in presets) or "(none)"
     current = "\n".join(f"- {c}" for c in taxonomy if c not in presets) or "(none)"
-    prompt = f"""Here are {len(sample)} videos (title | channel) from a library of {len(videos)}:
+    wants = (f"""The user's learning interests (from About you). Build the categories around these first: one category for
+each topic they name that these videos cover, using their words where they fit:
+{interests.strip()}
+
+""" if (interests or "").strip() else "")
+    prompt = f"""{wants}Here are {len(sample)} videos (title | channel) from a library of {len(videos)}:
 
 {chr(10).join(_line(v) for v in sample)}
 
@@ -114,7 +121,8 @@ Categories in use now. Keep, rename, merge or drop them as the videos suggest:
 
 Propose at most {max_categories} categories in total, protected ones included, that together cover most of these videos.
 Add new categories only for topics that none of the existing ones cover. To keep an existing category, use its name exactly.
-Prefer specific, single-topic categories (for example "AI Agents", "Time Management") over broad combined ones ("A & B"). Never return a variant of an existing name.
+Each category is ONE topic (for example "Fitness", "Mental Health", "Personal Finance", "Podcasts"). Never join two topics in
+one name with "&", "and" or a comma: "Health & Fitness" must be two categories. Never return a variant of an existing name.
 Do not include a catch-all such as "{FALLBACK_CATEGORY}"; it always exists.
 For each category give a one-sentence description and 5-12 lowercase keywords or short phrases that would appear in matching titles or channel names.
 
@@ -134,7 +142,7 @@ Reply with JSON:
 
     out: Dict[str, Dict[str, Any]] = {}
     known = list(presets) + [t for t in taxonomy if t not in presets]
-    for c in raw:
+    for c in _one_topic(raw, keep=known):   # names in use stay whole; Split separates them
         if not isinstance(c, dict):
             continue
         name = _clean_name(c.get("name"))
@@ -168,22 +176,51 @@ _NAME_FILLER = {"and", "the", "of", "for", "a", "an", "to", "in", "on"}
 def _name_words(name: str) -> set:
     return {w for w in re.findall(r"[a-z0-9]+", name.lower()) if w not in _NAME_FILLER}
 
+_TOPIC_SEP = re.compile(r"\s*(?:&|,|\+|/|\band\b)\s*", re.IGNORECASE)
+
+def _topics(name: str) -> List[set]:
+    """The topics a name joins ("Health, Fitness & Wellness" -> health, fitness, wellness), each as its words."""
+    return [w for w in (_name_words(part) for part in _TOPIC_SEP.split(name)) if w]
+
+def _one_topic(cats: List[Any], keep: Iterable[str] = ()) -> List[Dict[str, Any]]:
+    """
+    Turns each proposed "A & B" into one category per topic (names in keep, and copies of them, stay whole):
+    small models join topics even when told not to. A topic keeps the keywords that share a word with it, or all of
+    them when none do; AI suggestions then sort the videos properly.
+    """
+    keep = list(keep)
+    out: List[Dict[str, Any]] = []
+    for c in cats:
+        if not isinstance(c, dict):
+            continue
+        name = _clean_name(c.get("name"))
+        parts = [p for p in _TOPIC_SEP.split(name) if _name_words(p)]
+        if len(parts) < 2 or _same_topic(name, keep):
+            out.append(c)
+            continue
+        kws = [str(k) for k in c.get("keywords") or [] if str(k).strip()] if isinstance(c.get("keywords"), list) else []
+        for part in parts:
+            out.append({**c, "name": part, "keywords": [k for k in kws if _name_words(k) & _name_words(part)] or kws})
+    return out
+
 def _same_topic(name: str, names: List[str]) -> Optional[str]:
-    """The existing name this one duplicates: equal ignoring case, one's words contained in the other's
-    ("Finance & Business Strategy" and "Finance & Business"), or at least half their words shared.
-    The closest match wins."""
-    words = _name_words(name)
+    """The existing name this one duplicates: equal ignoring case, or naming the same topics, each pair sharing at
+    least half its words ("Productivity and Career Growth" = "Productivity & Career"). A single topic never
+    duplicates a combined name ("Fitness" stays apart from "Health, Fitness & Wellness"). The closest match wins."""
     for other in names:
         if other.lower() == name.lower():
             return other
+    close = lambda a, b: len(a & b) / len(a | b) >= 0.5
+    mine, words = _topics(name), _name_words(name)
     best, best_score = None, 0.0
     for other in names:
-        ow = _name_words(other)
-        shared = words & ow
-        if not shared:
+        theirs = _topics(other)
+        if len(theirs) != len(mine) or not all(any(close(a, b) for b in theirs) for a in mine) \
+                or not all(any(close(a, b) for a in mine) for b in theirs):
             continue
-        score = len(shared) / len(words | ow)
-        if (words <= ow or ow <= words or score >= 0.5) and score > best_score:
+        ow = _name_words(other)
+        score = len(words & ow) / len(words | ow)
+        if score > best_score:
             best, best_score = other, score
     return best
 
@@ -220,7 +257,12 @@ def split_category(
     others = [o for o in other_names if o and o != name and o != FALLBACK_CATEGORY]
     other_text = "\n".join(f"- {o}" for o in sorted(others)) or "(none)"
 
-    prompt = f"""The category "{name}" is broad and should be split. Here are {len(rendered)} videos from it:
+    parts = [p for p in _TOPIC_SEP.split(name) if _name_words(p)]
+    combined = (f"""It joins {len(parts)} topics: {", ".join(f'"{p}"' for p in parts)}. Propose each of these as its own category
+(you may make a name clearer, e.g. "Business" -> "Business Strategy"), and add others only if many videos need them.
+
+""" if len(parts) > 1 else "")
+    prompt = f"""The category "{name}" is broad and should be split. {combined}Here are {len(rendered)} videos from it:
 
 {chr(10).join(rendered)}
 
@@ -247,8 +289,14 @@ Reply with JSON:
         raise LLMError("The model's reply was cut off before the end. Raise the context size (Settings, Ollama) or use a "
                        "model with a larger context." if cut else "The model's reply had no category list")
 
+    proposals = _one_topic([c for c in raw if isinstance(c, dict) and not _same_topic(_clean_name(c.get("name")), others + [name])])
+    if len(parts) > 1:   # a combined category always splits into the topics its name joins, the AI's extras after them
+        match = lambda p: next((c for c in proposals if _same_topic(_clean_name(c.get("name")), [p])), {})
+        # a topic the model gave no keywords keeps its own name as one, so new videos can still be sorted into it
+        proposals = [{**match(p), "name": p, "keywords": match(p).get("keywords") or [p.lower()]} for p in parts] + \
+                    [c for c in proposals if not any(_same_topic(_clean_name(c.get("name")), [p]) for p in parts)]
     out: List[Dict[str, Any]] = []
-    for c in raw:
+    for c in proposals:
         if not isinstance(c, dict):
             continue
         cname = _clean_name(c.get("name"))
@@ -436,8 +484,8 @@ def run_discover(max_categories: int = 12, library: Optional[int] = None,
         complete = llm.make_completer(settings, "categorize")
         # Leave room for the instructions and a reply of ~12 categories with keywords
         budget = max(3_000, llm.context_chars(settings, "categorize") - 4_000)
-        cats = discover_categories(videos, complete, presets=settings.get("presets"),
-                                   taxonomy=load_taxonomy(library=library), max_categories=max_categories, max_chars=budget)
+        cats = discover_categories(videos, complete, presets=settings.get("presets"), taxonomy=load_taxonomy(library=library),
+                                   max_categories=max_categories, max_chars=budget, interests=settings.get("interests") or "")
     except LLMError as e:
         print(f"Error: {e}")
         return False

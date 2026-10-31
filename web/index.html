@@ -1419,6 +1419,10 @@ function viewCategories() {
       ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>`
         : fb ? `<a class="btn-text" href="#/" data-act="v-cat" data-v="${esc(FALLBACK())}">Review ${fb} unsorted →</a>` : ''}
     </div>
+    ${!Object.keys(tax).length ? `<p class="note" style="margin-top:10px">No categories yet. Write what you want to learn in <a href="#/settings/about">Settings → About you</a>, then use <b>Propose categories with AI</b>: it makes one category per interest your videos cover. Or add your own.</p>`
+      : ai.interests ? '<p class="hint" style="margin-top:8px">AI proposals follow your learning interests from About you.</p>' : ''}
+    ${(() => { const joined = Object.keys(tax).filter(c => /\s&\s|,|\sand\s/i.test(c));
+      return joined.length ? `<p class="note" style="margin-top:10px">${plural(joined.length, 'category')} ${joined.length === 1 ? 'joins' : 'join'} several topics (${joined.slice(0, 3).map(c => `“${esc(c)}”`).join(', ')}${joined.length > 3 ? '…' : ''}). Use <b>Split with AI</b> on ${joined.length === 1 ? 'it' : 'each'} to give every topic its own category.</p>` : ''; })()}
     ${noMatch && ai.ready_for.categorize ? `<p class="note" style="margin-top:10px">The AI found no matching category for ${plural(noMatch, 'unsorted video')}. Add a category for ${noMatch === 1 ? 'it' : 'them'} or use <b>Propose categories with AI</b>; after the categories change, Sort offers ${noMatch === 1 ? 'it' : 'them'} again.</p>` : ''}
     <div id="job"></div>
   </section>

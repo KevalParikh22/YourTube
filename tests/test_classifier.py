@@ -2,7 +2,7 @@ import os
 import tempfile
 import unittest
 
-from classifier import FALLBACK_CATEGORY, classify_playlist_videos, classify_video, load_taxonomy, save_taxonomy, DEFAULT_TAXONOMY
+from classifier import FALLBACK_CATEGORY, classify_playlist_videos, classify_video, load_taxonomy, save_taxonomy
 
 TAX = {"Cooking": ["recipe", "pasta", "air fryer"], "Fitness": ["workout", "yoga"]}
 
@@ -30,8 +30,8 @@ class ClassifierTest(unittest.TestCase):
         classify_playlist_videos(vids, TAX)
         self.assertEqual([v["category"] for v in vids], ["Mine", "Cooking"])
 
-    def test_taxonomy_roundtrip_and_default(self):
+    def test_taxonomy_roundtrip_and_empty_start(self):
         path = os.path.join(tempfile.mkdtemp(), "tax.json")
-        self.assertEqual(load_taxonomy(path), DEFAULT_TAXONOMY)
+        self.assertEqual(load_taxonomy(path), {})   # no built-in categories: the user's interests lead
         save_taxonomy(TAX, path)
         self.assertEqual(load_taxonomy(path), TAX)

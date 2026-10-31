@@ -73,10 +73,10 @@ class DiscoverTest(unittest.TestCase):
         cats = discover_categories(self.VIDEOS, fake(reply), presets=["Finance & Business"],
                                    taxonomy={"Finance & Business": ["stocks"], "Productivity & Career": ["career"]})
         by = {c["name"]: c for c in cats}
-        self.assertEqual(set(by), {"Finance & Business", "AI & Automation Tools", "Productivity & Career"})
+        self.assertEqual(set(by), {"Finance & Business", "AI", "Automation Tools", "Productivity & Career"})   # new: one topic each
         self.assertEqual(by["Finance & Business"]["added"], ["mutual funds"])        # merged as new keywords only
         self.assertEqual(by["Productivity & Career"]["keywords"], ["career", "habits"])
-        self.assertEqual(by["AI & Automation Tools"]["added"], [])                   # a genuinely new category
+        self.assertEqual(by["Automation Tools"]["added"], [])                        # a genuinely new category
 
     def test_cut_off_reply_is_explained(self):
         with self.assertRaisesRegex(LLMError, "cut off"):
@@ -392,12 +392,52 @@ class SameTopicTest(unittest.TestCase):
 
     def test_near_copies_merge_into_the_closest_existing_category(self):
         for proposed, existing in [("Productivity and Career Growth", "Productivity & Career"),
-                                   ("Coding", "Software Engineering & Coding")]:
+                                   ("Finance and Business", "Finance & Business"),
+                                   ("Business Strategy & Finance", "Finance & Business")]:
             self.assertEqual(_same_topic(proposed, self.KNOWN), existing, proposed)
 
     def test_new_topics_stay_new(self):
         for proposed in ("Cooking", "Woodworking Projects", "Travel Vlogs", "AI Agents", "AI Tools", "Career Growth"):
             self.assertIsNone(_same_topic(proposed, self.KNOWN), proposed)
+
+    def test_one_topic_never_folds_into_a_combined_category(self):
+        known = self.KNOWN + ["Health, Fitness & Wellness", "Philosophy & Self-Improvement", "Tech Trends & Podcasts"]
+        for proposed in ("Fitness", "Health", "Coding", "Finance", "Business", "Podcasts", "Tech Trends", "Self-Improvement",
+                         "Philosophy", "Mental Health"):
+            self.assertIsNone(_same_topic(proposed, known), proposed)
+
+    def test_discover_prompt_leads_with_interests_and_one_topic_per_category(self):
+        seen = {}
+        def complete(system, prompt):
+            seen["prompt"] = prompt
+            return json.dumps({"categories": [{"name": "Communication Skills", "description": "d", "keywords": ["speaking"]},
+                                              {"name": "Fitness", "description": "d", "keywords": ["workout"]}]})
+        cats = discover_categories([{"video_id": "v1", "title": "How to speak", "channel": "c"}], complete,
+                                   presets=["Health, Fitness & Wellness"], interests="Learn: Communication skills, Physical Health")
+        self.assertIn("Learn: Communication skills", seen["prompt"])
+        self.assertIn("Never join two topics", seen["prompt"])
+        self.assertEqual({c["name"] for c in cats}, {"Communication Skills", "Fitness", "Health, Fitness & Wellness"})
+
+
+class OneTopicTest(unittest.TestCase):
+    def test_combined_proposals_become_one_category_per_topic(self):
+        reply = json.dumps({"categories": [
+            {"name": "Fitness & Body Transformation", "description": "d", "keywords": ["workout", "body fat", "gym"]},
+            {"name": "Health, Fitness & Wellness", "description": "kept: protected", "keywords": ["health"]}]})
+        cats = discover_categories([{"video_id": "v", "title": "t", "channel": "c"}], fake(reply), presets=["Health, Fitness & Wellness"])
+        names = {c["name"]: c["keywords"] for c in cats}
+        self.assertEqual(set(names), {"Fitness", "Body Transformation", "Health, Fitness & Wellness"})
+        self.assertEqual(names["Body Transformation"], ["body fat"])           # the keywords that mention it
+
+    def test_splitting_a_combined_category_gives_its_topics(self):
+        reply = json.dumps({"categories": [
+            {"name": "Fitness & Body Transformation", "description": "Training", "keywords": ["workout", "gym"]},
+            {"name": "Home Remedies", "description": "Natural cures", "keywords": ["remedy"]}]})
+        videos = [{"video_id": f"h{i}", "title": f"Video {i}", "channel": "c"} for i in range(8)]
+        cats = split_category("Health, Fitness & Wellness", videos, ["Philosophy & Self-Improvement"], fake(reply), max_new=5)
+        self.assertEqual([c["name"] for c in cats][:3], ["Health", "Fitness", "Wellness"])
+        self.assertEqual(next(c for c in cats if c["name"] == "Fitness")["keywords"], ["gym", "workout"])
+        self.assertIn("Home Remedies", [c["name"] for c in cats])
 
 
 class SplitTest(unittest.TestCase):
@@ -416,7 +456,8 @@ class SplitTest(unittest.TestCase):
             {"name": "Remote Work", "description": "Working from home", "keywords": ["remote"]},
             {"name": "Job Hunting", "description": "Resumes and interviews", "keywords": ["resume"]},
         ]})
-        cats = split_category("Productivity & Career", self.VIDEOS, ["Software Engineering & Coding"], fake(reply), max_new=5)
+        cats = split_category("Self-Improvement", self.VIDEOS, ["Software Engineering & Coding", "Productivity & Career"],
+                              fake(reply), max_new=5)
         self.assertEqual(len(cats), 5)
         names = [c["name"] for c in cats]
         self.assertEqual(names, ["AI Agents", "AI Tools", "Time Management", "Goal Setting", "Remote Work"])
@@ -431,16 +472,17 @@ class SplitTest(unittest.TestCase):
             {"name": "Career", "description": "jobs and growth", "keywords": ["career"]},
             {"name": "Productivity", "description": "getting things done", "keywords": ["focus"]},
         ]})
-        names = [c["name"] for c in split_category("Productivity & Career", self.VIDEOS, [], fake(reply))]
-        self.assertEqual(names, ["Career", "Productivity"])
+        cats = split_category("Productivity & Career", self.VIDEOS, [], fake(reply))
+        self.assertEqual([c["name"] for c in cats], ["Productivity", "Career"])   # the topics of the name, in its order
+        self.assertEqual(cats[1]["description"], "jobs and growth")
 
     def test_split_category_requires_at_least_two_valid_categories(self):
         reply = json.dumps({"categories": [
             {"name": "AI Agents", "description": "Autonomous agents", "keywords": ["agent"]},
-            {"name": "Productivity & Career", "description": "Old duplicate", "keywords": ["career"]},
+            {"name": "Productivity", "description": "Old duplicate", "keywords": ["career"]},
         ]})
         with self.assertRaises(LLMError) as cm:
-            split_category("Productivity & Career", self.VIDEOS, [], fake(reply))
+            split_category("Productivity", self.VIDEOS, [], fake(reply))
         self.assertIn("could not find distinct topics", str(cm.exception))
 
     def test_split_category_empty_videos_raises(self):
@@ -468,8 +510,7 @@ class SplitTest(unittest.TestCase):
             split = llm.library_settings(s, 1)["split"]
             self.assertIsNotNone(split)
             self.assertEqual(split["category"], "Work")
-            self.assertEqual(len(split["categories"]), 2)
-            self.assertEqual(split["categories"][0]["name"], "Focus & Flow")
+            self.assertEqual([c["name"] for c in split["categories"]], ["Focus", "Flow", "Office Politics"])   # one topic each
             self.assertIn("created_at", split)
 
     def test_category_scope_and_include_locked(self):

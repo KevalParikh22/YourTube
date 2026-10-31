@@ -8,40 +8,10 @@ import json
 from typing import List, Dict, Any, Optional
 
 FALLBACK_CATEGORY = "General / Other"
-# User-edited taxonomy (written by the dashboard); DEFAULT_TAXONOMY is used when absent
+# User-edited taxonomy (written by the dashboard); a library without one has no categories yet
 _DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(__file__)
 TAXONOMY_PATH = os.environ.get("YTKB_TAXONOMY") or os.path.join(_DATA_DIR, "taxonomy.json")
 
-# Default category taxonomy and signature keyword rules
-DEFAULT_TAXONOMY: Dict[str, List[str]] = {
-    "AI & Machine Learning": [
-        "ai", "llm", "gpt", "rag", "langchain", "deep learning", "machine learning",
-        "neural network", "transformer", "agent", "agents", "openai", "claude",
-        "gemini", "pytorch", "tensorflow", "prompt", "diffusion", "vision", "nlp"
-    ],
-    "System Design & Architecture": [
-        "system design", "architecture", "microservices", "distributed", "scalability",
-        "database", "sql", "nosql", "postgres", "redis", "kafka", "caching", "sharding",
-        "concurrency", "load balancer", "high availability", "design patterns"
-    ],
-    "Software Engineering & Coding": [
-        "python", "javascript", "typescript", "golang", "rust", "react", "next.js",
-        "frontend", "backend", "full stack", "api", "rest", "graphql", "algorithms",
-        "data structures", "leetcode", "clean code", "refactoring", "c++", "java"
-    ],
-    "DevOps, Cloud & Infrastructure": [
-        "docker", "kubernetes", "k8s", "aws", "azure", "gcp", "ci/cd", "terraform",
-        "devops", "linux", "bash", "git", "github", "monitoring", "prometheus", "grafana"
-    ],
-    "Productivity & Career": [
-        "productivity", "resume", "interview", "career", "salary", "promotion",
-        "soft skills", "study", "notion", "obsidian", "time management", "habit"
-    ],
-    "Business, Tech Trends & Podcasts": [
-        "podcast", "interview with", "startup", "founder", "tech news", "future of",
-        "crypto", "finance", "investing", "market", "economy"
-    ]
-}
 
 def taxonomy_path(library: Optional[int] = None, path: str = TAXONOMY_PATH) -> str:
     """Library 1 (the original one) uses taxonomy.json; library N uses taxonomy-N.json next to it."""
@@ -52,8 +22,8 @@ def taxonomy_path(library: Optional[int] = None, path: str = TAXONOMY_PATH) -> s
 
 def load_taxonomy(path: str = TAXONOMY_PATH, library: Optional[int] = None) -> Dict[str, List[str]]:
     """
-    A library's categories and keywords. Library 1 falls back to the built-in default taxonomy;
-    other libraries start empty (everything is General / Other until categories are added).
+    A library's categories and keywords. A new library starts empty (everything is General / Other) until the
+    user adds categories or accepts an AI proposal built from their learning interests.
     """
     path = taxonomy_path(library, path)
     if os.path.exists(path):
@@ -61,9 +31,7 @@ def load_taxonomy(path: str = TAXONOMY_PATH, library: Optional[int] = None) -> D
             data = json.load(f)
         if isinstance(data, dict):
             return {str(k): [str(kw) for kw in v] for k, v in data.items()}
-    if library and int(library) != 1:
-        return {}
-    return {k: list(v) for k, v in DEFAULT_TAXONOMY.items()}
+    return {}
 
 def save_taxonomy(taxonomy: Dict[str, List[str]], path: str = TAXONOMY_PATH, library: Optional[int] = None) -> None:
     with open(taxonomy_path(library, path), "w", encoding="utf-8") as f:

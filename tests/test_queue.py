@@ -138,6 +138,8 @@ class LaneTest(unittest.TestCase):
         job.start("rate", "R1", lambda: True, lane="cloud")
         job.start("sync", "S1", lambda: True, lane="youtube")
         self.assertTrue(wait_until(lambda: len(job.snapshot()["recent"]) == 2))
+        # each finished task queues the update just after it shows as finished, so wait for both to have tried
+        time.sleep(0.2)
         self.assertEqual([t["label"] for t in job.snapshot()["queue"]], ["Update meaning index"])
         gate.set()
         self.assertTrue(wait_until(lambda: not any(l["running"] for l in job.snapshot()["lanes"]) and not job.snapshot()["queue"]))

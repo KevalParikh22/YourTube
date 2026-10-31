@@ -319,6 +319,8 @@ Shortcuts are ignored while you type in a field.
 | Search titles, chapters, transcripts, summaries and notes | Search box in the header (or press `/`), then click a hit to jump to that moment. Tick **By meaning** to also find the same idea in other words or another language | — |
 | Ask a question across your videos | **Ask** → type the question → click a number in the answer to play that moment. Ask follow-ups below the answer ("and where does he show the code?"); **+ New question** starts over. Past conversations stay in the list on the right; **Export note** saves one as Markdown | — |
 | Summarise a video | Open it → **Summarise** (or select videos → Summarise selected). About 1–2 minutes per video with a local model. You get a TL;DR, minutes with timestamps, key claims and quotes, check-yourself questions, takeaways, related moments in your other videos, and Learn more (prerequisites, deeper, other views, YouTube searches) | — |
+| Create your first categories | A new library has none. Write what you want to learn in Settings → **About you**, then Categories → **Propose categories with AI**: one category per interest your videos cover, each a single topic ("Fitness", not "Health & Fitness"). Review and apply, or add your own | — |
+| Separate a combined category ("Health, Fitness & Wellness") | Categories → **Split with AI** on it: you get one category per topic in its name (Health, Fitness, Wellness), plus any others the AI finds; untick what you don't want → **Create and sort**. Delete the old combined category once its videos have moved | — |
 | Make a category more specific | Categories → **Split with AI** on a category with 6+ videos → tick the proposed categories → **Create and sort**. The new categories are protected; the old category's videos (also ones you placed by hand) get suggestions you review in Library → AI suggestions | — |
 | Knowledge pages | **Knowledge** tab → **Summarise 5** for a category, then **Build** (or Update) once 3 are summarised → Open; every point links to the moment it comes from; **Export note** for Obsidian | — |
 | Ask about one video | Open the video → **Ask about this video** | — |
@@ -339,7 +341,7 @@ With `YTKB_DATA_DIR` set (Docker sets it to `/data`), all of these except `.venv
 |---|---|---|
 | `yt_kb.db` | Your library: playlists, videos, statuses, notes, transcripts, ratings, questions and answers | **No**. This is your data; back it up |
 | `settings.json` | AI settings and API keys, interests, language, transcript switches | Yes (you lose AI settings and keys) |
-| `taxonomy.json` | Your categories and their keywords | Yes (built-in categories come back) |
+| `taxonomy.json` | Your categories and their keywords | Yes (you start with no categories again) |
 | `reports/` | Old static reports from earlier versions (no longer written) | Yes |
 | `frames/` | Slide thumbnails for the slide strip | Yes (the strip disappears; read slides again to restore it) |
 | `media_cache/` | Temporary audio and video while processing; emptied after each job | Yes |
