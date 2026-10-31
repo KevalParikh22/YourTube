@@ -72,7 +72,7 @@ def rrf(lists: List[List[int]], weights: List[float], k: int = RRF_K) -> Dict[in
 
 def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None,
              embed_query: Optional[Callable[[str], List[float]]] = None, model: Optional[str] = None,
-             per_video: int = PER_VIDEO) -> Dict[str, Any]:
+             per_video: int = PER_VIDEO, settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     The k best pieces for a question: {'mode': 'hybrid'|'keyword', 'pieces': [{'id', 'video_id', 'title', 'kind',
     't', 'text', 'score'}]}. filters: video_ids, categories, playlists, include_done (default True), kinds.
@@ -105,14 +105,14 @@ def retrieve(question: str, k: int = 8, filters: Optional[Dict[str, Any]] = None
     keyword = keyword[:POOL]
 
     # Meaning
-    settings = llm.load_settings()
-    model = model or embedder.model_name(settings)
+    settings = settings or llm.load_settings()
+    emb = embedder.embedder_for(settings)
+    model = model or emb.model
     meaning: List[int] = []
     rows, mat = _matrix(model)
     if len(rows):
         if embed_query is None:
-            base = settings["providers"]["ollama"].get("base_url")
-            embed_query = lambda text: embedder.embed([embedder.QUERY_PREFIX + text], model, base)[0]
+            embed_query = lambda text: emb.queries([text])[0]
         try:
             qv = np.asarray(embed_query(question), dtype=np.float32)
             qv /= np.linalg.norm(qv) + 1e-12

@@ -129,16 +129,18 @@ def _embedding_similarity(settings: Dict[str, Any], pieces: List[Dict[str, Any]]
     import numpy as np
     import embedder
     import retrieval
-    model = embedder.model_name(settings)
+    emb = embedder.embedder_for(settings)
+    model = emb.model
     rows, mat = retrieval._matrix(model)
     index = {r["id"]: i for i, r in enumerate(rows)}
     if not pieces or any(p["id"] not in index for p in pieces):
         return None
     sent = mat[[index[p["id"]] for p in pieces]]
-    base = settings["providers"]["ollama"].get("base_url")
 
     def sim(sentences: List[str]):
-        v = np.asarray(embedder.embed([CLAIM_PREFIX + s for s in sentences], model, base), dtype=np.float32)
+        # the local model's thresholds (MOVE_MARGIN, MOVE_FLOOR) were tuned with CLAIM_PREFIX, not the query prefix
+        v = np.asarray(emb.docs([CLAIM_PREFIX + s for s in sentences]) if emb.provider == "local" else emb.queries(sentences),
+                       dtype=np.float32)
         v /= np.linalg.norm(v, axis=1, keepdims=True) + 1e-12
         return (v @ sent.T).tolist()
     return sim
