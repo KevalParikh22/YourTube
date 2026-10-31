@@ -149,10 +149,10 @@ class LaneTest(unittest.TestCase):
         with mock.patch("llm.media_provider", create=True, side_effect=lambda st, task: {"transcribe": "groq"}.get(task, "local")), \
              mock.patch("llm.is_local", side_effect=lambda st, task: task == "rate"):
             got = {k: dashboard.lane_for(k, s) for k in ("sync", "details", "remove", "pull", "asr", "visual", "embed", "rate",
-                                                          "knowledge", "summarize", "suggest", "discover", "split", "weird")}
+                                                          "knowledge", "summarize", "suggest", "discover", "weird")}
         self.assertEqual(got, {"sync": "youtube", "details": "youtube", "remove": "youtube", "pull": "local", "asr": "cloud",
                                "visual": "local", "embed": "local", "rate": "local", "knowledge": "local", "summarize": "cloud",
-                               "suggest": "cloud", "discover": "cloud", "split": "cloud", "weird": "youtube"})
+                               "suggest": "cloud", "discover": "cloud", "weird": "youtube"})
 
 
 class ConcurrentWritesTest(unittest.TestCase):

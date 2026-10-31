@@ -207,81 +207,6 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual((b["category"], b["category_source"]), ("Cooking", "ai"))
         self.call("/api/videos/update", {"ids": ["b"], "reset_category": True})
 
-    def test_split_endpoints(self):
-        # 1. Refuse category with fewer than 6 videos
-        code, r = self.call("/api/categories/split", {"name": "Cooking"})
-        self.assertEqual(code, 400)
-        self.assertEqual(r["error"], "Too few videos to split")
-
-        # Add 6 videos to a new category
-        storage.save_playlist(playlist("pl_split"), [video(f"sp_{i}", f"Split Vid {i}", category="ToSplit") for i in range(6)])
-
-        # AI not configured
-        self.call("/api/ai/settings", {"provider": "none"})
-        code, r = self.call("/api/categories/split", {"name": "ToSplit"})
-        self.assertEqual(code, 400)
-        self.assertIn("Set up an AI provider", r["error"])
-
-        # With AI configured -> queues split job
-        with mock.patch("llm.is_configured", return_value=True):
-            code, r = self.call("/api/categories/split", {"name": "ToSplit"})
-            self.assertEqual(code, 200)
-            self.assertTrue(r["ok"])
-            self.assertIn("id", r)
-
-        # 2. Apply with no stored split -> 400
-        s = llm.load_settings()
-        llm.set_library_settings(s, 1, split=None)
-        llm.save_settings(s)
-        code, r = self.call("/api/categories/split/apply", {"names": ["NewCat"]})
-        self.assertEqual(code, 400)
-        self.assertEqual(r["error"], "No split proposal to apply")
-
-        # Save a split in settings
-        s = llm.load_settings()
-        split_data = {
-            "category": "ToSplit",
-            "categories": [
-                {"name": "SubCat A", "description": "Topic A", "keywords": ["topic_a", "sub"]},
-                {"name": "SubCat B", "description": "Topic B", "keywords": ["topic_b"]},
-            ],
-            "model": "test-model",
-            "created_at": "2026-10-30 10:00:00",
-        }
-        llm.set_library_settings(s, 1, split=split_data)
-        llm.save_settings(s)
-
-        # Check /api/state shows split
-        _, state = self.call("/api/state")
-        self.assertIsNotNone(state["ai"]["split"])
-        self.assertEqual(state["ai"]["split"]["category"], "ToSplit")
-
-        # Dismiss split
-        code, r = self.call("/api/categories/split/dismiss", {"library": 1})
-        self.assertEqual(code, 200)
-        _, state = self.call("/api/state")
-        self.assertIsNone(state["ai"]["split"])
-
-        # Put split back and apply
-        llm.set_library_settings(s, 1, split=split_data)
-        llm.save_settings(s)
-        code, r = self.call("/api/categories/split/apply", {
-            "library": 1,
-            "names": ["SubCat A", "SubCat B"],
-        })
-        self.assertEqual(code, 200)
-        self.assertTrue(r["ok"])
-        self.assertIn("id", r)
-
-        # State check: split cleared, categories added as presets, descriptions in category_notes
-        _, state = self.call("/api/state")
-        self.assertIsNone(state["ai"]["split"])
-        self.assertIn("SubCat A", state["taxonomy"])
-        self.assertIn("SubCat B", state["taxonomy"])
-        self.assertIn("SubCat A", state["ai"]["presets"])
-        self.assertIn("SubCat B", state["ai"]["presets"])
-        self.assertEqual(state["ai"]["category_notes"]["SubCat A"], "Topic A")
-
     def test_remove_playlist_endpoints(self):
         storage.save_playlist(playlist("PL_RM"), [video("rm_solo", "Gone soon"), video("a", "Pasta recipe", category="Cooking")])
         self.assertEqual(self.call("/api/playlists/remove?id=PL_RM"), (200, {"removed": 1, "kept_notes": 0, "shared": 1}))
@@ -351,17 +276,6 @@ class DashboardTest(unittest.TestCase):
             self.assertIn("Health", llm.load_settings()["presets"])
         finally:
             save_taxonomy(before, library=1)
-
-    def test_split_per_library(self):
-        s = llm.load_settings()
-        llm.set_library_settings(s, 1, split={"category": "Lib1Cat", "categories": []})
-        llm.set_library_settings(s, 2, split={"category": "Lib2Cat", "categories": []})
-        self.assertEqual(llm.library_settings(s, 1)["split"]["category"], "Lib1Cat")
-        self.assertEqual(llm.library_settings(s, 2)["split"]["category"], "Lib2Cat")
-        self.assertEqual(llm.public_settings(s, 1)["split"]["category"], "Lib1Cat")
-        self.assertEqual(llm.public_settings(s, 2)["split"]["category"], "Lib2Cat")
-        self.assertEqual(s["split"]["category"], "Lib1Cat")
-        self.assertEqual(s["libraries"]["2"]["split"]["category"], "Lib2Cat")
 
     def test_video_details_endpoint(self):
         code, _ = self.call("/api/video?id=a")

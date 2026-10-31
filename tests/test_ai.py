@@ -8,8 +8,7 @@ from unittest import mock
 
 import llm
 from ai_classifier import (
-    FALLBACK_CATEGORY, _same_topic, assign_categories, discover_categories,
-    split_category, run_split
+    FALLBACK_CATEGORY, _same_topic, assign_categories, discover_categories
 )
 from llm import LLMError, parse_json
 
@@ -429,15 +428,6 @@ class OneTopicTest(unittest.TestCase):
         self.assertEqual(set(names), {"Fitness", "Body Transformation", "Health, Fitness & Wellness"})
         self.assertEqual(names["Body Transformation"], ["body fat"])           # the keywords that mention it
 
-    def test_splitting_a_combined_category_gives_its_topics(self):
-        reply = json.dumps({"categories": [
-            {"name": "Fitness & Body Transformation", "description": "Training", "keywords": ["workout", "gym"]},
-            {"name": "Home Remedies", "description": "Natural cures", "keywords": ["remedy"]}]})
-        videos = [{"video_id": f"h{i}", "title": f"Video {i}", "channel": "c"} for i in range(8)]
-        cats = split_category("Health, Fitness & Wellness", videos, ["Philosophy & Self-Improvement"], fake(reply), max_new=5)
-        self.assertEqual([c["name"] for c in cats][:3], ["Health", "Fitness", "Wellness"])
-        self.assertEqual(next(c for c in cats if c["name"] == "Fitness")["keywords"], ["gym", "workout"])
-        self.assertIn("Home Remedies", [c["name"] for c in cats])
 
 
 class SeparateTest(unittest.TestCase):
@@ -451,102 +441,3 @@ class SeparateTest(unittest.TestCase):
         self.assertEqual(topics["Business"]["from"], ["Finance & Business", "Business, Tech Trends & Podcasts"])
         self.assertEqual(topics["Business"]["keywords"], ["business", "business plan"])
         self.assertEqual(topics["Podcasts"]["keywords"], ["podcast"])
-
-
-class SplitTest(unittest.TestCase):
-    VIDEOS = [{"video_id": f"v{i}", "title": f"Video {i}", "channel": "Channel"} for i in range(10)]
-
-    def test_split_category_validation_and_deduplication(self):
-        reply = json.dumps({"categories": [
-            {"name": "AI Agents", "description": "Autonomous agents", "keywords": ["agent", "llm", "Agent", " "]},
-            {"name": "AI Tools", "description": "Productivity tools with AI", "keywords": ["tool", "PROMPT", "workflow"]},
-            {"name": "Productivity & Career", "description": "Old name duplicate", "keywords": ["career"]},
-            {"name": "Software Engineering & Coding", "description": "Other existing category", "keywords": ["code"]},
-            {"name": "AI Agents", "description": "Self duplicate", "keywords": ["agent"]},
-            {"name": "General / Other", "description": "Catch all", "keywords": []},
-            {"name": "Time Management", "description": "Focus and deep work", "keywords": ["pomodoro", "focus"]},
-            {"name": "Goal Setting", "description": "OKRs and planning", "keywords": ["goals"]},
-            {"name": "Remote Work", "description": "Working from home", "keywords": ["remote"]},
-            {"name": "Job Hunting", "description": "Resumes and interviews", "keywords": ["resume"]},
-        ]})
-        cats = split_category("Self-Improvement", self.VIDEOS, ["Software Engineering & Coding", "Productivity & Career"],
-                              fake(reply), max_new=5)
-        self.assertEqual(len(cats), 5)
-        names = [c["name"] for c in cats]
-        self.assertEqual(names, ["AI Agents", "AI Tools", "Time Management", "Goal Setting", "Remote Work"])
-        agents = cats[0]
-        self.assertEqual(agents["keywords"], ["agent", "llm"])
-        tools = cats[1]
-        self.assertEqual(tools["keywords"], ["prompt", "tool", "workflow"])
-
-    def test_split_keeps_narrower_parts_of_the_parent_but_not_its_name(self):
-        reply = json.dumps({"categories": [
-            {"name": "Productivity and Career", "description": "the parent again", "keywords": ["x"]},
-            {"name": "Career", "description": "jobs and growth", "keywords": ["career"]},
-            {"name": "Productivity", "description": "getting things done", "keywords": ["focus"]},
-        ]})
-        cats = split_category("Productivity & Career", self.VIDEOS, [], fake(reply))
-        self.assertEqual([c["name"] for c in cats], ["Productivity", "Career"])   # the topics of the name, in its order
-        self.assertEqual(cats[1]["description"], "jobs and growth")
-
-    def test_split_category_requires_at_least_two_valid_categories(self):
-        reply = json.dumps({"categories": [
-            {"name": "AI Agents", "description": "Autonomous agents", "keywords": ["agent"]},
-            {"name": "Productivity", "description": "Old duplicate", "keywords": ["career"]},
-        ]})
-        with self.assertRaises(LLMError) as cm:
-            split_category("Productivity", self.VIDEOS, [], fake(reply))
-        self.assertIn("could not find distinct topics", str(cm.exception))
-
-    def test_split_category_empty_videos_raises(self):
-        with self.assertRaises(LLMError):
-            split_category("Productivity & Career", [], [], fake('{"categories": []}'))
-
-    def test_run_split_too_few_videos(self):
-        with mock.patch("storage.get_library", return_value=[{"video_id": "v1", "category": "Cooking", "library": 1}]), \
-             mock.patch("storage.video_libraries", return_value={"v1": 1}):
-            self.assertFalse(run_split("Cooking", library=1))
-
-    def test_run_split_success_and_stored_in_settings(self):
-        vids = [{"video_id": f"v{i}", "category": "Work", "library": 1, "title": f"Work {i}", "channel": "C"} for i in range(7)]
-        reply = json.dumps({"categories": [
-            {"name": "Focus & Flow", "description": "Focus", "keywords": ["focus"]},
-            {"name": "Office Politics", "description": "Navigating office", "keywords": ["office"]},
-        ]})
-        with mock.patch("storage.get_library", return_value=vids), \
-             mock.patch("storage.video_libraries", return_value={v["video_id"]: 1 for v in vids}), \
-             mock.patch("classifier.load_taxonomy", return_value={"Work": []}), \
-             mock.patch("llm.make_completer", return_value=fake(reply)):
-            ok = run_split("Work", library=1)
-            self.assertTrue(ok)
-            s = llm.load_settings()
-            split = llm.library_settings(s, 1)["split"]
-            self.assertIsNotNone(split)
-            self.assertEqual(split["category"], "Work")
-            self.assertEqual([c["name"] for c in split["categories"]], ["Focus", "Flow", "Office Politics"])   # one topic each
-            self.assertIn("created_at", split)
-
-    def test_category_scope_and_include_locked(self):
-        import storage
-        from tests.helpers import playlist, temp_db, video
-        db = temp_db()
-        storage.save_playlist(playlist(), [
-            video("v1", "Task 1", category="Work"),
-            video("v2", "Task 2", category="Work"),
-            video("v3", "Task 3", category="Work"),
-            video("v4", "Other 4", category="Cooking"),
-        ], db_path=db)
-        with storage.get_connection(db) as conn:
-            conn.execute("UPDATE videos SET category_locked = 1 WHERE video_id = 'v2'")
-            conn.commit()
-        storage.save_suggestions([{"video_id": "v3", "category": "Deep Work"}], db_path=db, include_locked=True)
-
-        vids = storage.videos_for_ai("category:Work", db_path=db)
-        vid_ids = {v["video_id"] for v in vids}
-        self.assertEqual(vid_ids, {"v1", "v2"})
-
-        stored = storage.save_suggestions([{"video_id": "v2", "category": "Office Politics"}], db_path=db, include_locked=False)
-        self.assertEqual(stored, 0)
-
-        stored = storage.save_suggestions([{"video_id": "v2", "category": "Office Politics"}], db_path=db, include_locked=True)
-        self.assertEqual(stored, 1)

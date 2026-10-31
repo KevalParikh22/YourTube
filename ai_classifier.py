@@ -24,10 +24,6 @@ DISCOVER_SYSTEM = (
     "You organise a person's YouTube watch-later backlog into a small set of clear topic "
     "categories. Reply with JSON only."
 )
-SPLIT_SYSTEM = (
-    "You split a broad topic category into a small set of specific, single-topic categories. "
-    "Reply with JSON only."
-)
 ASSIGN_SYSTEM = (
     "You sort YouTube videos into a fixed list of categories using the title and channel. "
     "Reply with JSON only."
@@ -251,101 +247,6 @@ def separate_topics(names: List[str], taxonomy: Dict[str, List[str]]) -> List[Di
     return list(out.values())
 
 
-def split_category(
-    name: str,
-    videos: List[Dict[str, Any]],
-    other_names: List[str],
-    complete: Complete,
-    max_new: int = 5,
-    max_chars: int = 60_000,
-) -> List[Dict[str, Any]]:
-    """
-    Proposes 2-5 specific, single-topic categories to replace a broad category.
-    Names must not duplicate any existing category in other_names or the category itself.
-    Returns [{'name', 'description', 'keywords'}].
-    """
-    if not videos:
-        raise LLMError("The category has no videos to split.")
-
-    sample = list(videos)
-    while len(sample) > 5 and sum(len(_item(i, v)) + 1 for i, v in enumerate(sample, 1)) > max_chars:
-        sample = _sample(sample, max(5, int(len(sample) * 0.85)))
-
-    rendered = []
-    size = 0
-    for i, v in enumerate(sample, 1):
-        line = _item(i, v)
-        if rendered and size + len(line) + 1 > max_chars:
-            break
-        rendered.append(line)
-        size += len(line) + 1
-
-    others = [o for o in other_names if o and o != name and o != FALLBACK_CATEGORY]
-    other_text = "\n".join(f"- {o}" for o in sorted(others)) or "(none)"
-
-    parts = [p for p in _TOPIC_SEP.split(name) if _name_words(p)]
-    combined = (f"""It joins {len(parts)} topics: {", ".join(f'"{p}"' for p in parts)}. Propose each of these as its own category
-(you may make a name clearer, e.g. "Business" -> "Business Strategy"), and add others only if many videos need them.
-
-""" if len(parts) > 1 else "")
-    prompt = f"""The category "{name}" is broad and should be split. {combined}Here are {len(rendered)} videos from it:
-
-{chr(10).join(rendered)}
-
-Other categories already in use in this library (do not duplicate or propose variants of these):
-{other_text}
-
-Propose between 2 and {max_new} specific, single-topic categories that together cover most of these videos.
-Prefer specific, single-topic categories (for example "AI Agents", "Time Management") over broad combined ones ("A & B").
-Do not propose "{name}" or any variant of it, or any variant of the other existing categories.
-Do not include a catch-all category such as "{FALLBACK_CATEGORY}".
-For each category give a one-sentence description and 5-12 lowercase keywords or short phrases that would appear in matching titles or channel names.
-
-Reply with JSON:
-{{"categories": [{{"name": "...", "description": "...", "keywords": ["...", "..."]}}]}}"""
-
-    reply = complete(SPLIT_SYSTEM, prompt)
-    try:
-        data = parse_json(reply)
-    except LLMError:
-        data = None
-    raw = data.get("categories") if isinstance(data, dict) else data
-    if not isinstance(raw, list):
-        cut = reply.count("{") > reply.count("}")
-        raise LLMError("The model's reply was cut off before the end. Raise the context size (Settings, Ollama) or use a "
-                       "model with a larger context." if cut else "The model's reply had no category list")
-
-    proposals = _one_topic([c for c in raw if isinstance(c, dict) and not _same_topic(_clean_name(c.get("name")), others + [name])])
-    if len(parts) > 1:   # a combined category always splits into the topics its name joins, the AI's extras after them
-        match = lambda p: next((c for c in proposals if _same_topic(_clean_name(c.get("name")), [p])), {})
-        # a topic the model gave no keywords keeps its own name as one, so new videos can still be sorted into it
-        proposals = [{**match(p), "name": p, "keywords": match(p).get("keywords") or [p.lower()]} for p in parts] + \
-                    [c for c in proposals if not any(_same_topic(_clean_name(c.get("name")), [p]) for p in parts)]
-    out: List[Dict[str, Any]] = []
-    for c in proposals:
-        if not isinstance(c, dict):
-            continue
-        cname = _clean_name(c.get("name"))
-        if not cname or cname.lower() in _CATCH_ALL:
-            continue
-        # a narrower piece of the split category ("Career" from "Productivity & Career") is the point; only its exact name is not
-        if _name_words(cname) == _name_words(name) or _same_topic(cname, others + [o["name"] for o in out]):
-            continue
-        kws = c.get("keywords") if isinstance(c.get("keywords"), list) else []
-        kws = sorted({str(k).strip().lower() for k in kws if str(k).strip()})[:12]
-        out.append({
-            "name": cname,
-            "description": " ".join(str(c.get("description") or "").split())[:200],
-            "keywords": kws,
-        })
-        if len(out) >= max_new:
-            break
-
-    if len(out) < 2:
-        raise LLMError("The AI could not find distinct topics in this category")
-    return out
-
-
 def assign_categories(
     videos: List[Dict[str, Any]],
     categories: List[str],
@@ -522,53 +423,4 @@ def run_discover(max_categories: int = 12, library: Optional[int] = None,
     llm.set_library_settings(settings, library, proposal={"categories": cats, "model": llm.describe(settings, "categorize")})
     llm.save_settings(settings)
     print(f"Proposed {len(cats)} categories. Review them on the Categories page.")
-    return True
-
-
-def run_split(name: str, library: Optional[int] = None,
-              should_stop: Callable[[], bool] = lambda: False) -> bool:
-    """Asks the configured model to split a broad category into 2-5 specific ones and stores the proposal."""
-    from datetime import datetime
-    import llm
-    import storage
-    from classifier import load_taxonomy
-
-    library = int(library or 1)
-    settings = llm.for_library(llm.load_settings(), library)
-    libs = storage.video_libraries()
-    videos = [v for v in storage.get_library() if libs.get(v["video_id"], 1) == library and v.get("category") == name]
-    print(f"Splitting category \"{name}\" with {llm.describe(settings, 'categorize')} from {len(videos)} videos…")
-    if should_stop():
-        print("Stopped before asking the model.")
-        return False
-    if len(videos) < 6:
-        print("Error: Too few videos to split.")
-        return False
-    context = storage.ai_context([v['video_id'] for v in videos], EXCERPT_CHARS)
-    if settings.get("use_descriptions", True) is False:
-        for c in context.values():
-            c.pop("description", None)
-    videos = [{**v, **context.get(v['video_id'], {})} for v in videos]
-    taxonomy = load_taxonomy(library=library)
-    other_names = [c for c in taxonomy if c != name]
-    try:
-        complete = llm.make_completer(settings, "categorize")
-        budget = max(3_000, llm.context_chars(settings, "categorize") - 4_000)
-        cats = split_category(name, videos, other_names, complete, max_chars=budget)
-    except LLMError as e:
-        print(f"Error: {e}")
-        return False
-    if should_stop():
-        print("Stopped. The split was discarded.")
-        return False
-    settings = llm.load_settings()
-    split_data = {
-        "category": name,
-        "categories": cats,
-        "model": llm.describe(settings, "categorize"),
-        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    llm.set_library_settings(settings, library, split=split_data)
-    llm.save_settings(settings)
-    print(f"Proposed {len(cats)} categories to split \"{name}\". Review them on the Categories page.")
     return True
