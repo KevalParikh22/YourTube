@@ -118,3 +118,194 @@ class HashMigrationTest(unittest.TestCase):
         self.assertEqual(storage.embedding_status("m", db_path=db), {"pieces": 1, "embedded": 0})
         self.assertEqual(len(storage.docs_missing_embeddings("m", db_path=db)), 1)
         self.assertEqual(retrieval.keyword_query('How do I run "neo4j" in a container?'), '"run" OR "neo4j" OR "container"')
+
+
+class CloudEmbeddingTest(unittest.TestCase):
+    def test_local_embedder_cache_key(self):
+        import llm
+        s = llm.default_settings()
+        emb = embedder.embedder_for(s)
+        self.assertEqual(emb.model, "qwen3-embedding:0.6b")
+        self.assertEqual(emb.provider, "local")
+        s["embed_model"] = "custom-local:4b"
+        self.assertEqual(embedder.embedder_for(s).model, "custom-local:4b")
+
+    def test_gemini_request_shape(self):
+        import json
+        import llm
+        from unittest import mock
+        s = llm.default_settings()
+        s["tasks"] = {"embed": "gemini"}
+        s["providers"]["gemini"]["api_key"] = "test-gemini-key"
+        emb = embedder.embedder_for(s)
+        self.assertEqual(emb.model, "gemini:gemini-embedding-001")
+        self.assertEqual(emb.provider, "gemini")
+
+        captured = []
+        def fake_urlopen(req, timeout=None):
+            captured.append(req)
+            body = json.loads(req.data.decode("utf-8"))
+            n = len(body.get("requests", []))
+            resp_data = {"embeddings": [{"values": [3.0, 4.0]} for _ in range(n)]}
+            m = mock.MagicMock()
+            m.__enter__.return_value = io.BytesIO(json.dumps(resp_data).encode("utf-8"))
+            return m
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            vecs = emb.docs(["doc1", "doc2"])
+            self.assertEqual(len(captured), 1)
+            req = captured[0]
+            self.assertEqual(req.full_url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:batchEmbedContents")
+            self.assertEqual(req.headers.get("X-goog-api-key"), "test-gemini-key")
+            body = json.loads(req.data.decode("utf-8"))
+            self.assertEqual(len(body["requests"]), 2)
+            self.assertEqual(body["requests"][0]["taskType"], "RETRIEVAL_DOCUMENT")
+            self.assertEqual(body["requests"][0]["model"], "models/gemini-embedding-001")
+            self.assertEqual(body["requests"][0]["content"]["parts"][0]["text"], "doc1")
+            self.assertAlmostEqual(vecs[0][0], 0.6, places=4)
+            self.assertAlmostEqual(vecs[0][1], 0.8, places=4)
+
+            # query task type
+            captured.clear()
+            qvecs = emb.queries(["query1"])
+            self.assertEqual(len(captured), 1)
+            qbody = json.loads(captured[0].data.decode("utf-8"))
+            self.assertEqual(qbody["requests"][0]["taskType"], "RETRIEVAL_QUERY")
+            self.assertAlmostEqual(qvecs[0][0], 0.6, places=4)
+
+    def test_openai_request_shape(self):
+        import json
+        import llm
+        from unittest import mock
+        s = llm.default_settings()
+        s["tasks"] = {"embed": "openai"}
+        s["providers"]["openai"]["api_key"] = "test-openai-key"
+        emb = embedder.embedder_for(s)
+        self.assertEqual(emb.model, "openai:text-embedding-3-small")
+        self.assertEqual(emb.provider, "openai")
+
+        captured = []
+        def fake_urlopen(req, timeout=None):
+            captured.append(req)
+            body = json.loads(req.data.decode("utf-8"))
+            inputs = body.get("input", [])
+            resp_data = {"object": "list", "data": [{"object": "embedding", "index": i, "embedding": [0.0, 5.0]} for i in range(len(inputs))]}
+            m = mock.MagicMock()
+            m.__enter__.return_value = io.BytesIO(json.dumps(resp_data).encode("utf-8"))
+            return m
+
+        with mock.patch("urllib.request.urlopen", side_effect=fake_urlopen):
+            vecs = emb.docs(["doc A", "doc B"])
+            self.assertEqual(len(captured), 1)
+            req = captured[0]
+            self.assertEqual(req.full_url, "https://api.openai.com/v1/embeddings")
+            self.assertEqual(req.headers.get("Authorization"), "Bearer test-openai-key")
+            body = json.loads(req.data.decode("utf-8"))
+            self.assertEqual(body["model"], "text-embedding-3-small")
+            self.assertEqual(body["input"], ["doc A", "doc B"])
+            self.assertAlmostEqual(vecs[0][0], 0.0, places=4)
+            self.assertAlmostEqual(vecs[0][1], 1.0, places=4)
+
+            captured.clear()
+            qvecs = emb.queries(["query A"])
+            self.assertEqual(len(captured), 1)
+            qbody = json.loads(captured[0].data.decode("utf-8"))
+            self.assertEqual(qbody["input"], ["query A"])
+            self.assertAlmostEqual(qvecs[0][1], 1.0, places=4)
+
+    def test_local_only_blocks_cloud_embedding(self):
+        import llm
+        s = llm.default_settings()
+        s["tasks"] = {"embed": "gemini"}
+        s["providers"]["gemini"]["api_key"] = "test-gemini-key"
+        s["local_only"] = True
+        emb = embedder.embedder_for(s)
+        self.assertEqual(emb.provider, "local")
+        self.assertEqual(emb.model, embedder.DEFAULT_MODEL)
+
+    def test_provider_switch_caches_separately_and_switching_back_needs_no_work(self):
+        import llm
+        s_local = llm.default_settings()
+        s_local["embed_model"] = "test_custom_local_model"
+
+        s_gemini = llm.default_settings()
+        s_gemini["tasks"] = {"embed": "gemini"}
+        s_gemini["providers"]["gemini"]["api_key"] = "gem-key"
+        s_gemini["providers"]["gemini"]["embed_model"] = "test_gemini_model"
+
+        emb_l = embedder.embedder_for(s_local)
+        emb_g = embedder.embedder_for(s_gemini)
+        self.assertEqual(emb_l.model, "test_custom_local_model")
+        self.assertEqual(emb_g.model, "gemini:test_gemini_model")
+
+        try:
+            # 1. Embed with local
+            fake_local_vecs = lambda texts: [[1.0, 0.0, 0.0] for _ in texts]
+            embedder.run_embed(embed_fn=fake_local_vecs, settings=s_local)
+            st_l = storage.embedding_status(emb_l.model)
+            self.assertGreater(st_l["embedded"], 0)
+            st_g = storage.embedding_status(emb_g.model)
+            self.assertEqual(st_g["embedded"], 0)
+
+            # 2. Switch to gemini and build its cache
+            fake_gemini_vecs = lambda texts: [[0.0, 1.0, 0.0] for _ in texts]
+            embedder.run_embed(embed_fn=fake_gemini_vecs, settings=s_gemini)
+            st_g2 = storage.embedding_status(emb_g.model)
+            self.assertEqual(st_g2["embedded"], st_l["embedded"])
+            # local cache was preserved!
+            st_l2 = storage.embedding_status(emb_l.model)
+            self.assertEqual(st_l2["embedded"], st_l["embedded"])
+
+            # 3. Switch back to local: no work needed!
+            called = []
+            def counting_embed(texts):
+                called.append(texts)
+                return [[1.0, 0.0, 0.0] for _ in texts]
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                embedder.run_embed(embed_fn=counting_embed, settings=s_local)
+            self.assertEqual(len(called), 0)
+            self.assertIn("up to date", out.getvalue())
+        finally:
+            storage.clear_embeddings(emb_l.model)
+            storage.clear_embeddings(emb_g.model)
+
+    def test_retrieval_uses_same_embedder_as_index(self):
+        import llm
+        import numpy as np
+        from unittest import mock
+        storage.save_playlist(playlist("PL_RET"), [video("v_ret", "Video Ret")])
+        s_gemini = llm.default_settings()
+        s_gemini["tasks"] = {"embed": "gemini"}
+        s_gemini["providers"]["gemini"]["api_key"] = "gem-key"
+
+        emb = embedder.embedder_for(s_gemini)
+        self.assertEqual(emb.model, "gemini:gemini-embedding-001")
+
+        mock_emb = mock.MagicMock()
+        mock_emb.model = "gemini:gemini-embedding-001"
+        mock_emb.queries.return_value = [[0.0, 1.0, 0.0]]
+
+        mock_rows = [{"id": 1, "video_id": "v_ret", "kind": "transcript"}]
+        mock_mat = np.array([[0.0, 1.0, 0.0]], dtype=np.float32)
+
+        with mock.patch("embedder.embedder_for", return_value=mock_emb), \
+             mock.patch("retrieval._matrix", return_value=(mock_rows, mock_mat)):
+            r = retrieval.retrieve("find pasta", settings=s_gemini)
+            mock_emb.queries.assert_called_once_with(["find pasta"])
+            self.assertEqual(r["mode"], "hybrid")
+
+    def test_local_setup_embed_status_names_provider(self):
+        import local_setup
+        import llm
+        s_loc = llm.default_settings()
+        st_loc = local_setup.embed_status(s_loc, {})
+        self.assertEqual(st_loc["provider"], "local")
+
+        s_gem = llm.default_settings()
+        s_gem["tasks"] = {"embed": "gemini"}
+        s_gem["providers"]["gemini"]["api_key"] = "gem-key"
+        st_gem = local_setup.embed_status(s_gem, {})
+        self.assertEqual(st_gem["provider"], "gemini")
+        self.assertEqual(st_gem["model"], "gemini:gemini-embedding-001")
+        self.assertTrue(st_gem["installed"])

@@ -211,10 +211,14 @@ def status() -> Dict[str, Any]:
 def embed_status(settings: Dict[str, Any], ollama_state: Dict[str, Any]) -> Dict[str, Any]:
     """The meaning index: which embedding model, whether Ollama has it, and how many pieces have vectors."""
     import embedder
+    import llm
     import storage
+    provider = llm.media_provider(settings, "embed")
     model = embedder.model_name(settings)
     names = {m["name"] for m in ollama_state.get("models", [])}
-    return {"model": model, "installed": model in names, "choices": [{**m, "installed": m["model"] in names} for m in EMBED_MODELS],
+    installed = True if provider != "local" else (model in names)
+    return {"provider": provider, "model": model, "installed": installed,
+            "choices": [{**m, "installed": m["model"] in names} for m in EMBED_MODELS],
             **storage.embedding_status(model)}
 
 

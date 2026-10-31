@@ -316,7 +316,8 @@ def related_moments(video_id: str, summary: Dict[str, Any], settings: Optional[D
     import retrieval
     import storage
     settings = settings or llm.load_settings()
-    model = embedder.model_name(settings)
+    emb = embedder.embedder_for(settings)
+    model = emb.model
     rows, mat = retrieval._matrix(model)
     minutes = summary.get("minutes") or []
     if not len(rows) or not minutes:
@@ -330,8 +331,7 @@ def related_moments(video_id: str, summary: Dict[str, Any], settings: Optional[D
     texts = [f"{m['topic']}: {' '.join(m['notes'])}" for m in minutes]
     try:
         if embed_fn is None:
-            base = settings["providers"]["ollama"].get("base_url")
-            embed_fn = lambda t: embedder.embed([embedder.QUERY_PREFIX + x for x in t], model, base)
+            embed_fn = emb.queries
         q = np.asarray(embed_fn(texts), dtype=np.float32)
     except Exception:
         return {}

@@ -100,6 +100,28 @@ class AskTest(unittest.TestCase):
         self.assertEqual(llm.provider_for(s, "ask"), "anthropic")
         self.assertEqual(llm.provider_for({**s, "tasks": {}}, "ask"), "gemini")
 
+    def test_citation_checks_use_same_embedder_as_index(self):
+        import numpy as np
+        s_gem = llm.default_settings()
+        s_gem["tasks"] = {"embed": "gemini"}
+        s_gem["providers"]["gemini"]["api_key"] = "test-key"
+
+        mock_emb = mock.MagicMock()
+        mock_emb.model = "gemini:gemini-embedding-001"
+        mock_emb.queries.return_value = [[0.0, 1.0]]
+
+        pieces = [{"id": 1, "video_id": "v1", "text": "text1"}]
+        mock_rows = [{"id": 1}]
+        mock_mat = np.array([[0.0, 1.0]], dtype=np.float32)
+
+        with mock.patch("embedder.embedder_for", return_value=mock_emb), \
+             mock.patch("retrieval._matrix", return_value=(mock_rows, mock_mat)):
+            sim_fn = asker._embedding_similarity(s_gem, pieces)
+            self.assertIsNotNone(sim_fn)
+            scores = sim_fn(["sentence one"])
+            mock_emb.queries.assert_called_once_with(["sentence one"])
+            self.assertAlmostEqual(scores[0][0], 1.0, places=4)
+
 
 class FollowUpTest(unittest.TestCase):
     def test_follow_up_is_rewritten_and_keeps_filters(self):
