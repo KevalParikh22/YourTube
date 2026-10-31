@@ -9,6 +9,8 @@ cookies*.txt
 reports/
 media_cache/
 frames/
+exports/
+backups/
 data/
 .team/runs/
 # Logs
