@@ -140,7 +140,7 @@
   /* ---------- library ---------- */
   .lib { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; margin-top: 40px; align-items: start; }
   .rail { position: sticky; top: 80px; max-height: calc(100vh - 96px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; display: flex; flex-direction: column; gap: 28px; }
-  .rail h4 { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .rail h4 { margin: 0 0 6px; font-size: 12.5px; font-weight: 500; letter-spacing: .02em; color: var(--ink-3); }
   .rail a {
     display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; margin: 0 -8px; border-radius: 5px;
     text-decoration: none; color: var(--ink-2);
@@ -209,6 +209,11 @@
   .empty { padding: 56px 0; text-align: center; color: var(--ink-2); }
   .empty h2 { font-weight: 600; font-size: 20px; color: var(--ink); margin: 0 0 6px; }
   .empty .btn { margin-top: 18px; }
+  .home-card { padding: 20px 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
+  .home-card + .home-card { margin-top: 16px; }
+  .knowledge-page { max-width: 68ch; margin: 28px auto 0; font: 16px/1.65 var(--serif); }
+  .knowledge-page .h { font-family: var(--serif); font-size: 19px !important; }
+  .knowledge-page ul { font: inherit; }
 
   /* ---------- tables ---------- */
   .tbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 16px; }
@@ -471,7 +476,7 @@
   .drawer-body { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 22px; }
   .embed { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
   .embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-  .drawer h3 { font-weight: 600; font-size: 19px; line-height: 1.25; margin: 0; }
+  .drawer h3 { font: 600 24px/1.2 var(--serif); letter-spacing: -.01em; margin: 0; overflow-wrap: anywhere; }
   .drawer .by { color: var(--ink-2); margin-top: 6px; font-size: 13.5px; }
   .speeds { display: flex; gap: 18px; font-size: 13px; color: var(--ink-3); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
   .speeds b { color: var(--ink); font-weight: 500; }
@@ -533,6 +538,7 @@
     .tabs { flex: 1 1 auto; gap: 16px; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
     .bar-right { gap: 2px; }
     #libpick select { max-width: 104px; }
+    .home-card { padding: 0; border: 0; background: none; }   /* phone: rows need the full width */
     .page { padding: 28px 16px 72px; }
     .display { font-size: 30px; }
     .display em { display: block; margin: 4px 0 0; font-size: 18px; }
@@ -816,7 +822,7 @@ function renderView() {
   }
   else { v.innerHTML = videos().length ? viewLibrary() : emptyState(); renderList(); }
 }
-const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a YouTube playlist to get started. YourTube only reads it and never changes it.<br><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
+const emptyState = () => `<div class="empty"><h2>Your library is empty</h2><p>Add a playlist to start building your study library.</p><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
 
 /* ---------------- library ---------------- */
 function statusFilter(v, status, src) {
@@ -1018,7 +1024,7 @@ function viewHome() {
     </div>
   </section>
 
-  <section class="section">
+  <section class="section home-card">
     <h2 class="h">Today's session</h2>
     <div class="form-row" style="margin-top:12px">
       <label class="field">Minutes<input type="number" min="5" step="5" value="${S.session.mins}" data-change="s-mins" aria-label="Session minutes"></label>
@@ -1030,17 +1036,17 @@ function viewHome() {
         : `<p class="note" style="margin-top:12px">${session.pool ? 'No single video fits. Try more minutes or a faster speed.' : 'Nothing left to watch here.'}</p>`}</div>
   </section>
 
-  <section class="section"><h2 class="h">Continue watching</h2>
+  <section class="section home-card"><h2 class="h">Continue watching</h2>
     ${inProgress.length ? `<ul class="rows">${inProgress.map(row).join('')}</ul>` : '<p class="note">Nothing in progress.</p>'}
   </section>
 
-  <section class="section"><h2 class="h">Top picks</h2>
+  <section class="section home-card"><h2 class="h">Top picks</h2>
     ${!rated.length ? `<p class="note">Rate your videos to get picks. <button class="btn-text" data-act="rate-batch">Rate videos</button></p>`
       : picks.length ? `<ul class="rows">${picks.map(row).join('')}</ul><a class="btn-text" href="#/" data-act="home-picks">See all →</a>`
         : '<p class="note">No unwatched Watch picks yet.</p>'}
   </section>
 
-  <section class="section"><h2 class="h">Needs you</h2>
+  <section class="section home-card"><h2 class="h">Needs you</h2>
     ${suggestions || unrated || failedSync || knowledgeStale || videos().some(v => v.category === FALLBACK()) ? `<ul class="rows" style="margin-top:10px">
       ${suggestions ? `<li><a href="#/" data-act="v-status" data-v="suggested">${plural(suggestions, 'AI suggestion')} to review →</a></li>` : ''}
       ${unrated ? `<li><button class="btn-text" data-act="rate-batch">${plural(unrated, 'video')} not rated yet · Rate</button></li>` : ''}
@@ -1050,7 +1056,7 @@ function viewHome() {
     </ul>` : '<p class="note">Nothing needs your attention.</p>'}
   </section>
 
-  <section class="section"><details ${innerWidth > 760 ? 'open' : ''}><summary class="h" style="cursor:pointer">Time by category</summary>
+  <section class="section home-card"><details ${innerWidth > 760 ? 'open' : ''}><summary class="h" style="cursor:pointer">Time by category</summary>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th><th class="r">Left</th><th class="r">Time at ${sx(S.speed)}</th><th class="r">Study days</th><th class="r">Done by</th></tr></thead>
       <tbody>${rows.map(({ c, st, sd }) => `<tr><td><a href="#/" data-act="v-cat" data-v="${esc(c)}">${esc(c)}</a></td><td class="r">${st.left}</td><td class="r">${fmt(st.rem / S.speed)}</td><td class="r">${sd || '–'}</td><td class="r">${finish(sd)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td>Everything</td><td class="r">${all.left}</td><td class="r">${fmt(all.rem / S.speed)}</td><td class="r">${allDays}</td><td class="r">${finish(allDays)}</td></tr></tfoot></table></div>
@@ -1859,7 +1865,7 @@ function viewKnowledgeList() {
   <section class="section">
     ${list === null ? '<p class="note"><span class="spin" style="display:inline-block"></span> Loading topics…</p>'
       : list.error ? `<p class="note warn-text">Could not load topics: ${esc(list.error)}</p>`
-      : !list.length ? '<p class="note faint">No categories found in this library.</p>'
+      : !list.length ? '<div class="empty"><p>No topics are available for study yet.</p><a class="btn btn-dark" href="#/categories">Review categories</a></div>'
       : `<div class="tbl-wrap"><table class="tbl">
           <thead>
             <tr>
@@ -1954,7 +1960,7 @@ function viewKnowledgePage(cat) {
       <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
-      <p class="lede">No knowledge page has been built for this topic yet.</p>
+      <p class="lede">Build a study page from this topic’s video summaries.</p>
       <div class="actions" style="margin-top:16px">
         <button class="btn btn-dark btn-sm" data-act="knowledge-build" data-cat="${esc(cat)}" ${!ai.ready_for.summarize ? 'disabled' : ''}>Build page</button>
       </div>
@@ -1994,13 +2000,13 @@ function viewKnowledgePage(cat) {
     <div id="job"></div>
   </section>
 
-  <article class="knowledge-page" style="margin-top:28px">
-    ${p.overview ? `<div class="lede" style="font-size:16px;line-height:1.65;margin-bottom:28px;color:var(--ink)">${esc(p.overview)}</div>` : ''}
+  <article class="knowledge-page">
+    ${p.overview ? `<div style="margin-bottom:28px;color:var(--ink)">${esc(p.overview)}</div>` : ''}
 
     ${(p.sections || []).map(sec => `
       <section style="margin-top:28px">
         <h2 class="h" style="font-size:18px;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line)">${esc(sec.heading)}</h2>
-        <ul style="list-style:disc;padding-left:22px;margin:0 0 16px;font-size:15px;line-height:1.6">
+        <ul style="list-style:disc;padding-left:22px;margin:0 0 16px;line-height:1.65">
           ${(sec.points || []).map(pt => `
             <li style="margin-bottom:8px">
               <span>${esc(pt.text)}</span> ${(pt.cites || []).map(renderCite).join(' ')}
