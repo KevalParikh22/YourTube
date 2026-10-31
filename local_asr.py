@@ -15,6 +15,7 @@ import os
 import random
 import shutil
 import subprocess
+import threading
 import time
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
@@ -276,6 +277,7 @@ def run_asr(
     """Transcribes candidate videos (or the given ones). Prints progress for the job log."""
     import llm
     import storage
+    import parallel
 
     if settings is None:
         settings = llm.load_settings()
@@ -317,82 +319,149 @@ def run_asr(
         if engine == "gemini":
             print("   Timestamps from Gemini are approximate.")
 
+    helper = llm.helper_for(settings, "transcribe")
+    engines = [engine] + ([helper] if helper else [])
+    for worker_engine in engines:
+        if worker_engine == "local" and not available():
+            print("Error: Local transcription needs faster-whisper and ffmpeg. Run: bash scripts/setup.sh --local-ai")
+            return False
+        if worker_engine != "local" and shutil.which("ffmpeg") is None:
+            print("Error: Transcription needs ffmpeg. Run: bash scripts/setup.sh")
+            return False
+
     for v in queue:
         storage.set_job(v["video_id"], "asr", status="queued", error=None, progress=0)
 
-    transcriber = None
     done = failed = 0
-    try:
-        for n, v in enumerate(queue, 1):
-            vid, label = v["video_id"], (v.get("title") or v["video_id"])[:60]
-            if should_stop():
-                print("Stopped. Finished videos are saved; run again for the rest.")
-                break
-            timings: Dict[str, float] = {}
-            path = None
-            try:
-                storage.set_job(vid, "asr", status="downloading")
+    tally = threading.Lock()   # two workers update the counts when a helper engine shares the queue
+    bot_seen = [False]
+    counts = {name: 0 for name in engines}
+    worker_states = {}
+
+    def process(worker_engine, v):
+        nonlocal done, failed
+        state = worker_states[worker_engine]
+        n = state["started"] = state["started"] + 1
+        prefix = f"[{n}/{len(queue)}] "
+        if helper:
+            prefix = f"[{n}/{len(queue)}] [{worker_engine}] "
+        vid, label = v["video_id"], (v.get("title") or v["video_id"])[:60]
+        if should_stop():
+            return False
+        timings: Dict[str, float] = {}
+        path = None
+        try:
+            storage.set_job(vid, "asr", status="downloading")
+            t = time.time()
+            path = download(vid)
+            timings["download_s"] = round(time.time() - t, 1)
+            last = [0.0]
+
+            def progress(p, vid=vid):
+                if p - last[0] >= 0.1:
+                    last[0] = p
+                    storage.set_job(vid, "asr", progress=round(p, 2))
+
+            if worker_engine == "local":
+                samples = decode_audio(path)
+                timings["audio_s"] = round(len(samples) / 16000)
+                if state["transcriber"] is None:
+                    if state["dev"] in ("cuda", "mlx"):
+                        freed = unload_ollama(settings["providers"]["ollama"].get("base_url"))
+                        if freed:
+                            print(f"   Unloaded {', '.join(freed)} from the GPU to make room.")
+                    print(f"   Loading {state['name']} (the first time downloads it: ~1.6 GB for large-v3-turbo, ~0.5 GB for small)…")
+                    state["transcriber"] = state["factory"](state["name"], state["dev"], state["compute"])
+                storage.set_job(vid, "asr", status="transcribing")
                 t = time.time()
-                path = download(vid)
-                timings["download_s"] = round(time.time() - t, 1)
-                last = [0.0]
+                segments, language = state["transcriber"](samples, progress)
+                timings["transcribe_s"] = round(time.time() - t, 1)
+                save_model = state["name"]
+            else:
+                storage.set_job(vid, "asr", status="transcribing")
+                t = time.time()
+                import cloud_asr
+                worker_settings = state["settings"]
+                model = cloud_model(worker_settings, worker_engine)
+                call_transcribe = transcribe_cloud or cloud_asr.transcribe
+                segments, language = call_transcribe(path, worker_engine, worker_settings, progress=progress)
+                timings["transcribe_s"] = round(time.time() - t, 1)
+                timings["audio_s"] = v.get("duration_seconds") or (round(segments[-1]["start"] + segments[-1].get("dur", 0)) if segments else 0)
+                save_model = f"{worker_engine}:{model}"
 
-                def progress(p, vid=vid):
-                    if p - last[0] >= 0.1:
-                        last[0] = p
-                        storage.set_job(vid, "asr", progress=round(p, 2))
-
-                if engine == "local":
-                    samples = decode_audio(path)
-                    timings["audio_s"] = round(len(samples) / 16000)
-                    if transcriber is None:
-                        if dev in ("cuda", "mlx"):
-                            freed = unload_ollama(settings["providers"]["ollama"].get("base_url"))
-                            if freed:
-                                print(f"   Unloaded {', '.join(freed)} from the GPU to make room.")
-                        print(f"   Loading {name} (the first time downloads it: ~1.6 GB for large-v3-turbo, ~0.5 GB for small)…")
-                        transcriber = transcriber_factory(name, dev, compute)
-                    storage.set_job(vid, "asr", status="transcribing")
-                    t = time.time()
-                    segments, language = transcriber(samples, progress)
-                    timings["transcribe_s"] = round(time.time() - t, 1)
-                    storage.save_local_transcript(vid, segments, language=language, model=name)
-                else:
-                    storage.set_job(vid, "asr", status="transcribing")
-                    t = time.time()
-                    import cloud_asr
-                    call_transcribe = transcribe_cloud or cloud_asr.transcribe
-                    segments, language = call_transcribe(path, engine, settings, progress=progress)
-                    timings["transcribe_s"] = round(time.time() - t, 1)
-                    timings["audio_s"] = v.get("duration_seconds") or (round(segments[-1]["start"] + segments[-1].get("dur", 0)) if segments else 0)
-                    save_model = f"{engine}:{cloud_mod}"
-                    storage.save_local_transcript(vid, segments, language=language, model=save_model)
-
-                storage.set_job(vid, "asr", status="done", progress=1.0, timings=timings)
+            storage.save_local_transcript(vid, segments, language=language, model=save_model)
+            storage.set_job(vid, "asr", status="done", progress=1.0, timings=timings)
+            with tally:
                 done += 1
-                audio_secs = timings.get("audio_s") or (v.get("duration_seconds") or 0)
-                speed = audio_secs / max(0.1, timings["transcribe_s"])
-                note = " · captions kept; choose in the video panel" if v.get("reason") == "wrong_script" else ""
-                print(f"   [{n}/{len(queue)}] ✓ {label} · {language} · {len(segments)} lines · {speed:.0f}× real time{note}")
-            except BotCheck:
-                storage.set_job(vid, "asr", status="queued")
-                print("YouTube asked to confirm we're not a bot. Stopping; try again in an hour or two.")
-                return False
-            except Exception as e:  # one bad video shouldn't stop the run
+                counts[worker_engine] += 1
+            audio_secs = timings.get("audio_s") or (v.get("duration_seconds") or 0)
+            speed = audio_secs / max(0.1, timings["transcribe_s"])
+            note = " · captions kept; choose in the video panel" if v.get("reason") == "wrong_script" else ""
+            parallel.safe_print(f"   {prefix}✓ {label} · {language} · {len(segments)} lines · {speed:.0f}× real time · {save_model}{note}")
+            return True
+        except BotCheck:
+            storage.set_job(vid, "asr", status="queued")
+            bot_seen[0] = True
+            return False
+        except Exception as e:
+            with tally:
                 failed += 1
-                storage.set_job(vid, "asr", status="failed", error=str(e)[:300], timings=timings)
-                print(f"   [{n}/{len(queue)}] Warning: {label}: {str(e)[:120]}")
-            finally:
-                if path and os.path.exists(path):
-                    os.remove(path)   # media is temporary (Phase 2.5 rule)
-            if n < len(queue):
-                if engine == "local":
-                    _cool_down(sleep)
+            storage.set_job(vid, "asr", status="failed", error=str(e)[:300], timings=timings)
+            parallel.safe_print(f"   {prefix}Warning: {label}: {str(e)[:120]}")
+            return False
+        finally:
+            if path and os.path.exists(path):
+                os.remove(path)
+            if worker_engine == "local":
+                _cool_down(sleep)
+            if not should_stop():
                 sleep(DOWNLOAD_DELAY + random.uniform(0, DOWNLOAD_DELAY / 2))
+
+    def worker(worker_engine):
+        worker_settings = dict(settings)
+        worker_settings["tasks"] = dict(settings.get("tasks") or {})
+        worker_settings["tasks"]["transcribe"] = worker_engine
+        if worker_engine == "local":
+            dev = device() if make_transcriber is Transcriber else "cpu"
+            name, compute = choose_model(settings, dev)
+            factory = MlxTranscriber if dev == "mlx" and make_transcriber is Transcriber else make_transcriber
+        else:
+            dev, name, compute, factory = "cloud", cloud_model(worker_settings, worker_engine), None, None
+        worker_states[worker_engine] = {"settings": worker_settings, "dev": dev, "name": name,
+                                        "compute": compute, "factory": factory, "transcriber": None, "started": 0}
+
+        def run_video(v):
+            process(worker_engine, v)
+        return run_video
+
+    try:
+        if helper:
+            count_map = parallel.share(queue, {str(e): worker(e) for e in engines}, should_stop=lambda: should_stop() or bot_seen[0],
+                                       on_error=lambda name, item, exc: None)
+        else:
+            fn = worker(engine)
+            for v in queue:
+                if should_stop():
+                    break
+                try:
+                    fn(v)
+                    if bot_seen[0]:
+                        break
+                except BotCheck:
+                    print("YouTube asked to confirm we're not a bot. Stopping; try again in an hour or two.")
+                    return False
+                except Exception:
+                    pass
+        if bot_seen[0]:
+            print("YouTube asked to confirm we're not a bot. Stopping; try again in an hour or two.")
     finally:
         _clear_cache()   # jobs never reached stay "queued", which the UI shows as not started
+    if should_stop():
+        print("Stopped. Finished videos are saved; run again for the rest.")
     print(f"{done} transcribed" + (f", {failed} failed" if failed else "") + ".")
-    return done > 0 or failed == 0
+    if helper:
+        print("   By engine: " + ", ".join(f"{count} by {name}" for name, count in counts.items()) + ".")
+    return not bot_seen[0] and (done > 0 or failed == 0)
 
 
 def _cool_down(sleep: Callable[[float], None], max_wait: float = 90) -> None:

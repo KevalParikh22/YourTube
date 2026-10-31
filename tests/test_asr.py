@@ -268,6 +268,56 @@ class RunAsrTest(unittest.TestCase):
         self.assertTrue(log.splitlines()[0].startswith("Gemini gemini-3.8-flash"))
         self.assertIn("Timestamps from Gemini are approximate.", log)
 
+    def test_helper_shares_videos_between_local_and_cloud_workers(self):
+        import cloud_asr
+        import llm
+        from unittest import mock
+        settings = llm.load_settings()
+        settings["tasks"]["transcribe"] = "local"
+        settings["helpers"]["transcribe"] = "groq"
+        settings["providers"]["groq"]["api_key"] = "test-key"
+        storage.save_playlist(playlist("HELP"), [video("h1", "Helper one"), video("h2", "Helper two")])
+        for vid in ("h1", "h2"):
+            storage.save_details(vid, {"status": "no_captions"})
+        downloads = []
+
+        def download(vid):
+            downloads.append(vid)
+            return self.fake_download(vid)
+
+        local_factory = lambda name, dev, compute: (lambda samples, progress: ([{"start": 0, "dur": 1, "text": "local"}], "en"))
+        with mock.patch("local_asr.available", return_value=True), \
+                mock.patch("local_asr.device", return_value="cpu"), \
+                mock.patch.object(cloud_asr, "transcribe", return_value=([{"start": 0, "dur": 1, "text": "cloud"}], "en")), \
+                mock.patch("local_asr._cool_down"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            ok = local_asr.run_asr(["h1", "h2"], download=download, make_transcriber=local_factory,
+                                   decode_audio=lambda p: [0.0] * 16000, sleep=lambda s: None, settings=settings)
+
+        self.assertTrue(ok)
+        self.assertCountEqual(downloads, ["h1", "h2"])
+        self.assertEqual(len(downloads), 2)
+        models = {storage.get_details(vid)["asr_model"] for vid in ("h1", "h2")}
+        self.assertEqual(models, {"groq:whisper-large-v3-turbo", "small"},
+                         {vid: storage.get_details(vid) for vid in ("h1", "h2")})
+
+    def test_helper_honors_stop_before_claiming_items(self):
+        import llm
+        storage.save_playlist(playlist("STOP"), [video("s1", "Stop one"), video("s2", "Stop two")])
+        for vid in ("s1", "s2"):
+            storage.save_details(vid, {"status": "no_captions"})
+        settings = llm.load_settings()
+        settings["tasks"]["transcribe"] = "local"
+        settings["helpers"]["transcribe"] = "groq"
+        settings["providers"]["groq"]["api_key"] = "test-key"
+        with unittest.mock.patch("local_asr.available", return_value=True), \
+                unittest.mock.patch("local_asr.shutil.which", return_value="/usr/bin/ffmpeg"), \
+                contextlib.redirect_stdout(io.StringIO()):
+            ok = local_asr.run_asr(["s1", "s2"], should_stop=lambda: True, settings=settings)
+        self.assertTrue(ok)
+        self.assertNotIn("asr", storage.get_details("s1"))
+        self.assertNotIn("asr", storage.get_details("s2"))
+
     def test_cloud_cost_estimates(self):
         import llm
         settings = llm.load_settings()
