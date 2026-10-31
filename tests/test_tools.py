@@ -305,6 +305,9 @@ class ToolsAPITest(unittest.TestCase):
         # invalid browser type
         status, data = self.call_post("/api/tools/length", {"links": ["PL1"], "browser": 123})
         self.assertEqual(status, 400)
+        for bad in (["firefox"], {"a": 1}, "netscape"):   # unhashable or unknown: a 400, never a crash
+            status, data = self.call_post("/api/tools/length", {"links": ["PL1"], "browser": bad})
+            self.assertEqual(status, 400, bad)
 
     @mock.patch("extractor.extract_playlist_metadata")
     @mock.patch("extractor.extract_video")

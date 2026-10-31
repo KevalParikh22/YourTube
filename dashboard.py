@@ -1079,7 +1079,7 @@ class Handler(BaseHTTPRequestHandler):
                 if len(raw_links) > 10 or len(cleaned) > 10:
                     return self._error("At most 10 links allowed")
                 browser = body.get("browser") or None
-                if browser is not None and browser not in ALLOWED_BROWSERS:
+                if browser is not None and (not isinstance(browser, str) or browser not in ALLOWED_BROWSERS):
                     return self._error("Unknown browser")
                 return self._json({"items": tools.read_links(cleaned, browser=browser)})
 

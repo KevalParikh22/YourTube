@@ -1234,6 +1234,12 @@ function toolsCsv(videos) {
   const blob = new Blob(['\ufeff' + rows.map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'yourtube-videos.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+// A playlist's videos split into shared with the other read playlists, and only here
+function toolsSplit(item) {
+  const others = new Set(S.tools.items.filter(x => x !== item && Array.isArray(x.videos)).flatMap(x => x.videos.map(v => v.video_id)));
+  return { shared: item.videos.filter(v => others.has(v.video_id)), only: item.videos.filter(v => !others.has(v.video_id)) };
+}
+const toolsSum = vs => vs.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
 function toolVideos(item, index) {
   const from = Math.max(1, Math.min(item.videos.length || 1, +(S.tools.ranges[index]?.from || 1)));
   const to = Math.max(from, Math.min(item.videos.length || 1, +(S.tools.ranges[index]?.to || item.videos.length || 1)));
@@ -1252,16 +1258,11 @@ function viewTools() {
     const vids = toolVideos(item, index), seconds = vids.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
     const known = vids.filter(v => videosInLibrary.has(v.video_id));
     const knownTime = known.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
-    const compare = items.length > 1 && items.every(x => x.kind === 'playlist') ? (() => {
-      const others = new Set(items.filter((_, i) => i !== index).flatMap(x => x.videos.map(v => v.video_id)));
-      const shared = item.videos.filter(v => others.has(v.video_id)), only = item.videos.filter(v => !others.has(v.video_id));
-      return { shared, only };
-    })() : null;
+    const compare = items.length > 1 && items.every(x => x.kind === 'playlist');
     return `<section class="section card"><h2 class="h">${esc(item.title || item.id || 'Untitled')}</h2><p class="note">${plural(item.videos.length, 'video')}${item.unavailable ? ` · ${item.unavailable} unavailable` : ''} · ${fmt(item.videos.reduce((sum, v) => sum + (v.duration_seconds || 0), 0))} total</p>
       <div class="form-row" style="margin-top:12px"><label class="field">From video<input type="number" min="1" max="${item.videos.length}" value="${fromValue(range.from, item.videos.length, 1)}" data-change="tools-range" data-index="${index}" data-bound="from"></label><label class="field">To video<input type="number" min="1" max="${item.videos.length}" value="${fromValue(range.to, item.videos.length, item.videos.length)}" data-change="tools-range" data-index="${index}" data-bound="to"></label></div>
       <p class="note" id="tools-range-summary-${index}">Range: videos ${vids.length ? `${rangeFrom}–${rangeTo}` : 'none'} · ${fmt(seconds)}</p>${toolsSpeeds(seconds, `tools-speeds-${index}`)}
       <p class="note" id="tools-library-${index}">${known.length} already in your library (${fmt(knownTime)} total)</p>
-      ${compare ? `<p class="note">Shared with other playlists: ${plural(compare.shared.length, 'video')} (${fmt(compare.shared.reduce((s, v) => s + (v.duration_seconds || 0), 0))}) · only here: ${plural(compare.only.length, 'video')} (${fmt(compare.only.reduce((s, v) => s + (v.duration_seconds || 0), 0))})</p>` : ''}
       <div class="actions"><button class="btn" data-act="tools-export" data-index="${index}">Export CSV</button>${item.kind === 'playlist' ? `<button class="btn btn-dark" data-act="tools-add" data-index="${index}">Add to library</button>` : ''}${compare ? `<button class="btn" data-act="tools-export-only" data-index="${index}">Export only here</button>` : ''}</div></section>`;
   }).join('');
   const sharedIds = new Set();
@@ -1272,7 +1273,9 @@ function viewTools() {
   return `<section><div class="eyebrow">Tools</div><h1 class="display">Playlist length<em>for any playlist or video</em></h1><p class="lede">Paste playlist or video links to see how long they take, without adding them to your library.</p></section>
     <section class="section card"><label class="field">Playlist or video links<textarea id="tools-links" rows="4" placeholder="One YouTube link per line">${esc(t.links)}</textarea></label><label class="check" style="margin-top:12px"><input id="tools-browser" type="checkbox" ${t.browser ? 'checked' : ''}> Use my YouTube sign-in for private playlists</label><div class="actions" style="margin-top:14px"><button class="btn btn-dark" data-act="tools-calculate" ${t.busy ? 'disabled' : ''}>${t.busy ? `Reading ${t.links.split(/\r?\n/).filter(x => x.trim()).length} links…` : 'Calculate'}</button></div></section>
     ${errors.map(x => `<p class="banner warn">${esc(x.link || '')}: ${esc(x.error)}${!t.browser && !x.link?.includes('watch?v=') ? ' If it is a private playlist, tick “Use my YouTube sign-in” and calculate again.' : ''}</p>`).join('')}
-    ${items.length > 1 ? `<section class="section card"><h2 class="h">Combined length</h2><p class="note">${allById.size} unique videos · ${fmt(total)}</p>${toolsSpeeds(total)}</section>` : ''}${resultCards}
+    ${items.length > 1 ? `<section class="section card"><h2 class="h">Combined length</h2><p class="note">${allById.size} unique videos · ${fmt(total)}</p>${toolsSpeeds(total)}
+      ${items.every(x => x.kind === 'playlist') ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Playlist</th><th class="r">Videos</th><th class="r">Total</th><th class="r">Shared</th><th class="r">Only here</th></tr></thead><tbody>${items.map(item => { const { shared, only } = toolsSplit(item);
+        return `<tr><td>${esc(item.title || item.id || 'Untitled')}</td><td class="r">${item.videos.length}</td><td class="r">${fmt(toolsSum(item.videos))}</td><td class="r">${shared.length} · ${fmt(toolsSum(shared))}</td><td class="r">${only.length} · ${fmt(toolsSum(only))}</td></tr>`; }).join('')}</tbody></table></div>` : ''}</section>` : ''}${resultCards}
     ${sharedIds.size ? `<p class="note">${plural(sharedIds.size, 'video')} appear in more than one playlist.</p>` : ''}
     ${items.length ? `<section class="section card"><h2 class="h">Daily planner</h2><div class="form-row" style="margin-top:12px"><label class="field">Minutes a day<input type="number" min="5" step="5" value="${t.mins}" data-change="tools-plan" data-key="mins"></label><label class="field">Days a week<input type="number" min="1" max="7" value="${t.days}" data-change="tools-plan" data-key="days"></label><label class="field">Speed<select data-change="tools-plan" data-key="speed">${SPEEDS.map(x => `<option value="${x}" ${x === t.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select></label></div><p class="note" id="tools-plan-summary">Done in ${plural(plannerDays, 'day')} · by ${esc(studyFinish(plannerDays, t.days))}</p></section>` : ''}`;
 }
@@ -2874,7 +2877,7 @@ document.addEventListener('click', async e => {
     }
     case 'tools-export-only': {
       const index = +el.dataset.index, item = S.tools.items[index];
-      if (item) { const others = new Set(S.tools.items.filter((_, i) => i !== index).flatMap(x => x.videos.map(v => v.video_id))); toolsCsv(item.videos.filter(v => !others.has(v.video_id))); }
+      if (item?.videos) toolsCsv(toolsSplit(item).only);
       break;
     }
     case 'tools-add': {
