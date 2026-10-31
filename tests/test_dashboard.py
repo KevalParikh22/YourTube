@@ -289,7 +289,7 @@ class DashboardTest(unittest.TestCase):
 
     def test_no_questions_while_transcribing(self):
         from unittest import mock
-        with mock.patch.dict(dashboard.JOB.state, {"running": True, "kind": "asr"}):
+        with mock.patch.object(dashboard.JOB, "busy", side_effect=lambda kind, lane: (kind, lane) == ("asr", "local")):
             code, r = self.call("/api/ask", {"question": "lora?"})
         self.assertEqual((code, "Transcribing" in r["error"]), (409, True))
 
@@ -299,18 +299,20 @@ class DashboardTest(unittest.TestCase):
     def test_job_retry_latest_failure_and_dismiss(self):
         from unittest import mock
         job = dashboard.Job()
+        from tests.test_queue import wait_until
+        idle = lambda: wait_until(lambda: not job.snapshot()["running"] and not job.snapshot()["queue"])
         job.start("test", "failed", lambda: False)   # not an AUTO_EMBED kind: no real embedding call
-        job._worker.join(2)
+        idle()
         failed_id = job.snapshot()["id"]
         self.assertTrue(job.dismiss(failed_id))
         self.assertTrue(job.snapshot()["dismissed"])
         self.assertIsNotNone(job.retry(failed_id))
-        job._worker.join(2)
+        idle()
         latest_id = job.snapshot()["id"]
         self.assertNotEqual(latest_id, failed_id)
         self.assertIsNone(job.retry(failed_id))
         self.assertIsNotNone(job.retry(latest_id))
-        job._worker.join(2)
+        idle()
 
     def test_logs_level_cap_and_download(self):
         import tempfile

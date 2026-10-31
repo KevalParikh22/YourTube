@@ -81,6 +81,7 @@ def estimate_minutes(seconds_of_video: float) -> float:
 def download_video(video_id: str, height: int = 480, dest: str = CACHE) -> str:
     """Video-only stream up to `height`, whole file (section downloads were very slow), anonymously."""
     import yt_dlp
+    from extractor import YT_LOCK
     from enrich import _classify_error, _js_runtimes, _QuietLogger
     os.makedirs(dest, exist_ok=True)
     opts: Dict[str, Any] = {"format": f"bv[height<={height}][vcodec!=none]/bv*[height<={height}]/worstvideo",
@@ -90,7 +91,7 @@ def download_video(video_id: str, height: int = 480, dest: str = CACHE) -> str:
     if runtimes:
         opts["js_runtimes"] = runtimes
     try:
-        with yt_dlp.YoutubeDL(opts) as y:
+        with YT_LOCK, yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
             return y.prepare_filename(info)
     except yt_dlp.utils.DownloadError as e:

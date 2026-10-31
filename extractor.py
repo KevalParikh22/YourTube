@@ -4,10 +4,14 @@ Extracts video metadata and exact durations non-destructively without downloadin
 Supports public, unlisted, and private playlists (via browser cookies or cookies file).
 """
 import re
+import threading
 import time
 
 import yt_dlp
 from typing import Dict, Any, List, Optional
+
+# Held around each single YouTube read, so tasks in different lanes never hit YouTube at the same moment
+YT_LOCK = threading.Lock()
 
 WATCH_LATER_ALIASES = {"wl", "watch later", "watchlater", ":ytwatchlater"}
 # Order tried by browser="auto". Firefox first: its cookies never need a keyring.
@@ -72,7 +76,7 @@ def video_id_from_url(value: str) -> Optional[str]:
 def extract_video(video_id: str) -> Dict[str, Any]:
     """One video's title, channel and duration, read anonymously (per-video reads never use the sign-in)."""
     opts = {"skip_download": True, "quiet": True, "no_warnings": True, "logger": _QuietLogger()}
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    with YT_LOCK, yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
     if not info or not info.get("id"):
         raise ValueError("YouTube did not return this video. It may be private, deleted or age-restricted.")
@@ -104,7 +108,7 @@ def list_my_playlists(browser_cookies: Optional[str] = "auto", cookies_file: Opt
         opts['cookiefile'] = cookies_file
     else:
         raise ValueError("Listing your playlists needs a sign-in (--browser or --cookies).")
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    with YT_LOCK, yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info("https://www.youtube.com/feed/playlists", download=False) or {}
     # "RD…" entries are auto-generated mixes, not saved playlists
     return [{'id': e['id'], 'title': e.get('title') or e['id']}
@@ -192,7 +196,7 @@ def _read_playlist_once(playlist_url: str, cookie_opts: Dict[str, Any]) -> Dict[
         **cookie_opts,
     }
     try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        with YT_LOCK, yt_dlp.YoutubeDL(ydl_opts) as ydl:
             raw_info = ydl.extract_info(playlist_url, download=False)
     except Exception as e:
         reason = _clean_error(str(e))

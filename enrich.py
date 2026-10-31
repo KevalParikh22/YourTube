@@ -18,6 +18,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import yt_dlp
 
+from extractor import YT_LOCK
+
 DEFAULT_DELAY = 3.0      # seconds between videos, plus jitter
 MAX_TRIES = 3            # failed videos are retried on later runs up to this many times
 DEFAULT_LIMIT = 200      # videos per run
@@ -111,7 +113,8 @@ def fetch_details(ydl: yt_dlp.YoutubeDL, video_id: str) -> Dict[str, Any]:
     'no_captions', 'music', 'unavailable' or 'failed'. Raises BotCheck to stop the run.
     """
     try:
-        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        with YT_LOCK:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
     except yt_dlp.utils.DownloadError as e:
         kind = _classify_error(str(e))
         if kind == "bot":

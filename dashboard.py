@@ -20,7 +20,7 @@ import secrets
 import threading
 from http.cookies import SimpleCookie
 import webbrowser
-import contextlib
+import contextvars
 import shutil
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -75,129 +75,207 @@ def load_token():
 def _same(a, b):
     return hmac.compare_digest(str(a).encode("utf-8"), str(b).encode("utf-8"))
 
+LANES = ("youtube", "local", "cloud")   # reading YouTube, this computer's GPU/CPU, cloud AI: one task each at a time
+_AI_TASK = {"rate": "rate", "knowledge": "rate", "summarize": "summarize", "suggest": "categorize", "discover": "categorize",
+            "split": "categorize"}
+_MEDIA_TASK = {"asr": "transcribe", "visual": "slides", "embed": "embed"}
+
+def lane_for(kind, settings):
+    """The lane a task kind runs in: work on this computer, cloud AI, or everything else (YouTube reads, library)."""
+    if kind == "pull":
+        return "local"
+    if kind in _MEDIA_TASK:
+        return "local" if llm.media_provider(settings, _MEDIA_TASK[kind]) == "local" else "cloud"
+    if kind in _AI_TASK:
+        return "local" if llm.is_local(settings, _AI_TASK[kind]) else "cloud"
+    return "youtube"
+
+# Per-task console output and stop flag. Context variables (not redirect_stdout, which is process-wide) let tasks in
+# different lanes print and stop independently; helper threads started with contextvars.copy_context().run share them.
+_OUT = contextvars.ContextVar("job_out", default=None)
+_STOP = contextvars.ContextVar("job_stop", default=None)
+
+class _RoutedStdout:
+    def __init__(self, real):
+        self.real = real
+
+    def write(self, text):
+        out = _OUT.get()
+        return (self.real if out is None else out).write(text)
+
+    def flush(self):
+        out = _OUT.get()
+        (self.real if out is None else out).flush()
+
+    def __getattr__(self, name):
+        return getattr(self.real, name)
+
+def _idle(lane=None):
+    return {"id": 0, "running": False, "ok": None, "log": "", "kind": None, "label": None, "lane": lane,
+            "started_at": None, "finished_at": None, "dismissed": False}
+
+class _Lane:
+    def __init__(self, name):
+        self.name = name
+        self.pending = []    # [{'id', 'kind', 'label', 'fn', 'key', 'retry_key', 'lane', 'queued_at'}]
+        self.state = _idle(name)
+        self.buf = io.StringIO()
+        self.stop = threading.Event()
+        self.worker = None
+
 class Job:
     """
-    Background tasks (syncs, details, AI runs, transcription, downloads) in a queue: one runs at a time and
-    the rest wait their turn, so starting a task while another runs queues it instead of refusing it.
-    The same task (kind + label) can't be queued twice. Console output is captured per task.
+    Background tasks (syncs, details, AI runs, transcription, downloads) in queues, one per lane (LANES): each lane
+    runs one task at a time and the rest wait their turn, so a cloud AI task can run while the GPU transcribes.
+    The same task (kind + key, default the label) can't be queued twice in any lane. Console output is captured per task.
     """
     HISTORY = 5   # finished tasks kept for the status panel
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.state = {"id": 0, "running": False, "ok": None, "log": "", "kind": None, "label": None,
-                      "started_at": None, "finished_at": None, "dismissed": False}
-        self.pending = []    # [{'id', 'kind', 'label', 'fn', 'queued_at'}]
+        self.lanes = {name: _Lane(name) for name in LANES}
+        self.last = _idle()  # the last finished task, with its log (shown when nothing runs)
         self.done = []       # recent finished tasks, newest first (without logs)
         self.tasks = {}      # retry functions for retained finished tasks
         self._next = 1
-        self._buf = io.StringIO()
-        self._stop = threading.Event()
-        self._worker = None
 
     def stop_requested(self):
-        return self._stop.is_set()
+        """True when the task calling this was asked to stop (False outside a task)."""
+        stop = _STOP.get()
+        return stop is not None and stop.is_set()
+
+    def busy(self, kind, lane):
+        with self.lock:
+            state = self.lanes[lane].state
+            return bool(state["running"] and state["kind"] == kind)
 
     def request_stop(self, task_id=None):
-        """Stops the running task, or (with the id of a waiting one) takes it off the queue."""
+        """Stops a running task, or takes a waiting one off its queue. Without an id: stops every running task."""
         with self.lock:
-            if task_id is not None and any(t["id"] == task_id for t in self.pending):
-                self.pending = [t for t in self.pending if t["id"] != task_id]
-                return True
-            if self.state["running"] and task_id in (None, self.state["id"]):
-                self._stop.set()
-                return True
-        return False
+            for lane in self.lanes.values():
+                if task_id is not None and any(t["id"] == task_id for t in lane.pending):
+                    lane.pending = [t for t in lane.pending if t["id"] != task_id]
+                    return True
+            hit = False
+            for lane in self.lanes.values():
+                if lane.state["running"] and task_id in (None, lane.state["id"]):
+                    lane.stop.set()
+                    hit = True
+            return hit
 
     def snapshot(self):
         with self.lock:
-            snap = {k: v for k, v in self.state.items() if k != "key"}
-            snap["stopping"] = bool(snap["running"] and self._stop.is_set())
-            if snap["running"]:
-                snap["log"] = self._buf.getvalue()
-            snap["queue"] = [{k: t[k] for k in ("id", "kind", "label", "queued_at")} for t in self.pending]
+            running = [l for l in self.lanes.values() if l.state["running"]]
+            if running:   # the old single-task fields follow the most recently started task
+                lane = max(running, key=lambda l: l.state["id"])
+                snap = {k: v for k, v in lane.state.items() if k != "key"}
+                snap["log"], snap["stopping"] = lane.buf.getvalue(), lane.stop.is_set()
+            else:
+                snap = {**self.last, "stopping": False}
+            snap["lanes"] = [{"lane": l.name, "running": l.state["running"], "id": l.state["id"] if l.state["running"] else None,
+                              "kind": l.state["kind"] if l.state["running"] else None,
+                              "label": l.state["label"] if l.state["running"] else None,
+                              "started_at": l.state["started_at"] if l.state["running"] else None,
+                              "log": l.buf.getvalue() if l.state["running"] else "",
+                              "stopping": bool(l.state["running"] and l.stop.is_set())} for l in self.lanes.values()]
+            snap["queue"] = sorted(({k: t[k] for k in ("id", "kind", "label", "lane", "queued_at")}
+                                    for l in self.lanes.values() for t in l.pending), key=lambda t: t["id"])
             snap["recent"] = list(self.done)
             snap["dismissed"] = bool(snap.get("dismissed"))
         return snap
 
-    def start(self, kind, label, fn, key=None):
+    def start(self, kind, label, fn, key=None, lane=None):
         """
-        Queues a task. Returns {'id', 'position'} (0 = started now), or None when the same task (kind + key, default
-        the label) is already waiting or running.
+        Queues a task in its lane (lane_for(kind) unless given). Returns {'id', 'position', 'lane'} (position 0 =
+        started now), or None when the same task (kind + key, default the label) is already waiting or running.
         """
+        lane = lane or lane_for(kind, llm.load_settings())
         retry_key = key if key is not None else label
         key = json.dumps([kind, retry_key], sort_keys=True, default=str)
         with self.lock:
-            if (self.state["running"] and self.state.get("key") == key) or any(t["key"] == key for t in self.pending):
-                return None
-            task = {"id": self._next, "kind": kind, "label": label, "fn": fn, "key": key, "retry_key": retry_key,
+            for l in self.lanes.values():
+                if (l.state["running"] and l.state.get("key") == key) or any(t["key"] == key for t in l.pending):
+                    return None
+            target = self.lanes[lane]
+            task = {"id": self._next, "kind": kind, "label": label, "fn": fn, "key": key, "retry_key": retry_key, "lane": lane,
                     "queued_at": datetime.now().isoformat(timespec="seconds")}
             self._next += 1
-            self.pending.append(task)
-            position = len(self.pending) - (0 if self.state["running"] else 1)
-            if not (self._worker and self._worker.is_alive()):
-                self._worker = threading.Thread(target=self._work, daemon=True)
-                self._worker.start()
-        return {"id": task["id"], "position": position}
+            target.pending.append(task)
+            position = len(target.pending) - (0 if target.state["running"] else 1)
+            if not (target.worker and target.worker.is_alive()):
+                target.worker = threading.Thread(target=self._work, args=(target,), daemon=True)
+                target.worker.start()
+        return {"id": task["id"], "position": position, "lane": lane}
 
     def retry(self, task_id):
         with self.lock:
-            if not self.done or self.done[0]["id"] != task_id or self.done[0]["ok"] or self.done[0].get("stopped"):
+            finished = next((t for t in self.done if t["id"] == task_id), None)
+            # only a lane's latest finished task, if it failed: a later run of that lane replaces the failure
+            if (finished is None or finished["ok"] or finished.get("stopped")
+                    or next(t for t in self.done if t["lane"] == finished["lane"]) is not finished):
                 return None
             task = self.tasks.get(task_id)
         if task is None:
             return None
-        return self.start(task["kind"], task["label"], task["fn"], key=task["retry_key"])
+        return self.start(task["kind"], task["label"], task["fn"], key=task["retry_key"], lane=task["lane"])
 
     def dismiss(self, task_id):
         with self.lock:
-            if self.state.get("id") != task_id or self.state.get("running"):
+            if self.last.get("id") != task_id:
                 return False
-            self.state["dismissed"] = True
+            self.last["dismissed"] = True
             return True
 
-    def _work(self):
+    def _work(self, lane):
+        if not isinstance(sys.stdout, _RoutedStdout):
+            sys.stdout = _RoutedStdout(sys.stdout)
         while True:
             with self.lock:
-                if not self.pending:
-                    self._worker = None
+                if not lane.pending:
+                    lane.worker = None
                     return
-                task = self.pending.pop(0)
+                task = lane.pending.pop(0)
                 self.tasks[task["id"]] = task
-                self._buf = io.StringIO()
-                self._stop.clear()
-                self.state = {"id": task["id"], "key": task["key"], "running": True, "ok": None, "log": "", "kind": task["kind"], "label": task["label"], "dismissed": False,
-                              "started_at": datetime.now().isoformat(timespec="seconds"), "finished_at": None}
-            self._run(task["fn"])
+                lane.buf = io.StringIO()
+                lane.stop = threading.Event()
+                lane.state = {**_idle(lane.name), "id": task["id"], "key": task["key"], "running": True, "kind": task["kind"],
+                              "label": task["label"], "started_at": datetime.now().isoformat(timespec="seconds")}
+            self._run(lane, task["fn"])
 
-    def _run(self, fn):
+    def _run(self, lane, fn):
         ok = False
+        out, stop = _OUT.set(lane.buf), _STOP.set(lane.stop)
         try:
-            with contextlib.redirect_stdout(self._buf):
-                ok = fn()
-                # Keep the meaning index current after anything that adds or changes searchable text
-                if self.state["kind"] in AUTO_EMBED_KINDS and not self._stop.is_set():
-                    import embedder
-                    try:
-                        print()
-                        embedder.run_embed(should_stop=self.stop_requested, quiet=True)
-                    except Exception as e:  # the main job already finished; just report
-                        print(f"Warning: Meaning index not updated: {e}")
+            ok = fn()
         except Exception as e:  # surface anything unexpected in the job log
-            self._buf.write(f"\nUnexpected error: {e}\n")
-            applog.get("job").exception("Unexpected error in task %s", self.state.get("label"))
+            lane.buf.write(f"\nUnexpected error: {e}\n")
+            applog.get("job").exception("Unexpected error in task %s", lane.state.get("label"))
+        finally:
+            _OUT.reset(out)
+            _STOP.reset(stop)
         with self.lock:
-            stopped = self._stop.is_set()
-            self.state.update(running=False, ok=bool(ok), stopped=stopped, log=self._buf.getvalue(),
-                              finished_at=datetime.now().isoformat(timespec="seconds"))
-            self.done.insert(0, {k: self.state.get(k) for k in ("id", "kind", "label", "ok", "stopped", "started_at", "finished_at")})
+            stopped = lane.stop.is_set()
+            state = {**lane.state, "running": False, "ok": bool(ok), "stopped": stopped, "log": lane.buf.getvalue(),
+                     "finished_at": datetime.now().isoformat(timespec="seconds")}
+            state.pop("key", None)
+            lane.state = _idle(lane.name)
+            self.last = state
+            self.done.insert(0, {k: state.get(k) for k in ("id", "kind", "label", "lane", "ok", "stopped", "started_at", "finished_at")})
             del self.done[self.HISTORY:]
             retained = {t["id"] for t in self.done}
             self.tasks = {task_id: task for task_id, task in self.tasks.items() if task_id in retained}
-            task_state = self.state.copy()
-            output = self._buf.getvalue()
-        applog.log_task(task_state.get("kind"), task_state.get("label"), bool(ok), stopped,
-                        task_state.get("started_at"), task_state.get("finished_at"), output)
+        applog.log_task(state.get("kind"), state.get("label"), bool(ok), stopped,
+                        state.get("started_at"), state.get("finished_at"), state["log"])
+        # Keep the meaning index current after anything that adds or changes searchable text, as its own task
+        # shortcut: an index update already running doesn't queue another, so text saved meanwhile waits for the next one
+        if ok and not stopped and state["kind"] in AUTO_EMBED_KINDS:
+            import embedder
+            try:
+                if embedder.available(llm.load_settings()):
+                    self.start("embed", "Update meaning index",
+                               lambda: embedder.run_embed(should_stop=self.stop_requested, quiet=True), key="auto")
+            except Exception:  # never let this end the lane's worker thread
+                applog.get("job").exception("Could not queue the meaning index update")
 
 def _library_name(library):
     return next((l["name"] for l in storage.get_libraries() if l["id"] == library), "all libraries")
@@ -401,9 +479,9 @@ class Handler(BaseHTTPRequestHandler):
         """Reply for a task handed to JOB: where it is in the queue, or 409 when it is already there."""
         if started is None:
             return self._error("That task is already running or waiting in the queue", 409)
-        snap = JOB.snapshot()
-        ahead = ([snap["label"]] if snap["running"] and snap["id"] != started["id"] else []) + \
-                [t["label"] for t in snap["queue"] if t["id"] < started["id"]]
+        snap, lane = JOB.snapshot(), started.get("lane")
+        ahead = [l["label"] for l in snap["lanes"] if l["running"] and l["lane"] == lane and l["id"] != started["id"]] + \
+                [t["label"] for t in snap["queue"] if t["lane"] == lane and t["id"] < started["id"]]
         return self._json({"ok": True, "id": started["id"], "position": started["position"], "after": ahead})
 
     def _body(self):
@@ -877,7 +955,7 @@ class Handler(BaseHTTPRequestHandler):
                 if task_id is not None and (not isinstance(task_id, int) or isinstance(task_id, bool)):
                     return self._error("id must be a number")
                 ok = JOB.request_stop(task_id)
-                return self._json({"ok": ok, "stopping": JOB.stop_requested() if ok else False})
+                return self._json({"ok": ok, "stopping": ok})
 
             if path in ("/api/job/retry", "/api/job/dismiss"):
                 task_id = body.get("id")
@@ -934,7 +1012,7 @@ class Handler(BaseHTTPRequestHandler):
                 follow = body.get("follow_up_of")
                 if follow is not None and (not isinstance(follow, int) or isinstance(follow, bool)):
                     return self._error("follow_up_of must be a number")
-                if JOB.state["running"] and JOB.state["kind"] == "asr":   # Ollama would reload into the GPU whisper is using
+                if JOB.busy("asr", "local"):   # Ollama would reload into the GPU whisper is using
                     return self._error("Transcribing on the GPU right now. Ask again when it finishes.", 409)
                 if not llm.is_configured(llm.load_settings(), "ask"):
                     return self._error("Choose an AI for questions and answers in Settings → AI first")
