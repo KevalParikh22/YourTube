@@ -1422,7 +1422,9 @@ function viewCategories() {
     ${!Object.keys(tax).length ? `<p class="note" style="margin-top:10px">No categories yet. Write what you want to learn in <a href="#/settings/about">Settings → About you</a>, then use <b>Propose categories with AI</b>: it makes one category per interest your videos cover. Or add your own.</p>`
       : ai.interests ? '<p class="hint" style="margin-top:8px">AI proposals follow your learning interests from About you.</p>' : ''}
     ${(() => { const joined = Object.keys(tax).filter(c => /\s&\s|,|\sand\s/i.test(c));
-      return joined.length ? `<p class="note" style="margin-top:10px">${plural(joined.length, 'category')} ${joined.length === 1 ? 'joins' : 'join'} several topics (${joined.slice(0, 3).map(c => `“${esc(c)}”`).join(', ')}${joined.length > 3 ? '…' : ''}). Use <b>Split with AI</b> on ${joined.length === 1 ? 'it' : 'each'} to give every topic its own category.</p>` : ''; })()}
+      return joined.length && !S.separate ? `<p class="note" style="margin-top:10px">${plural(joined.length, 'category')} ${joined.length === 1 ? 'joins' : 'join'} several topics (${joined.slice(0, 3).map(c => `“${esc(c)}”`).join(', ')}${joined.length > 3 ? '…' : ''}).
+        <button class="btn btn-sm" data-act="sep-open" data-job-btn style="margin-left:6px">Separate combined categories</button></p>` : ''; })()}
+    ${S.separate ? viewSeparate() : ''}
     ${noMatch && ai.ready_for.categorize ? `<p class="note" style="margin-top:10px">The AI found no matching category for ${plural(noMatch, 'unsorted video')}. Add a category for ${noMatch === 1 ? 'it' : 'them'} or use <b>Propose categories with AI</b>; after the categories change, Sort offers ${noMatch === 1 ? 'it' : 'them'} again.</p>` : ''}
     <div id="job"></div>
   </section>
@@ -1449,6 +1451,24 @@ function viewCategories() {
       <div>${counts[n] >= 6 ? `<button class="btn-text" data-act="split-cat" data-name="${esc(n)}" data-job-btn ${!ai.ready_for.categorize ? 'disabled title="Set up an AI provider in Settings first"' : ''}>Split with AI</button>` : ''}<button class="btn-text" data-act="adopt-cat" data-name="${esc(n)}">Add keywords</button><button class="btn-text" data-act="del-cat" data-name="${esc(n)}">Delete</button></div>
     </div>`).join('')}
   </section>`;
+}
+// One category per topic for several combined categories at once (no duplicates across them); S.separate = {names, topics}
+function viewSeparate() {
+  const sep = S.separate, joined = Object.keys(S.data.taxonomy).filter(c => /\s&\s|,|\sand\s/i.test(c));
+  const counts = {};
+  for (const v of videos()) counts[v.category] = (counts[v.category] || 0) + 1;
+  return `<section class="section card" id="separate-panel">
+    <h2 class="h">Separate combined categories</h2>
+    <p class="hint">Tick the categories to separate. Each topic becomes its own protected category; a topic that already exists is reused. The ticked categories are removed, and their videos get AI suggestions for their best topic, which you review in Library → AI suggestions.</p>
+    <div>${joined.map(c => `<label class="check" style="display:flex;gap:8px;padding:4px 0"><input type="checkbox" data-sep-name="${esc(c)}" ${sep.names.includes(c) ? 'checked' : ''}><span>${esc(c)} <span class="faint">· ${plural(counts[c] || 0, 'video')}</span></span></label>`).join('')}</div>
+    <p class="field-label" style="margin-top:12px">Categories you'll have</p>
+    <div class="chips">${(sep.topics || []).map(t => `<span class="chip" title="From ${esc(t.from.join(', '))}">${esc(t.name)}${t.exists ? ' <span class="faint">(exists)</span>' : ''}</span>`).join('') || '<span class="faint">Tick a category above.</span>'}</div>
+    <div class="actions"><button class="btn btn-dark btn-sm" data-act="sep-apply" ${sep.names.length ? '' : 'disabled'}>Separate and sort</button><button class="btn btn-sm" data-act="sep-close">Cancel</button></div>
+  </section>`;
+}
+async function separatePreview() {
+  S.separate.topics = S.separate.names.length ? (await api('/api/categories/separate', { names: S.separate.names, preview: true })).topics : [];
+  refresh();
 }
 function viewSplit(split, counts) {
   const categories = Array.isArray(split.categories) ? split.categories : [];
@@ -2908,6 +2928,22 @@ document.addEventListener('click', async e => {
       } catch (err) { toast(err.message, true); }
       break;
     }
+    case 'sep-open':
+      try { await saveTax(collectTax()); S.separate = { names: [], topics: [] }; refresh(); }
+      catch (err) { S.separate = null; toast(err.message, true); }
+      break;
+    case 'sep-close': S.separate = null; refresh(); break;
+    case 'sep-apply': {
+      const names = S.separate.names;
+      if (!confirm(`Separate ${plural(names.length, 'category')} into ${plural(S.separate.topics.length, 'topic')}? The combined categories are removed; their videos are suggested a new category for you to review.`)) break;
+      try {
+        const r = await api('/api/categories/separate', { names });
+        S.separate = null; await load();
+        toast(r.queued ? `Created ${plural(r.topics.length, 'category')}. Sorting suggestions are running.` : `Created ${plural(r.topics.length, 'category')}. Set up an AI in Settings to sort their videos, or use Save and re-sort.`);
+        if (r.queued) await refreshJob();
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'split-dismiss':
       try { await api('/api/categories/split/dismiss', {}); await load(); toast('Split proposal dismissed'); }
       catch (err) { toast(err.message, true); }
@@ -3078,6 +3114,11 @@ document.addEventListener('click', async e => {
   }
 });
 document.addEventListener('change', async e => {
+  if (e.target.matches?.('[data-sep-name]') && S.separate) {
+    S.separate.names = $$('[data-sep-name]:checked').map(i => i.dataset.sepName);
+    try { await separatePreview(); } catch (err) { toast(err.message, true); }
+    return;
+  }
   if (e.target.matches?.('[data-ai-route], [data-media-task]')) refreshHelpers();
   const el = e.target, ch = el.dataset.change;
   if (ch === 'lib') {

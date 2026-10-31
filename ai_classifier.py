@@ -176,6 +176,10 @@ _NAME_FILLER = {"and", "the", "of", "for", "a", "an", "to", "in", "on"}
 def _name_words(name: str) -> set:
     return {w for w in re.findall(r"[a-z0-9]+", name.lower()) if w not in _NAME_FILLER}
 
+def _stems(text: str) -> set:
+    """A text's words without a trailing s, so "podcast" matches the topic "Podcasts"."""
+    return {w.rstrip("s") for w in _name_words(text)}
+
 _TOPIC_SEP = re.compile(r"\s*(?:&|,|\+|/|\band\b)\s*", re.IGNORECASE)
 
 def _topics(name: str) -> List[set]:
@@ -200,7 +204,7 @@ def _one_topic(cats: List[Any], keep: Iterable[str] = ()) -> List[Dict[str, Any]
             continue
         kws = [str(k) for k in c.get("keywords") or [] if str(k).strip()] if isinstance(c.get("keywords"), list) else []
         for part in parts:
-            out.append({**c, "name": part, "keywords": [k for k in kws if _name_words(k) & _name_words(part)] or kws})
+            out.append({**c, "name": part, "keywords": [k for k in kws if _stems(k) & _stems(part)] or kws})
     return out
 
 def _same_topic(name: str, names: List[str]) -> Optional[str]:
@@ -223,6 +227,28 @@ def _same_topic(name: str, names: List[str]) -> Optional[str]:
         if score > best_score:
             best, best_score = other, score
     return best
+
+
+def is_combined(name: str) -> bool:
+    return len(_topics(name)) > 1
+
+def separate_topics(names: List[str], taxonomy: Dict[str, List[str]]) -> List[Dict[str, Any]]:
+    """
+    One category per topic of the given combined categories, without duplicates: a topic that names a category being
+    kept ("Podcasts" when it exists) or an earlier topic merges into it. Each new topic gets its name as a keyword plus
+    the old keywords that share a word with it. Returns [{'name', 'keywords', 'from': [combined names], 'exists'}].
+    """
+    keep = [c for c in taxonomy if c not in names]
+    out: Dict[str, Dict[str, Any]] = {}
+    for name in names:
+        for part in [p for p in _TOPIC_SEP.split(name) if _name_words(p)]:
+            target = _same_topic(part, keep) or _same_topic(part, list(out)) or part
+            entry = out.setdefault(target, {"name": target, "keywords": [], "from": [], "exists": target in taxonomy})
+            mine = {k for k in taxonomy.get(name, []) if _stems(k) & _stems(part)}
+            entry["keywords"] = sorted(set(entry["keywords"]) | mine | (set() if entry["exists"] else {part.lower()}))
+            if name not in entry["from"]:
+                entry["from"].append(name)
+    return list(out.values())
 
 
 def split_category(

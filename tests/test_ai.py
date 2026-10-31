@@ -440,6 +440,19 @@ class OneTopicTest(unittest.TestCase):
         self.assertIn("Home Remedies", [c["name"] for c in cats])
 
 
+class SeparateTest(unittest.TestCase):
+    def test_overlapping_combined_categories_give_each_topic_once(self):
+        from ai_classifier import separate_topics
+        tax = {"Finance & Business": ["stocks", "business plan"], "Tech Trends & Podcasts": ["podcast"],
+               "Business, Tech Trends & Podcasts": ["startup"], "Podcasts": ["episode"], "AI & Machine Learning": ["llm"]}
+        topics = {t["name"]: t for t in separate_topics(["Finance & Business", "Tech Trends & Podcasts", "Business, Tech Trends & Podcasts"], tax)}
+        self.assertEqual(set(topics), {"Finance", "Business", "Tech Trends", "Podcasts"})
+        self.assertTrue(topics["Podcasts"]["exists"])                                  # the existing one is reused
+        self.assertEqual(topics["Business"]["from"], ["Finance & Business", "Business, Tech Trends & Podcasts"])
+        self.assertEqual(topics["Business"]["keywords"], ["business", "business plan"])
+        self.assertEqual(topics["Podcasts"]["keywords"], ["podcast"])
+
+
 class SplitTest(unittest.TestCase):
     VIDEOS = [{"video_id": f"v{i}", "title": f"Video {i}", "channel": "Channel"} for i in range(10)]
 

@@ -329,6 +329,27 @@ class DashboardTest(unittest.TestCase):
             s["providers"].get("groq", {}).pop("api_key", None)
             llm.save_settings(s)
 
+    def test_separate_combined_categories(self):
+        from classifier import save_taxonomy, load_taxonomy
+        before = load_taxonomy(library=1)
+        save_taxonomy({**before, "Health & Fitness": ["gym"], "Fitness": ["workout"]}, library=1)
+        storage.save_playlist(playlist("PL_SEP"), [video("sep1", "Leg day", category="Health & Fitness")])
+        try:
+            self.assertEqual(self.call("/api/categories/separate", {"names": ["Fitness"]})[0], 400)    # not combined
+            code, r = self.call("/api/categories/separate", {"names": ["Health & Fitness"], "preview": True})
+            self.assertEqual([(t["name"], t["exists"]) for t in r["topics"]], [("Health", False), ("Fitness", True)])
+            self.assertIn("Health & Fitness", load_taxonomy(library=1))                                   # preview changes nothing
+            started = []
+            with mock.patch("llm.is_configured", return_value=True), \
+                 mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None: started.append(key) or {"id": 1, "position": 0}):
+                code, r = self.call("/api/categories/separate", {"names": ["Health & Fitness"]})
+            self.assertEqual((r["queued"], started), (1, [["category:Health & Fitness", 1]]))   # its videos get suggestions
+            tax = load_taxonomy(library=1)
+            self.assertEqual((code, "Health & Fitness" in tax, tax["Health"], tax["Fitness"]), (200, False, ["health"], ["workout"]))
+            self.assertIn("Health", llm.load_settings()["presets"])
+        finally:
+            save_taxonomy(before, library=1)
+
     def test_split_per_library(self):
         s = llm.load_settings()
         llm.set_library_settings(s, 1, split={"category": "Lib1Cat", "categories": []})

@@ -919,6 +919,39 @@ class Handler(BaseHTTPRequestHandler):
                                     lambda: run_suggest(scope, library=lib, should_stop=JOB.stop_requested), key=[scope, lib])
                 return self._queued(started)
 
+            if path == "/api/categories/separate":
+                # Combined categories ("Health, Fitness & Wellness") become one category per topic, without duplicates;
+                # their videos get AI suggestions for their best topic. preview: true only lists the topics.
+                from ai_classifier import is_combined, separate_topics, run_suggest
+                tax = load_taxonomy(library=lib)
+                names = body.get("names")
+                if not isinstance(names, list) or not names or not all(isinstance(n, str) and n in tax and is_combined(n) for n in names):
+                    return self._error("Choose combined categories of this library")
+                topics = separate_topics(names, tax)
+                if body.get("preview"):
+                    return self._json({"topics": topics})
+                settings = llm.load_settings()
+                own = llm.library_settings(settings, lib)
+                presets = [p for p in own.get("presets") or [] if p not in names]
+                notes = {k: v for k, v in (own.get("category_notes") or {}).items() if k not in names}
+                for t in topics:
+                    tax[t["name"]] = sorted(set(tax.get(t["name"], [])) | set(t["keywords"]))
+                    if t["name"] not in presets:
+                        presets.append(t["name"])
+                for name in names:
+                    tax.pop(name, None)   # its videos keep the old name until their suggestions are accepted
+                save_taxonomy(tax, library=lib)
+                llm.set_library_settings(settings, lib, presets=presets, category_notes=notes)
+                llm.save_settings(settings)
+                queued = 0
+                if llm.is_configured(llm.for_library(settings, lib), "categorize"):
+                    for name in names:
+                        scope = f"category:{name}"
+                        queued += JOB.start("suggest", f"Suggest categories: {name}",
+                                            lambda scope=scope: run_suggest(scope, library=lib, should_stop=JOB.stop_requested),
+                                            key=[scope, lib]) is not None
+                return self._json({"ok": True, "topics": topics, "queued": queued})
+
             if path == "/api/categories/split/dismiss":
                 settings = llm.load_settings()
                 llm.set_library_settings(settings, lib, split=None)
