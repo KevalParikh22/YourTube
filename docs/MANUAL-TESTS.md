@@ -89,8 +89,17 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S11.3 | Library ratings | Library → sort AI score → Watch / Skim / Skip chips → Skip the AI skips → Undo | Best first; chips filter with right counts; skip then undo restores the statuses | |
 | S11.4 | Menu and old links | Use the five menu items; open `#/plan` and `#/triage`; press `G H`, `G ?` | Home and Library open; the shortcuts work | |
 | S11.5 | Knowledge guide | Knowledge → Summarise 5 on a category you study → Build when it shows | The guide explains the steps; Build appears after 3 summaries | |
-| S11.6 | Split | Categories → Split with AI on your biggest category → untick any you don't want → Create and sort → Library → AI suggestions | Specific new categories; suggestions move the right videos (even hand-placed ones) only when you accept | |
+| S11.6 | Split | (Replaced by S15.3.) | | |
 | S11.7 | Dropdowns | Look at every page in light and dark, desktop and phone | Same size dropdowns and fields, none inside headings, nothing misaligned | |
+
+### S15 checks (simpler Categories page, 2026-10-31)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S15.1 | Fewer buttons | Open Categories | The top row has only Save and re-sort, Add category, Sort N unsorted videos with AI, and a Review link when suggestions wait | |
+| S15.2 | Leftover proposal | Sort unsorted videos with AI when several fit no category | Suggestions for the ones that fit, and a box "New categories for N videos that fit none" to accept or dismiss | |
+| S15.3 | Split into topics | On a category named like "A & B": Split into topics → confirm | A and B appear (existing ones reused); its videos get suggestions to review | |
+| S15.4 | Empty library | Create a new library, add a playlist, open Categories | "Create categories from my interests"; it asks for About you first if that is empty | |
 
 ### S14 checks (local and cloud side by side, cloud media, 2026-10-31)
 
@@ -149,7 +158,7 @@ Do the rows that match the computer in front of you, and note which computer (OS
 | 2.2 | Ratings spread | Library → Rate (on a mixed playlist, after Fetch details) | A mix of Watch / Skim / Skip, not everything 8–9 | |
 | 2.3 | Skip verdicts | Read 5–10 Skip reasons, and open a couple of the videos | You agree they're skippable; note any you disagree with | |
 | 2.4 | Skim ranges | Click a Skim range on a few videos | It lands on the part the reason describes | |
-| 2.5 | Categories | Categories → Propose categories with AI → review → Apply; then Sort unsorted with AI → review suggestions | Sensible categories; suggestions mostly right; note the wrong ones | |
+| 2.5 | Categories | Categories → Sort N unsorted videos with AI → review suggestions (and any new categories it proposes) | Sensible categories; suggestions mostly right; note the wrong ones | |
 | 2.6 | Pending suggestion | Library → AI suggestions → Graph RAG → Accept or Dismiss | Your call | |
 
 ## 3. Local media (Phase 2.5)
@@ -196,7 +205,7 @@ YTKB_LIVE=1 ANTHROPIC_API_KEY=... GEMINI_API_KEY=... .venv/bin/python -m unittes
 | # | Test | Steps | Expect | Result |
 |---|---|---|---|---|
 | 7.1 | Create a library | Playlists → Libraries → type "Health" → Create; move one or two playlists to it with the Library column | The header switcher shows Health; Home, Library, Search and Ask show only its videos | |
-| 7.2 | Its own categories | In Health: Categories → Propose categories with AI → Apply; set Health interests in Settings → About you | Health categories don't appear in My library; ratings in Health judge against Health interests | |
+| 7.2 | Its own categories | In Health: set Health interests in Settings → About you, then Categories → Create categories from my interests → Apply | Health categories don't appear in My library; ratings in Health judge against Health interests | |
 | 7.3 | Queue | Start a transcription, then click Rate | Rate says "queued"; the header shows the running task and "+1 waiting"; Rate runs after | |
 | 7.4 | Finished state | Let a sync finish | The header turns green "Finished: …" and the page shows a Finished banner; a failure shows red with the error | |
 | 7.5 | Single video | Playlists → paste one video link → Sync | It appears in *Added one by one*, with details fetched | |
