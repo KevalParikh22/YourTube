@@ -92,6 +92,18 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S11.6 | Split | (Replaced by S15.3.) | | |
 | S11.7 | Dropdowns | Look at every page in light and dark, desktop and phone | Same size dropdowns and fields, none inside headings, nothing misaligned | |
 
+### S17 checks (storage, API reference, phone, task log, 2026-11-01)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S17.1 | Log with two tasks | Start a details fetch (or a sync), scroll its log up, then start something else (Settings → Local AI → Update index) | The first log stays visible and where you left it, also when the second task ends; Stop stops the task on this page | |
+| S17.2 | Check for new videos | Playlists | Synced playlists say Check for new videos; Last synced shows "2 h ago" with the full date on hover | |
+| S17.3 | Back up and restore | Settings → Storage → Back up now; change a note; Restore that backup | The note is back as before; a new "before restore" backup is listed; API keys still work | |
+| S17.4 | Clear and exports | Export a CSV from the Library; Storage → download it again, delete it; Clear the media cache | Each works; confirms say what is lost | |
+| S17.5 | API reference | Settings → General → Open the API reference; Try it out on GET /api/state | Answers with your library; the page works with the network cable out | |
+| S17.6 | Phone | Open the dashboard at phone width (browser dev tools, 375 px) on every page, light and dark | No sideways scrolling; tables become cards; the video panel fills the screen; buttons easy to tap | |
+| S17.7 | Phone options | Read docs/Mobile-options.md | Decide: phone as a remote (Tailscale), an app on the phone, or nothing yet | |
+
 ### S16 checks (new look, Tools, things that reset, 2026-10-31)
 
 | # | Test | Steps | Expect | Result |

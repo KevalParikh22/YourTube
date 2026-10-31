@@ -5,7 +5,9 @@ Map of the codebase. Specs are `docs/PRD-*.md`; the user guide is `docs/SETUP.md
 ## Folders
 
 - **Project root:** Python modules for playlist sync, storage, dashboard, AI, search, and exports. `requirements.txt` lists app dependencies; `requirements-local.txt` covers optional local features.
-- **`web/`:** Single-file dashboard frontend at `web/index.html`; the server points to this directory ([dashboard.py:26-33](dashboard.py)).
+- **`web/`:** Dashboard frontend: `web/index.html` (markup), `web/static/app.js` and `app.css` (the app, served no-cache), fonts and icon, `web/static/api.html` plus the pinned `swagger/` bundle for `/docs/api`. Everything under `/static/` goes through the `dashboard.STATIC` allow-list.
+- **`files.py`:** Settings → Storage: `usage()`, `backup()` / `restore()` (SQLite backup API; never settings.json), `clear(key)`, `save_export()` (every export is also kept in `exports/`).
+- **`docs/openapi.json`:** OpenAPI 3.1 description of every `/api/` route; `tests/test_openapi.py` fails when a route is added without it.
 - **`docs/`:** Setup and manual-test guides, PRDs, and the architecture stub. `docs/SETUP.md` documents setup and launch ([docs/SETUP.md:20-42](docs/SETUP.md)).
 - **`scripts/`:** Linux/macOS and Windows setup scripts ([docs/SETUP.md:22-36](docs/SETUP.md)).
 - **`tests/`:** `unittest` coverage by module; test setup redirects DB, taxonomy, and settings to temporary files ([tests/__init__.py:1-18](tests/__init__.py)).

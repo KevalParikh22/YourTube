@@ -269,7 +269,7 @@ Switching the index to another service builds a new index; the old one is kept, 
 
 ### Settings
 
-Settings has a side menu: **General** (default playback speed and theme, kept in this browser), **About you**, **AI by task**, **Cloud AI**, **Local AI**, **Sync and details** and **Scoring** (how scores are calculated).
+Settings has a side menu: **General** (default playback speed and theme, kept in this browser), **About you**, **AI by task**, **Cloud AI**, **Local AI**, **Sync and details**, **Storage** and **Scoring** (how scores are calculated). General also links to the **API reference**.
 
 **About you:**
 - **What are you looking for?** Say it (🎙 **Record**, up to 3 minutes; you can record several times) or type it, in your own words. **Write my interests with AI** turns it into four short lines (Learn, Level, Skip, Goal), keeping what still applies from your current interests. **Use this** puts the draft into Interests; nothing is saved until you press **Save**. Voice is turned into text on your computer by Whisper (`small` model on the CPU, about 10 seconds per minute of speech; the first use downloads it, ~0.5 GB) and the recording is deleted right away. It needs local transcription (`bash scripts/setup.sh --local-ai`); the browser asks once for microphone access.
@@ -277,6 +277,14 @@ Settings has a side menu: **General** (default playback speed and theme, kept in
 - **Language:** summaries and rating reasons are written in this language (default English), chosen from the list of supported languages.
 
 **Sync and details:** fetch details for new videos after each sync, use descriptions in search and AI, and suggest categories for new videos after each sync.
+
+**Storage:** what YourTube keeps on this computer (the data folder, and the size of the database, slide pictures, media cache, logs, backups and exports), with:
+- **Clear** for slide pictures (their text stays), the media cache, and old logs (today's log stays);
+- **Back up now:** a copy of the library and your categories in `backups/` (never `settings.json`, so no API keys). The newest 10 are kept;
+- **Restore** a backup: only while no task runs. Your current library is backed up first, then replaced; the page reloads;
+- **Exports:** every export (CSV, JSON, notes, knowledge pages, answers) is also saved in `exports/`, to download again or delete.
+
+**API reference** (Settings → General, or `/docs/api`): every endpoint the dashboard uses, with **Try it out**. It runs against your real library, works offline and needs the same access link. The description is `docs/openapi.json`, also served at `/api/openapi.json`.
 
 ### Getting around
 
@@ -308,7 +316,7 @@ Shortcuts are ignored while you type in a field.
 
 | Task | Dashboard | Command line |
 |---|---|---|
-| Sync a playlist | Playlists → Sync | `.venv/bin/python main.py <ID> --browser auto` |
+| Sync a playlist | Playlists → Sync (a playlist already synced says **Check for new videos**: it reads the playlist again, adds new videos and flags removed ones; nothing changes on YouTube) | `.venv/bin/python main.py <ID> --browser auto` |
 | Remove a playlist from YourTube | Playlists → **Remove** on its row. The dialog counts what happens first. Videos only in that playlist are removed with their subtitles, transcripts, ratings, summaries and slides; ones with your notes keep their notes, title and status (and the notes are downloaded as a .zip first); videos also in other playlists stay. Nothing changes on YouTube. Sync it again later to add it back (its fetched data starts over) | — |
 | Add one video | Playlists → paste the video link → Sync. It goes to the source *Added one by one*, which only grows; its details are fetched right away | — |
 | Separate libraries (e.g. Tech, Health, Personal) | Playlists → **Libraries** → Create; move playlists with the Library column; switch at the top of the page. Each library has its own categories, interests, time left, ratings and answers | — |
@@ -329,7 +337,8 @@ Shortcuts are ignored while you type in a field.
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
 | Export notes for Obsidian / note apps (Markdown) | Library → Export → Notes (.zip), the selection bar's **Export notes**, or **Export note** in a video's panel | — |
 | How long is a playlist? | **Tools** → paste up to 10 playlist or video links, one per line → **Calculate**. For each: total time at 1× to 2×, a **From video / To video** range (for example 31–100), how many you already have, **Export CSV**, and **Add to library**. With two or more playlists: the combined time counting each video once, and which videos are shared or only in one (**Export only here**). The **Daily planner** gives a finish date from minutes a day, days a week and speed. Private playlists need **Use my YouTube sign-in**. Nothing is saved | — |
-| Export your library | Library → Export → CSV or JSON | `curl -o library.csv "http://127.0.0.1:8765/api/export?format=csv"` (dashboard running) |
+| Back up or restore the library | Settings → **Storage** → Back up now, or Restore on a backup | — |
+| Export your library | Library → Export → CSV or JSON (a copy is kept in Settings → Storage → Exports) | `curl -o library.csv "http://127.0.0.1:8765/api/export?format=csv"` (dashboard running) |
 
 ---
 
@@ -347,6 +356,8 @@ With `YTKB_DATA_DIR` set (Docker sets it to `/data`), all of these except `.venv
 | `reports/` | Old static reports from earlier versions (no longer written) | Yes |
 | `frames/` | Slide thumbnails for the slide strip | Yes (the strip disappears; read slides again to restore it) |
 | `media_cache/` | Temporary audio and video while processing; emptied after each job | Yes |
+| `backups/` | Library backups from Settings → Storage (`yourtube-<date>-<time>.db`, with a folder of category files beside each); the newest 10 are kept | Yes (but they are your way back) |
+| `exports/` | A copy of every export you downloaded | Yes |
 | `logs/` | `yourtube.log` (and up to 5 older copies of 2 MB each): failures with their cause, fix and details. Keys, cookies and the access token are blanked out | Yes |
 | `.venv/` | The Python environment | Yes (run the setup again) |
 
@@ -387,7 +398,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `YTKB_TAXONOMY` | Use another categories file |
 | `YTKB_SETTINGS` | Use another settings file |
 | `YTKB_LOG_DIR` | Write `yourtube.log` to another folder |
-| `YTKB_DATA_DIR` | Keep the database, settings, categories, logs, slide thumbnails and temporary media in this folder (Docker: `/data`). The variables above still win |
+| `YTKB_DATA_DIR` | Keep the database, settings, categories, logs, slide thumbnails, temporary media, backups and exports in this folder (Docker: `/data`). The variables above still win |
 | `YTKB_OLLAMA_URL` | Ollama address to use while the saved one is the default `http://localhost:11434` (Docker: `http://host.docker.internal:11434`) |
 | `YTKB_UID`, `YTKB_GID` | Docker only: the user the container runs as (default 1000), so it can write to `./data` |
 | `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY` | API keys, used when no key is saved in Settings → Cloud AI (`OPENAI_API_KEY` is now for OpenAI itself; OpenRouter and other OpenAI-compatible hosts use `OPENAI_COMPAT_API_KEY`) |

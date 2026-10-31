@@ -377,6 +377,19 @@ class DashboardTest(unittest.TestCase):
         self.assertTrue(r["ai"]["local_only"])
         self.call("/api/ai/settings", {"local_only": False, "edit": "ollama", "config": {"num_ctx": 8192}})
 
+    def test_files_endpoints(self):
+        code, r = self.call("/api/files")
+        self.assertEqual(code, 200)
+        self.assertIn("areas", r)
+        self.assertEqual(self.raw("/files/exports/..%2fsettings.json")[0], 404)
+        self.assertEqual(self.call("/api/files/delete", {"area": "exports", "name": "../x"})[0], 400)
+        self.assertEqual(self.call("/api/files/clear", {"key": "db"})[0], 400)
+        self.assertEqual(self.call("/api/files/restore", {"name": "yourtube-20200101-000000.db"})[0], 404)
+        with mock.patch.dict(dashboard.JOB.lanes["youtube"].state, {"running": True}), \
+                mock.patch.object(dashboard.files, "restore") as restore:
+            self.assertEqual(self.call("/api/files/restore", {"name": "yourtube-20200101-000000.db"})[0], 409)
+            restore.assert_not_called()
+
     def raw(self, path):
         req = urllib.request.Request(self.base + path)
         try:
@@ -401,11 +414,28 @@ class DashboardTest(unittest.TestCase):
     def test_static_files(self):
         # Allow-list contains only the approved assets with expected types
         self.assertEqual(set(dashboard.STATIC.keys()),
-                         {"inter.woff2", "source-serif-4.woff2", "icon.svg", "OFL.txt"})
+                         {"inter.woff2", "source-serif-4.woff2", "icon.svg", "OFL.txt", "app.css", "app.js",
+                          "swagger/swagger-ui-bundle.js", "swagger/swagger-ui.css", "swagger/LICENSE"})
         self.assertEqual(dashboard.STATIC["inter.woff2"][1], "font/woff2")
         self.assertEqual(dashboard.STATIC["source-serif-4.woff2"][1], "font/woff2")
         self.assertEqual(dashboard.STATIC["icon.svg"][1], "image/svg+xml")
         self.assertEqual(dashboard.STATIC["OFL.txt"][1], "text/plain")
+
+        # The page loads the split-out styles and script, which are never cached for long
+        code, _, body = self.raw("/")
+        self.assertIn(b'<link rel="stylesheet" href="/static/app.css">', body)
+        self.assertIn(b'<script src="/static/app.js"></script>', body)
+        code, headers, body = self.raw("/static/app.js")
+        self.assertEqual((code, headers["Cache-Control"]), (200, "no-cache"))
+        self.assertTrue(body.startswith(b"'use strict'"))
+
+        # The API reference page loads the bundled Swagger UI and the spec, from this server only
+        code, _, body = self.raw("/docs/api")
+        self.assertEqual(code, 200)
+        self.assertIn(b"/static/swagger/swagger-ui-bundle.js", body)
+        self.assertIn(b"X-YTKB", body)
+        self.assertNotIn(b"https://", body)
+        self.assertEqual(self.raw("/static/swagger/swagger-ui.css")[0], 200)
 
         # icon.svg placeholder is served with content type and cache header
         code, headers, body = self.raw("/static/icon.svg")
@@ -419,6 +449,7 @@ class DashboardTest(unittest.TestCase):
             test_static = {}
             for name, (_, ctype) in dashboard.STATIC.items():
                 p = os.path.join(tmp, name)
+                os.makedirs(os.path.dirname(p), exist_ok=True)
                 with open(p, "wb") as f:
                     f.write(f"content-{name}".encode())
                 test_static[name] = (p, ctype)
@@ -427,7 +458,8 @@ class DashboardTest(unittest.TestCase):
                     code, headers, body = self.raw(f"/static/{name}")
                     self.assertEqual(code, 200, name)
                     self.assertEqual(headers["Content-Type"], ctype, name)
-                    self.assertEqual(headers["Cache-Control"], "public, max-age=604800", name)
+                    self.assertEqual(headers["Cache-Control"],
+                                     "no-cache" if name in dashboard.NO_CACHE_STATIC else "public, max-age=604800", name)
                     self.assertEqual(body, f"content-{name}".encode(), name)
 
         # Traversal and unknown names give 404

@@ -1,0 +1,3217 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "YourTube API",
+    "version": "0.3.0",
+    "description": "Local API for YourTube: YouTube playlist organizer, local transcription, AI classification, ratings, vector search, and knowledge synthesis."
+  },
+  "servers": [
+    {
+      "url": "/",
+      "description": "This dashboard (the address the page was opened on)"
+    }
+  ],
+  "tags": [
+    {"name": "Library", "description": "Playlists and video library management"},
+    {"name": "Videos", "description": "Video details, metadata, transcripts, and status"},
+    {"name": "Categories", "description": "Taxonomy management and categorization rules"},
+    {"name": "AI", "description": "AI provider configuration, category discovery, rating, and summarization"},
+    {"name": "Ask", "description": "Question answering and conversational inquiry over the library"},
+    {"name": "Search", "description": "Full-text and semantic vector search across transcripts and metadata"},
+    {"name": "Knowledge", "description": "Category knowledge synthesis and topic pages"},
+    {"name": "Jobs", "description": "Background task queue and job management"},
+    {"name": "Local AI", "description": "Local models, speech-to-text (Whisper), and visual/slide analysis"},
+    {"name": "Files", "description": "Storage usage, database backups, restore, and clearable caches"},
+    {"name": "Tools", "description": "Inspection and duration calculators for external videos and playlists"},
+    {"name": "Export", "description": "Data exports, Markdown notes, and system logs"}
+  ],
+  "security": [
+    {"cookieAuth": []}
+  ],
+  "paths": {
+    "/api/files": {
+      "get": {
+        "tags": ["Files"],
+        "summary": "Get storage usage, backups, and exports",
+        "operationId": "getFiles",
+        "responses": {
+          "200": {
+            "description": "Current storage usage and list of files",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data_dir": {"type": "string"},
+                    "areas": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/StorageArea"}
+                    },
+                    "counts": {
+                      "type": "object",
+                      "properties": {
+                        "videos": {"type": "integer"},
+                        "transcripts": {"type": "integer"},
+                        "summaries": {"type": "integer"},
+                        "slides": {"type": "integer"}
+                      },
+                      "required": ["videos", "transcripts", "summaries", "slides"]
+                    },
+                    "backups": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/BackupItem"}
+                    },
+                    "exports": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/ExportItem"}
+                    }
+                  },
+                  "required": ["data_dir", "areas", "counts", "backups", "exports"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/files/backup": {
+      "post": {
+        "tags": ["Files"],
+        "summary": "Back up library database and taxonomies",
+        "operationId": "backupFiles",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {"type": "object"}
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Backup job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/files/restore": {
+      "post": {
+        "tags": ["Files"],
+        "summary": "Restore library from a backup file",
+        "operationId": "restoreFiles",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string", "description": "Backup filename to restore"}
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Library restored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "safety": {"type": "string", "description": "Safety backup file created before restoring"}
+                  },
+                  "required": ["ok", "safety"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"},
+          "409": {"$ref": "#/components/responses/Error409"},
+          "500": {"$ref": "#/components/responses/Error500"}
+        }
+      }
+    },
+    "/api/files/clear": {
+      "post": {
+        "tags": ["Files"],
+        "summary": "Clear a clearable cache area (frames, media, logs)",
+        "operationId": "clearFiles",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "key": {"type": "string", "enum": ["frames", "media", "logs"], "description": "Area key to clear"}
+                },
+                "required": ["key"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cache cleared",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "removed": {"type": "integer", "description": "Count of removed items"}
+                  },
+                  "required": ["ok", "removed"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/files/delete": {
+      "post": {
+        "tags": ["Files"],
+        "summary": "Delete a backup or export file",
+        "operationId": "deleteFile",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "area": {"type": "string", "enum": ["exports", "backups"]},
+                  "name": {"type": "string", "description": "Filename to delete"}
+                },
+                "required": ["area", "name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "File deleted",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OkResponse"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/openapi.json": {
+      "get": {
+        "tags": ["Export"],
+        "summary": "OpenAPI specification for the YourTube API",
+        "operationId": "getOpenApiSpec",
+        "responses": {
+          "200": {
+            "description": "OpenAPI 3.1 specification document",
+            "content": {
+              "application/json": {
+                "schema": {"type": "object"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/state": {
+      "get": {
+        "tags": ["Library"],
+        "summary": "Get current dashboard state for a library",
+        "operationId": "getState",
+        "parameters": [
+          {
+            "name": "library",
+            "in": "query",
+            "required": false,
+            "description": "Library ID or 'all' (default: 1)",
+            "schema": {"type": "string", "default": "1"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Complete dashboard state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "library": {"type": "integer"},
+                    "libraries": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {"type": "integer"},
+                          "name": {"type": "string"}
+                        },
+                        "required": ["id", "name"]
+                      }
+                    },
+                    "playlists": {"type": "array"},
+                    "videos": {
+                      "type": "array",
+                      "items": {"$ref": "#/components/schemas/VideoRecord"}
+                    },
+                    "taxonomy": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                      }
+                    },
+                    "tax_key": {"type": "string"},
+                    "fallback_category": {"type": "string"},
+                    "job": {"$ref": "#/components/schemas/JobSnapshot"},
+                    "ai": {"type": "object"},
+                    "transcripts": {
+                      "type": "object",
+                      "additionalProperties": {"type": "boolean"}
+                    },
+                    "visual_categories": {
+                      "type": "object",
+                      "additionalProperties": {"type": "boolean"}
+                    },
+                    "details_after_sync": {"type": "boolean"},
+                    "use_descriptions": {"type": "boolean"},
+                    "platform": {"type": "string"},
+                    "voice": {"type": "boolean"},
+                    "summarised": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  },
+                  "required": ["library", "libraries", "playlists", "videos", "taxonomy", "tax_key", "job", "ai"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/job": {
+      "get": {
+        "tags": ["Jobs"],
+        "summary": "Get current background job queue and running tasks",
+        "operationId": "getJob",
+        "responses": {
+          "200": {
+            "description": "Snapshot of running lanes, queued tasks, and recent task completions",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/JobSnapshot"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/job/cancel": {
+      "post": {
+        "tags": ["Jobs"],
+        "summary": "Cancel a running or queued job",
+        "operationId": "cancelJob",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "integer", "description": "Specific task ID to stop; omit to stop all running tasks"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancel result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "stopping": {"type": "boolean"}
+                  },
+                  "required": ["ok", "stopping"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/job/retry": {
+      "post": {
+        "tags": ["Jobs"],
+        "summary": "Retry a failed background job",
+        "operationId": "retryJob",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "integer", "description": "Task ID of the failed job to retry"}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task restarted and queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/job/dismiss": {
+      "post": {
+        "tags": ["Jobs"],
+        "summary": "Dismiss completed or failed job notification",
+        "operationId": "dismissJob",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "integer", "description": "Task ID to dismiss"}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Task dismissed",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OkResponse"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/logs": {
+      "get": {
+        "tags": ["Export"],
+        "summary": "Get recent application log entries",
+        "operationId": "getLogs",
+        "parameters": [
+          {
+            "name": "level",
+            "in": "query",
+            "required": false,
+            "description": "Minimum log level (debug, info, warning, error, critical)",
+            "schema": {"type": "string", "default": "warning"}
+          },
+          {
+            "name": "lines",
+            "in": "query",
+            "required": false,
+            "description": "Maximum number of lines (1 to 1000)",
+            "schema": {"type": "integer", "default": 200}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Selected log lines",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "path": {"type": "string"},
+                    "lines": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  },
+                  "required": ["path", "lines"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/export/markdown": {
+      "get": {
+        "tags": ["Export"],
+        "summary": "Export Markdown notes for a single video",
+        "operationId": "exportMarkdownSingle",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "YouTube video ID",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Markdown document containing notes, summary, and transcript",
+            "content": {"text/markdown": {"schema": {"type": "string"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      },
+      "post": {
+        "tags": ["Export"],
+        "summary": "Export Markdown notes for multiple videos as a ZIP file",
+        "operationId": "exportMarkdownZip",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of video IDs to export"
+                  }
+                },
+                "required": ["ids"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "ZIP archive of Markdown notes",
+            "content": {"application/zip": {"schema": {"type": "string", "format": "binary"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/playlists/remove": {
+      "get": {
+        "tags": ["Library"],
+        "summary": "Plan removing a playlist without deleting",
+        "operationId": "planRemovePlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Playlist ID",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Counts of affected videos",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "removed": {"type": "integer"},
+                    "kept_notes": {"type": "integer"},
+                    "shared": {"type": "integer"}
+                  },
+                  "required": ["removed", "kept_notes", "shared"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      },
+      "post": {
+        "tags": ["Library"],
+        "summary": "Queue removing a playlist from the library",
+        "operationId": "removePlaylist",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Playlist ID to remove"}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Playlist removal job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/playlists/library": {
+      "post": {
+        "tags": ["Library"],
+        "summary": "Move a playlist to a different library",
+        "operationId": "setPlaylistLibrary",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Playlist ID"},
+                  "library": {"type": "integer", "description": "Target library ID"}
+                },
+                "required": ["id", "library"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Playlist moved and videos reclassified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "playlists": {"type": "array"},
+                    "changed": {"type": "integer"}
+                  },
+                  "required": ["ok", "playlists", "changed"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/retrieve": {
+      "get": {
+        "tags": ["Search"],
+        "summary": "Retrieve relevant transcript/summary chunks for a query",
+        "operationId": "retrievePieces",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Search or question text (up to 500 characters)",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "categories",
+            "in": "query",
+            "required": false,
+            "description": "Filter by comma-separated categories",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "playlists",
+            "in": "query",
+            "required": false,
+            "description": "Filter by comma-separated playlist IDs",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "videos",
+            "in": "query",
+            "required": false,
+            "description": "Filter by comma-separated video IDs",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "done",
+            "in": "query",
+            "required": false,
+            "description": "Include completed/skipped videos ('0' to exclude, default '1')",
+            "schema": {"type": "string", "default": "1"}
+          },
+          {
+            "name": "k",
+            "in": "query",
+            "required": false,
+            "description": "Number of pieces to return (1 to 30, default 8)",
+            "schema": {"type": "integer", "default": 8}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Retrieved pieces sorted by relevance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "mode": {"type": "string", "enum": ["hybrid", "keyword"]},
+                    "pieces": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {"type": "integer"},
+                          "video_id": {"type": "string"},
+                          "title": {"type": "string"},
+                          "kind": {"type": "string"},
+                          "t": {"type": "integer"},
+                          "text": {"type": "string"},
+                          "score": {"type": "number"}
+                        },
+                        "required": ["id", "video_id", "title", "text"]
+                      }
+                    }
+                  },
+                  "required": ["mode", "pieces"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ask/history": {
+      "get": {
+        "tags": ["Ask"],
+        "summary": "List past question and answer threads",
+        "operationId": "getAskHistory",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "Filter query string",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of past questions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {"type": "integer"},
+                          "question": {"type": "string"},
+                          "created_at": {"type": "string"}
+                        },
+                        "required": ["id", "question"]
+                      }
+                    }
+                  },
+                  "required": ["items"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ask/item": {
+      "get": {
+        "tags": ["Ask"],
+        "summary": "Get a specific question and answer thread",
+        "operationId": "getAskItem",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Question ID",
+            "schema": {"type": "integer"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full Q&A thread with citations and sources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "thread": {"type": "array"}
+                  },
+                  "required": ["thread"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/export/ask": {
+      "get": {
+        "tags": ["Export"],
+        "summary": "Export a Q&A thread as Markdown",
+        "operationId": "exportAskMarkdown",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Question ID",
+            "schema": {"type": "integer"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Markdown export of Q&A thread",
+            "content": {"text/markdown": {"schema": {"type": "string"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/ask/delete": {
+      "post": {
+        "tags": ["Ask"],
+        "summary": "Delete a question and its thread from history",
+        "operationId": "deleteAsk",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "integer", "description": "Question ID to delete"}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Question deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "deleted": {"type": "boolean"}
+                  },
+                  "required": ["ok", "deleted"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/embed/status": {
+      "get": {
+        "tags": ["Search"],
+        "summary": "Get embedding model and vector index status",
+        "operationId": "getEmbedStatus",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "description": "Optional embedding provider to preview status for",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Embedding status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "model": {"type": "string"},
+                    "available": {"type": "boolean"},
+                    "indexed": {"type": "integer"},
+                    "total": {"type": "integer"},
+                    "missing": {"type": "integer"}
+                  },
+                  "required": ["model", "available"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/embed/estimate": {
+      "get": {
+        "tags": ["Search"],
+        "summary": "Estimate token count and cost to embed unindexed text",
+        "operationId": "estimateEmbed",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "description": "Optional embedding provider to estimate",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cost estimate and piece counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "model": {"type": "string"},
+                    "available": {"type": "boolean"},
+                    "pieces": {"type": "integer"},
+                    "cost": {"type": "number"},
+                    "sends": {"type": "string"}
+                  },
+                  "required": ["model", "available", "pieces", "cost", "sends"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/embed": {
+      "post": {
+        "tags": ["Search"],
+        "summary": "Update or rebuild the semantic embedding index",
+        "operationId": "runEmbed",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rebuild": {"type": "boolean", "default": false, "description": "Whether to clear and rebuild all vectors"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Embedding job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/embed/switch": {
+      "post": {
+        "tags": ["Search"],
+        "summary": "Switch embedding provider and start index rebuild",
+        "operationId": "switchEmbedProvider",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {"type": "string", "description": "Target embedding provider"}
+                },
+                "required": ["provider"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Provider updated and rebuild started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "job": {"type": "object"},
+                    "ai": {"type": "object"}
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/visuals/plan": {
+      "get": {
+        "tags": ["Local AI"],
+        "summary": "Plan and cost estimate for slide visual analysis",
+        "operationId": "planVisuals",
+        "responses": {
+          "200": {
+            "description": "Visual analysis plan",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "available": {"type": "boolean"},
+                    "model": {"type": "string"},
+                    "engine": {"type": "string"},
+                    "model_ok": {"type": "boolean"},
+                    "videos": {"type": "integer"},
+                    "seconds": {"type": "integer"},
+                    "minutes": {"type": "number"},
+                    "frames": {"type": "integer"},
+                    "cost": {"type": ["number", "null"]},
+                    "sends": {"type": "string"}
+                  },
+                  "required": ["available", "videos", "seconds", "minutes", "frames", "sends"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/visuals": {
+      "post": {
+        "tags": ["Local AI"],
+        "summary": "Queue reading slide frames and visual text from videos",
+        "operationId": "runVisuals",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of video IDs to process"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Visual extraction job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/videos/visuals": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Mark whether videos have slides or visual content",
+        "operationId": "setVideosVisuals",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "value": {
+                    "type": ["boolean", "null"],
+                    "description": "True/False to lock flag, null to unset"
+                  }
+                },
+                "required": ["ids", "value"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Visual flags updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "updated": {"type": "integer"}
+                  },
+                  "required": ["ok", "updated"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/visuals/settings": {
+      "post": {
+        "tags": ["Local AI"],
+        "summary": "Enable or disable slide reading for a category",
+        "operationId": "setVisualSettings",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "category": {"type": "string", "description": "Category name"},
+                  "on": {"type": "boolean", "description": "Whether to extract slides for this category"}
+                },
+                "required": ["category", "on"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "visual_categories": {"type": "object"}
+                  },
+                  "required": ["ok", "visual_categories"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/asr/plan": {
+      "get": {
+        "tags": ["Local AI"],
+        "summary": "Plan and cost estimate for speech transcription",
+        "operationId": "getPlanAsr",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "description": "Optional comma-separated video IDs",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transcription estimate and device info",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/AsrEstimate"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      },
+      "post": {
+        "tags": ["Local AI"],
+        "summary": "Plan and cost estimate for speech transcription with video IDs list",
+        "operationId": "postPlanAsr",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transcription estimate and device info",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/AsrEstimate"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/asr/estimate": {
+      "get": {
+        "tags": ["Local AI"],
+        "summary": "Alias for /api/asr/plan (GET)",
+        "operationId": "getAsrEstimate",
+        "parameters": [
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false,
+            "description": "Optional comma-separated video IDs",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transcription estimate and device info",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/AsrEstimate"}
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      },
+      "post": {
+        "tags": ["Local AI"],
+        "summary": "Alias for /api/asr/plan (POST)",
+        "operationId": "postAsrEstimate",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transcription estimate and device info",
+            "content": {
+              "application/json": {
+                "schema": {"$ref": "#/components/schemas/AsrEstimate"}
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/asr": {
+      "post": {
+        "tags": ["Local AI"],
+        "summary": "Queue speech-to-text transcription",
+        "operationId": "runAsr",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional video IDs to transcribe"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transcription job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/search": {
+      "get": {
+        "tags": ["Search"],
+        "summary": "Search video transcripts, summaries, chapters and descriptions",
+        "operationId": "searchLibrary",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "description": "Search query text",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "kinds",
+            "in": "query",
+            "required": false,
+            "description": "Comma-separated search kinds (transcript, summary, chapters, description)",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "meaning",
+            "in": "query",
+            "required": false,
+            "description": "Set to '1' for semantic meaning search, '0' for text match",
+            "schema": {"type": "string", "default": "0"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching results",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "video_id": {"type": "string"},
+                      "title": {"type": "string"},
+                      "kind": {"type": "string"},
+                      "snippet": {"type": "string"},
+                      "t": {"type": "integer"}
+                    },
+                    "required": ["video_id", "title"]
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/local/status": {
+      "get": {
+        "tags": ["Local AI"],
+        "summary": "Check local AI system status (GPU, RAM, Ollama, Whisper, ffmpeg)",
+        "operationId": "getLocalStatus",
+        "responses": {
+          "200": {
+            "description": "System hardware and tool status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "gpu": {"type": "object"},
+                    "memory": {"type": "object"},
+                    "ffmpeg": {"type": "object"},
+                    "ollama": {"type": "object"},
+                    "whisper": {"type": "object"},
+                    "recommended": {"type": "array"},
+                    "embed": {"type": "object"}
+                  },
+                  "required": ["gpu", "memory", "ffmpeg", "ollama", "whisper"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/local/pull": {
+      "post": {
+        "tags": ["Local AI"],
+        "summary": "Download a model via Ollama",
+        "operationId": "pullLocalModel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {"type": "string", "description": "Ollama model name, e.g. qwen3.5:4b"}
+                },
+                "required": ["model"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Pull task started",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/local/use": {
+      "post": {
+        "tags": ["Local AI"],
+        "summary": "Set a local model for specific AI tasks",
+        "operationId": "useLocalModel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {"type": "string"},
+                  "tasks": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                },
+                "required": ["model"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Model configured",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "ai": {"type": "object"}
+                  },
+                  "required": ["ok", "ai"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/knowledge": {
+      "get": {
+        "tags": ["Knowledge"],
+        "summary": "Get knowledge synthesis status for categories in a library",
+        "operationId": "getKnowledgeStatus",
+        "parameters": [
+          {
+            "name": "library",
+            "in": "query",
+            "required": false,
+            "description": "Library ID",
+            "schema": {"type": "string", "default": "1"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Category knowledge status list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "library": {"type": "integer"},
+                    "categories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "category": {"type": "string"},
+                          "videos": {"type": "integer"},
+                          "summarised": {"type": "integer"},
+                          "page": {"type": "string", "enum": ["none", "ready", "stale"]},
+                          "built_at": {"type": ["string", "null"]}
+                        },
+                        "required": ["category", "videos", "summarised", "page"]
+                      }
+                    }
+                  },
+                  "required": ["library", "categories"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/knowledge/page": {
+      "get": {
+        "tags": ["Knowledge"],
+        "summary": "Get synthesized knowledge page for a category",
+        "operationId": "getKnowledgePage",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": true,
+            "description": "Category name",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "library",
+            "in": "query",
+            "required": false,
+            "description": "Library ID",
+            "schema": {"type": "string", "default": "1"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Synthesized topic page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "page": {"type": ["object", "null"]},
+                    "sources": {"type": "array"},
+                    "built_at": {"type": "string"},
+                    "model": {"type": "string"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/knowledge/build": {
+      "post": {
+        "tags": ["Knowledge"],
+        "summary": "Queue building a synthesized knowledge page for a category",
+        "operationId": "buildKnowledgePage",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "category": {"type": "string", "description": "Category name"},
+                  "library": {"type": "integer", "description": "Library ID"}
+                },
+                "required": ["category"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Knowledge build task queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/export/knowledge": {
+      "get": {
+        "tags": ["Export"],
+        "summary": "Export category knowledge page as Markdown",
+        "operationId": "exportKnowledgeMarkdown",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": true,
+            "description": "Category name",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "library",
+            "in": "query",
+            "required": false,
+            "description": "Library ID",
+            "schema": {"type": "string", "default": "1"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Markdown document of the synthesized knowledge page",
+            "content": {"text/markdown": {"schema": {"type": "string"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/summary": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "Get video summary, claims, quiz, and related moments",
+        "operationId": "getVideoSummary",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Video ID",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Video summary and related moments in library",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "summary": {"type": ["object", "null"]},
+                    "moments": {"type": "object"}
+                  },
+                  "required": ["summary", "moments"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/video": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "Get video details, transcript segments, chapters, and visuals",
+        "operationId": "getVideoDetails",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Video ID",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Detailed video metadata and segments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "details": {
+                      "type": "object",
+                      "properties": {
+                        "video_id": {"type": "string"},
+                        "description": {"type": "string"},
+                        "chapters": {"type": "array"},
+                        "segments": {"type": "array"},
+                        "sources": {"type": "array"},
+                        "transcript": {"type": "string"},
+                        "visuals": {"type": "array"}
+                      },
+                      "required": ["video_id"]
+                    }
+                  },
+                  "required": ["details"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/export": {
+      "get": {
+        "tags": ["Export"],
+        "summary": "Export video library metadata as CSV or JSON",
+        "operationId": "exportLibrary",
+        "parameters": [
+          {
+            "name": "playlist",
+            "in": "query",
+            "required": false,
+            "description": "Playlist ID or 'all'",
+            "schema": {"type": "string", "default": "all"}
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "Output format ('csv' or 'json')",
+            "schema": {"type": "string", "enum": ["csv", "json"], "default": "csv"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Library file download",
+            "content": {
+              "text/csv": {"schema": {"type": "string"}},
+              "application/json": {"schema": {"type": "array", "items": {"$ref": "#/components/schemas/VideoRecord"}}}
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/voice/transcribe": {
+      "post": {
+        "tags": ["Ask"],
+        "summary": "Transcribe a voice recording clip for input",
+        "operationId": "transcribeVoice",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "audio": {"type": "string", "description": "Base64-encoded audio bytes"},
+                  "mime": {"type": "string", "description": "Audio MIME type, e.g. audio/webm"}
+                },
+                "required": ["audio", "mime"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Transcribed speech",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "text": {"type": "string"},
+                    "language": {"type": "string"},
+                    "seconds": {"type": "number"}
+                  },
+                  "required": ["text"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "500": {"$ref": "#/components/responses/Error500"},
+          "503": {"$ref": "#/components/responses/Error503"}
+        }
+      }
+    },
+    "/api/videos/update": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Update video status, manual category, notes, or reset category",
+        "operationId": "updateVideos",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "status": {"type": "string", "enum": ["unwatched", "watched", "skipped", "completed", "archived"]},
+                  "category": {"type": "string"},
+                  "notes": {"type": "string"},
+                  "reset_category": {"type": "boolean", "description": "Unlock and reclassify according to taxonomy"}
+                },
+                "required": ["ids"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Videos updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "updated": {"type": "integer"},
+                    "changed": {"type": "integer"}
+                  },
+                  "required": ["ok"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/libraries": {
+      "post": {
+        "tags": ["Library"],
+        "summary": "Create, rename, or delete video libraries",
+        "operationId": "manageLibraries",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "action": {"type": "string", "enum": ["create", "rename", "delete"]},
+                  "name": {"type": "string"},
+                  "id": {"type": "integer"}
+                },
+                "required": ["action"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Libraries updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "id": {"type": "integer"},
+                    "libraries": {"type": "array"}
+                  },
+                  "required": ["ok", "libraries"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/taxonomy": {
+      "post": {
+        "tags": ["Categories"],
+        "summary": "Save taxonomy category definitions and keywords",
+        "operationId": "saveTaxonomy",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"},
+                  "taxonomy": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  }
+                },
+                "required": ["taxonomy"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Taxonomy saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "taxonomy": {"type": "object"}
+                  },
+                  "required": ["ok", "taxonomy"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/categories/rename": {
+      "post": {
+        "tags": ["Categories"],
+        "summary": "Rename an existing category in a library",
+        "operationId": "renameCategory",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"},
+                  "old": {"type": "string"},
+                  "new": {"type": "string"}
+                },
+                "required": ["old", "new"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Category renamed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "updated": {"type": "integer"}
+                  },
+                  "required": ["ok", "updated"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/categories/delete": {
+      "post": {
+        "tags": ["Categories"],
+        "summary": "Delete a category and move its videos back to default",
+        "operationId": "deleteCategory",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"},
+                  "name": {"type": "string"}
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Category deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "moved": {"type": "integer"}
+                  },
+                  "required": ["ok", "moved"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/categories/separate": {
+      "post": {
+        "tags": ["Categories"],
+        "summary": "Split combined categories into distinct single topics",
+        "operationId": "separateCategories",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"},
+                  "names": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  },
+                  "preview": {"type": "boolean", "default": false}
+                },
+                "required": ["names"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Topics preview or separation queued",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "topics": {"type": "array"},
+                    "queued": {"type": "integer"}
+                  }
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/reclassify": {
+      "post": {
+        "tags": ["Categories"],
+        "summary": "Re-run keyword taxonomy classifier across library videos",
+        "operationId": "reclassifyVideos",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Classification completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "changed": {"type": "integer"}
+                  },
+                  "required": ["ok", "changed"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ingest": {
+      "post": {
+        "tags": ["Library"],
+        "summary": "Sync a playlist or add a single video",
+        "operationId": "ingestPlaylistOrVideo",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "url": {"type": "string"},
+                  "playlist_id": {"type": "string"},
+                  "access": {"type": "string", "enum": ["public", "browser", "cookies"]},
+                  "browser": {"type": "string"},
+                  "cookies_file": {"type": "string"},
+                  "library": {"type": "integer"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Sync task queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/details/fetch": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Queue fetching details, chapters, and captions for videos",
+        "operationId": "fetchVideoDetails",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Details fetch job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/details/settings": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Configure video detail fetching, description usage, and category transcripts",
+        "operationId": "setDetailsSettings",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "after_sync": {"type": "boolean"},
+                  "use_descriptions": {"type": "boolean"},
+                  "category": {"type": "string"},
+                  "on": {"type": "boolean"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Settings updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "transcripts": {"type": "object"},
+                    "details_after_sync": {"type": "boolean"},
+                    "use_descriptions": {"type": "boolean"}
+                  },
+                  "required": ["ok", "transcripts", "details_after_sync", "use_descriptions"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ask": {
+      "post": {
+        "tags": ["Ask"],
+        "summary": "Ask a question and receive an answer with cited moments",
+        "operationId": "askQuestion",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "question": {"type": "string"},
+                  "filters": {
+                    "type": "object",
+                    "properties": {
+                      "categories": {"type": "array", "items": {"type": "string"}},
+                      "playlists": {"type": "array", "items": {"type": "string"}},
+                      "video_ids": {"type": "array", "items": {"type": "string"}},
+                      "include_done": {"type": "boolean", "default": true}
+                    }
+                  },
+                  "follow_up_of": {"type": "integer"}
+                },
+                "required": ["question"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Answer with citations and sources",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {"type": "integer"},
+                    "thread_id": {"type": "integer"},
+                    "question": {"type": "string"},
+                    "standalone": {"type": ["string", "null"]},
+                    "answer": {"type": "string"},
+                    "cited": {"type": "array"},
+                    "sources": {"type": "array"},
+                    "mode": {"type": "string"},
+                    "model": {"type": "string"},
+                    "seconds": {"type": "number"},
+                    "checked": {"type": "object"},
+                    "filters": {"type": "object"}
+                  },
+                  "required": ["question", "answer", "cited", "sources"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/tools/length": {
+      "post": {
+        "tags": ["Tools"],
+        "summary": "Read video/playlist links and calculate total duration without saving",
+        "operationId": "calculateLength",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "links": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Up to 10 YouTube video or playlist links"
+                  },
+                  "browser": {"type": "string", "description": "Browser for cookies if reading private playlists"}
+                },
+                "required": ["links"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Parsed links with video durations and titles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {"type": "array"}
+                  },
+                  "required": ["items"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/transcript/source": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Set the active transcript source for a video",
+        "operationId": "setTranscriptSource",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Video ID"},
+                  "source": {"type": "string", "description": "Active transcript source name, e.g. captions or asr"}
+                },
+                "required": ["id", "source"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Source updated",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OkResponse"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/rate": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Queue rating videos with AI (Watch / Skim / Skip)",
+        "operationId": "runRate",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of video IDs to rate"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rating job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/rate/estimate": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Estimate tokens and cost for rating videos",
+        "operationId": "estimateRate",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Rating cost estimate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "videos": {"type": "integer"},
+                    "with_transcript": {"type": "integer"},
+                    "tokens_in": {"type": "integer"},
+                    "tokens_out": {"type": "integer"},
+                    "cost": {"type": ["number", "null"]},
+                    "uses": {"type": "string"},
+                    "ready": {"type": "boolean"},
+                    "cost_note": {"type": "string"}
+                  },
+                  "required": ["videos", "with_transcript", "tokens_in", "tokens_out", "uses", "ready"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/summarize": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Queue generating structured summaries for videos",
+        "operationId": "runSummarize",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of video IDs (maximum 50)"
+                  }
+                },
+                "required": ["ids"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Summarization job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/summarize/estimate": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Estimate tokens and cost for summarizing videos",
+        "operationId": "estimateSummarize",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                },
+                "required": ["ids"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Summary cost estimate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "videos": {"type": "integer"},
+                    "with_transcript": {"type": "integer"},
+                    "tokens_in": {"type": "integer"},
+                    "tokens_out": {"type": "integer"},
+                    "cost": {"type": ["number", "null"]},
+                    "uses": {"type": "string"},
+                    "ready": {"type": "boolean"},
+                    "cost_note": {"type": "string"}
+                  },
+                  "required": ["videos", "with_transcript", "tokens_in", "tokens_out", "uses", "ready"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/interests/draft": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Draft user interests statement using AI from notes or description",
+        "operationId": "draftInterests",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "text": {"type": "string", "description": "Freeform user input about interests"},
+                  "current": {"type": "string", "description": "Existing interests statement"},
+                  "library": {"type": "integer"}
+                },
+                "required": ["text"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AI draft created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "interests": {"type": "string"}
+                  },
+                  "required": ["interests"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "502": {"$ref": "#/components/responses/Error502"}
+        }
+      }
+    },
+    "/api/ai/settings": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Update AI provider configuration, model choices, tasks, and interests",
+        "operationId": "setAiSettings",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {"type": "string"},
+                  "edit": {"type": "string"},
+                  "config": {"type": "object"},
+                  "tasks": {"type": "object"},
+                  "helpers": {"type": "object"},
+                  "auto_after_sync": {"type": "boolean"},
+                  "show_descriptions": {"type": "boolean"},
+                  "local_only": {"type": "boolean"},
+                  "asr_model": {"type": "string"},
+                  "vision_model": {"type": "string"},
+                  "embed_model": {"type": "string"},
+                  "rating_formula": {"type": "object"},
+                  "visual_height": {"type": "integer", "enum": [480, 720]},
+                  "interests": {"type": "string"},
+                  "language": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AI settings saved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "ai": {"type": "object"}
+                  },
+                  "required": ["ok", "ai"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ai/test": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Test connectivity and authentication with an AI provider",
+        "operationId": "testAiProvider",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {"type": "string"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "AI provider connection succeeded",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OkResponse"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "502": {"$ref": "#/components/responses/Error502"}
+        }
+      }
+    },
+    "/api/ai/models": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "List available models for an AI provider",
+        "operationId": "listAiModels",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "provider": {"type": "string"}
+                },
+                "required": ["provider"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "List of model identifiers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "models": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  },
+                  "required": ["models"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/presets": {
+      "post": {
+        "tags": ["Categories"],
+        "summary": "Toggle category preset status in library settings",
+        "operationId": "toggleCategoryPreset",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": "string"},
+                  "preset": {"type": "boolean"},
+                  "library": {"type": "integer"}
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated presets",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "presets": {
+                      "type": "array",
+                      "items": {"type": "string"}
+                    }
+                  },
+                  "required": ["ok", "presets"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ai/discover": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Queue AI discovery of new categories for an empty library",
+        "operationId": "discoverCategories",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Discovery job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/ai/suggest": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Queue AI category suggestions for unsorted or unlocked videos",
+        "operationId": "suggestCategories",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"},
+                  "scope": {"type": "string", "enum": ["unsorted", "unlocked"], "default": "unsorted"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Category suggestion job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/ai/proposal/apply": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Apply proposed AI categories and keywords to the library",
+        "operationId": "applyAiProposal",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"},
+                  "categories": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {"type": "string"},
+                        "keywords": {"type": "array", "items": {"type": "string"}},
+                        "description": {"type": "string"}
+                      },
+                      "required": ["name"]
+                    }
+                  },
+                  "remove": {
+                    "type": "array",
+                    "items": {"type": "string"}
+                  }
+                },
+                "required": ["categories"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Categories applied and library reclassified",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "categories": {"type": "integer"},
+                    "moved": {"type": "integer"},
+                    "changed": {"type": "integer"}
+                  },
+                  "required": ["ok", "categories", "moved", "changed"]
+                }
+              }
+            }
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ai/proposal/dismiss": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Dismiss current AI category proposal",
+        "operationId": "dismissAiProposal",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal dismissed",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/OkResponse"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ai/suggestions/accept": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Accept AI category suggestions for videos",
+        "operationId": "acceptAiSuggestions",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of video IDs; omits to accept all"
+                  },
+                  "min_confidence": {"type": "number", "description": "Minimum confidence threshold"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Suggestions accepted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "accepted": {"type": "integer"}
+                  },
+                  "required": ["ok", "accepted"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/ai/suggestions/dismiss": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Dismiss AI category suggestions for videos",
+        "operationId": "dismissAiSuggestions",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional list of video IDs; omits to dismiss all"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Suggestions dismissed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {"type": "boolean"},
+                    "dismissed": {"type": "integer"}
+                  },
+                  "required": ["ok", "dismissed"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cookieAuth": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "ytkb_token",
+        "description": "Session token set via dashboard launch link (?t=TOKEN)"
+      },
+      "headerAuth": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-YTKB",
+        "description": "Anti-CSRF header required on all POST requests (must be set to '1')"
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable error description"
+          }
+        },
+        "required": ["error"]
+      },
+      "OkResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {"type": "boolean"}
+        },
+        "required": ["ok"]
+      },
+      "JobQueued": {
+        "type": "object",
+        "properties": {
+          "ok": {"type": "boolean"},
+          "id": {"type": "integer", "description": "Queued task ID"},
+          "position": {"type": "integer", "description": "Queue position (0 = running now)"},
+          "after": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Labels of tasks ahead in this lane"
+          }
+        },
+        "required": ["ok", "id"]
+      },
+      "JobSnapshot": {
+        "type": "object",
+        "properties": {
+          "id": {"type": ["integer", "null"]},
+          "kind": {"type": ["string", "null"]},
+          "label": {"type": ["string", "null"]},
+          "running": {"type": "boolean"},
+          "stopping": {"type": "boolean"},
+          "log": {"type": "string"},
+          "lanes": {"type": "array"},
+          "queue": {"type": "array"},
+          "recent": {"type": "array"},
+          "dismissed": {"type": "boolean"}
+        }
+      },
+      "VideoRecord": {
+        "type": "object",
+        "properties": {
+          "video_id": {"type": "string"},
+          "title": {"type": "string"},
+          "channel": {"type": "string"},
+          "duration_seconds": {"type": "integer"},
+          "url": {"type": "string"},
+          "category": {"type": "string"},
+          "status": {
+            "type": "string",
+            "enum": ["unwatched", "watched", "skipped", "completed", "archived"]
+          }
+        },
+        "required": ["video_id", "title", "channel", "category", "status"]
+      },
+      "StorageArea": {
+        "type": "object",
+        "properties": {
+          "key": {"type": "string"},
+          "label": {"type": "string"},
+          "bytes": {"type": "integer"},
+          "files": {"type": "integer"},
+          "clearable": {"type": "boolean"}
+        },
+        "required": ["key", "label", "bytes", "files", "clearable"]
+      },
+      "BackupItem": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "bytes": {"type": "integer"},
+          "created": {"type": "string"},
+          "videos": {"type": "integer"}
+        },
+        "required": ["name", "bytes", "created", "videos"]
+      },
+      "ExportItem": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "bytes": {"type": "integer"},
+          "created": {"type": "string"}
+        },
+        "required": ["name", "bytes", "created"]
+      },
+      "AsrEstimate": {
+        "type": "object",
+        "properties": {
+          "engine": {"type": "string"},
+          "available": {"type": "boolean"},
+          "device": {"type": "string"},
+          "model": {"type": "string"},
+          "videos": {"type": "integer"},
+          "no_captions": {"type": "integer"},
+          "wrong_script": {"type": "integer"},
+          "audio_s": {"type": "number"},
+          "minutes": {"type": "number"},
+          "cost": {"type": ["number", "null"]},
+          "helper": {"type": ["string", "null"]},
+          "sends": {"type": "string"}
+        },
+        "required": ["engine", "available", "device", "model", "videos", "minutes", "sends"]
+      }
+    },
+    "responses": {
+      "Error400": {
+        "description": "Bad Request",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "Error401": {
+        "description": "Unauthorized - Missing or invalid access token",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "Error403": {
+        "description": "Forbidden - Missing X-YTKB: 1 header or forbidden host",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "Error404": {
+        "description": "Not Found",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "Error409": {
+        "description": "Conflict - Task already running or resource busy",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "Error415": {
+        "description": "Unsupported Media Type - Expected application/json",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "Error500": {
+        "description": "Internal Server Error",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "Error502": {
+        "description": "Bad Gateway - AI provider call failed",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      },
+      "Error503": {
+        "description": "Service Unavailable - Missing local dependency",
+        "content": {"application/json": {"schema": {"$ref": "#/components/schemas/Error"}}}
+      }
+    }
+  }
+}

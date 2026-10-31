@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YourTube API</title>
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+<link rel="stylesheet" href="/static/swagger/swagger-ui.css">
+<style>
+  body { margin: 0; background: #fff; }
+  .banner { font: 14px/1.5 system-ui, sans-serif; background: #f5f2ea; color: #1f2430; border-bottom: 1px solid #ddd6c6; padding: 10px 16px; }
+  .banner a { color: #2e4a7d; }
+</style>
+</head>
+<body>
+<div class="banner"><b>Try it out runs against your real library.</b> Requests change your data just like the dashboard does. <a href="/#/settings/general">Back to YourTube</a></div>
+<div id="swagger"></div>
+<script src="/static/swagger/swagger-ui-bundle.js"></script>
+<script>
+SwaggerUIBundle({
+  url: '/api/openapi.json',
+  dom_id: '#swagger',
+  validatorUrl: null,   // the default validator is an outside service; this page stays offline
+  deepLinking: true,
+  // The dashboard refuses POSTs without these (CSRF protection); the access cookie is sent by the browser
+  requestInterceptor: req => {
+    if ((req.method || 'GET').toUpperCase() === 'POST') {
+      req.headers['X-YTKB'] = '1';
+      req.headers['Content-Type'] = 'application/json';
+    }
+    return req;
+  },
+});
+</script>
+</body>
+</html>
