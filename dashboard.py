@@ -592,6 +592,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, data, ctype, extra_headers=headers)
         if url.path == "/api/files":
             return self._json({**files.usage(), "backups": files.list_backups(), "exports": files.list_exports()})
+        if url.path == "/api/openapi.json":
+            spec_path = os.path.join(ROOT_DIR, "docs", "openapi.json")
+            if not os.path.isfile(spec_path):
+                return self._error("Not found", 404)
+            with open(spec_path, "rb") as f:
+                return self._send(200, f.read(), "application/json; charset=utf-8")
         if url.path.startswith("/files/exports/"):
             name = url.path[len("/files/exports/"):]
             path = files.get_saved("exports", name)
