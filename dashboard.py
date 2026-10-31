@@ -635,6 +635,9 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/api/embed/status", "/api/embed/estimate"):
             import embedder
             settings = llm.load_settings()
+            wanted = (qs.get("provider") or [""])[0]
+            if wanted in llm.MEDIA_TASKS["embed"]["providers"]:   # estimate a choice before it is saved
+                settings = {**settings, "tasks": {**settings.get("tasks", {}), "embed": wanted}}
             model = embedder.model_name(settings)
             status = storage.embedding_status(model)
             if url.path == "/api/embed/status":

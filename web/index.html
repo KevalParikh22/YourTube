@@ -303,6 +303,8 @@
   .prov .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); margin-right: 8px; vertical-align: 1px; }
   .prov .dot.ok { background: var(--watch); }
   .route { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 12px; align-items: center; padding: 8px 0; }
+  .route3 { grid-template-columns: 170px minmax(0, 1.4fr) minmax(0, 1fr); }
+  .route-head { padding-bottom: 0; }
   .settings-layout { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 32px; align-items: start; margin-top: 24px; }
   .settings-side { position: sticky; top: 20px; display: grid; gap: 4px; }
   .settings-side a { color: var(--ink-2); text-decoration: none; border-radius: 6px; padding: 9px 11px; font-size: 13.5px; }
@@ -481,7 +483,7 @@
   /* ---------- responsive ---------- */
   @media (max-width: 760px) {
     .route { grid-template-columns: 112px minmax(0, 1fr); gap: 8px; }
-    .route .hint[style*="grid-column:2"] { grid-column: 1 / -1 !important; }
+    .route-head { display: none; }
     .jobpanel { width: min(360px, calc(100vw - 24px)); }
     .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     .settings-side { position: static; display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
@@ -2053,40 +2055,24 @@ function viewAI() {
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
   const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local));
+  const media = ai.media_tasks || {};
+  const pickMedia = (t, meta) => `<select id="media-${esc(t)}" data-media-task="${esc(t)}" aria-label="${esc(meta.label)} runs on" style="width:100%">
+      ${meta.providers.map(k => { const p = ai.providers[k], ready = k === 'local' || p?.ready;
+        return `<option value="${esc(k)}" ${(meta.selected || 'local') === k ? 'selected' : ''} ${ready ? '' : 'disabled'}>${esc(k === 'local' ? 'This computer' : p?.label || k)}${ready ? '' : ' (add a key in Cloud AI)'}</option>`; }).join('')}
+    </select>`;
+  const helperCell = t => t in (ai.helpers || {})
+    ? `<select data-helper-task="${esc(t)}" aria-label="Helper for ${esc(media[t]?.label || ai.task_labels[t])}" style="width:100%">${helperOptions(t, mainOf(t, ai), ai.helpers[t])}</select>`
+    : '<span class="faint" style="font-size:12.5px">—</span>';
+  const row = (label, main, t) => `<div class="route route3"><span class="field-label" style="margin:0">${esc(label)}</span>${main}${t ? helperCell(t) : '<span></span>'}</div>`;
   const routing = `
   <section class="section card">
     <h2 class="h">Which AI does what</h2>
-    <div style="margin-top:12px">
-      <div class="route"><span class="field-label" style="margin:0">Default</span>${pick('provider', ai.provider, false)}</div>
-      ${Object.entries(ai.task_labels).map(([t, label]) => `<div class="route"><span class="field-label" style="margin:0">${esc(label)}</span>${pick(t, ai.tasks[t] || '', true)}</div>`).join('')}
-    </div>
-    <p class="hint">AI choices ${tip('A smaller or local model often works well for categories. Ratings read whole transcripts, so a larger context window can help. Questions use the ratings choice unless you choose another model.')}</p>
-    <h3 class="h" style="margin-top:22px">Media</h3>
-    <p class="hint">Choose where media is processed. Cloud choices show an estimate before they start.</p>
-    ${Object.entries(ai.media_tasks || {}).map(([t, meta]) => {
-      const selected = meta.selected || 'local';
-      const label = selected === 'local' ? 'this computer' : ai.providers[selected]?.label || selected;
-      const sends = t === 'transcribe' ? (selected === 'local' ? 'Audio stays on this computer and is deleted after transcription.' : `Audio is uploaded to ${label} and deleted here afterwards.`)
-        : t === 'slides' ? (selected === 'local' ? 'Slide frames are read on this computer.' : `Slide frames are sent to ${label}.`)
-          : (selected === 'local' ? 'Indexed text stays on this computer.' : `All indexed text is sent to ${label}.`);
-      return `<div class="route"><label class="field-label" style="margin:0" for="media-${esc(t)}">${esc(meta.label)}</label><select id="media-${esc(t)}" data-media-task="${esc(t)}" style="width:100%">
-        ${meta.providers.map(k => { const p = ai.providers[k], ready = k === 'local' || p?.ready; return `<option value="${esc(k)}" ${selected === k ? 'selected' : ''} ${ready ? '' : 'disabled'}>${esc(k === 'local' ? 'This computer' : p?.label || k)}${ready ? '' : ' (not set up — add a key in Cloud AI)'}</option>`; }).join('')}
-      </select><p class="hint" style="grid-column:2;margin:0">${esc(sends)}</p></div>`;
-    }).join('')}
-    <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-media">Save media choices</button></div>
-    <h3 class="h" style="margin-top:24px">Helper AI (works at the same time)</h3>
-    <p class="hint">Shares big batches with your main AI so they finish sooner. Costs apply to the videos the cloud AI does.</p>
-    ${Object.entries(ai.helpers || {}).map(([t, value]) => {
-      const labels = ai.task_labels || {}, media = ai.media_tasks?.[t];
-      const main = media ? (media.selected || 'local') : (ai.tasks[t] || ai.provider);
-      const mainLocal = main === 'local' || !!ai.providers[main]?.local;   // a helper is cloud for a local main AI, and the other way round
-      const candidates = media
-        ? media.providers.filter(k => k !== main && (k === 'local') !== mainLocal && (k === 'local' || ai.providers[k]?.ready))
-            .map(k => [k, k === 'local' ? { label: 'This computer' } : ai.providers[k]])
-        : Object.entries(ai.providers).filter(([k, p]) => p.ready && !!p.local !== mainLocal);
-      return `<div class="route"><label class="field-label" style="margin:0" for="helper-${esc(t)}">${esc(media?.label || labels[t] || t)}</label><select id="helper-${esc(t)}" data-helper-task="${esc(t)}" style="width:100%"><option value="none" ${!value ? 'selected' : ''}>None</option>${candidates.map(([k,p]) => `<option value="${esc(k)}" ${value === k ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>`;
-    }).join('')}
-    <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-helpers">Save helpers</button></div>
+    <p class="hint">Each task runs on its AI. A <b>helper</b> works at the same time on big batches so they finish sooner: a cloud AI next to a local one, or this computer next to a cloud AI. ${tip('A smaller or local model often works well for categories. Ratings read whole transcripts, so a larger context window can help. Questions use the ratings choice unless you choose another model. Cloud runs show what is sent and the most they can cost before they start.')}</p>
+    <div class="route route3 route-head"><span></span><span class="field-label" style="margin:0">Runs on</span><span class="field-label" style="margin:0">Helper</span></div>
+    ${row('Default', pick('provider', ai.provider, false))}
+    ${Object.entries(ai.task_labels).map(([t, label]) => row(label, pick(t, ai.tasks[t] || '', true), t)).join('')}
+    ${Object.entries(media).map(([t, meta]) => row(meta.label, pickMedia(t, meta), t)).join('')}
+    <p class="hint" id="media-sends">${esc(mediaSends(ai, Object.fromEntries(Object.entries(media).map(([t, m]) => [t, m.selected || 'local']))))}</p>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
   </section>`;
   return { cloud, routing };
@@ -2314,16 +2300,52 @@ function aiPrefsBody() {
   if ($('#ai-auto')) body.auto_after_sync = $('#ai-auto').checked;
   return body;
 }
+// The AI a task runs on: the media choice, its own choice, the task it follows, or the default (from the page's selects when given)
+function mainOf(t, ai, live) {
+  if (ai.media_tasks?.[t]) return live?.media?.[t] ?? (ai.media_tasks[t].selected || 'local');
+  const own = live ? live.tasks[t] : ai.tasks[t];
+  if (own) return own;
+  const f = ai.task_follows?.[t];
+  return f ? mainOf(f, ai, live) : (live ? live.provider : ai.provider);
+}
+// A helper must sit on the other side of the main AI (cloud next to local, local next to cloud) and be set up
+function helperOptions(t, main, value) {
+  const ai = S.data.ai, meta = ai.media_tasks?.[t];
+  const isLocal = k => k === 'local' || !!ai.providers[k]?.local;
+  const keys = (meta ? meta.providers : Object.keys(ai.providers))
+    .filter(k => k !== main && isLocal(k) !== isLocal(main) && (k === 'local' || (ai.providers[k]?.ready && !ai.providers[k]?.blocked)));
+  const name = k => k === 'local' ? 'This computer' : ai.providers[k].label;
+  return `<option value="none">None</option>` + keys.map(k => `<option value="${esc(k)}" ${value === k ? 'selected' : ''}>${esc(name(k))}</option>`).join('');
+}
+function mediaSends(ai, chosen) {
+  const label = k => ai.providers[k]?.label || k;
+  const parts = [chosen.transcribe !== 'local' && `audio to ${label(chosen.transcribe)}`, chosen.slides !== 'local' && `slide frames to ${label(chosen.slides)}`,
+    chosen.embed !== 'local' && `all indexed text to ${label(chosen.embed)}`].filter(Boolean);
+  return parts.length ? `Sent to the cloud: ${parts.join('; ')}. Audio is deleted here after upload.` : 'Transcription, slide reading and the search index run on this computer; nothing is uploaded.';
+}
+function liveRoutes() {
+  const tasks = {}, media = {};
+  for (const sel of $$('[data-ai-route]')) if (sel.dataset.aiRoute !== 'provider') tasks[sel.dataset.aiRoute] = sel.value || null;
+  for (const sel of $$('[data-media-task]')) media[sel.dataset.mediaTask] = sel.value;
+  return { provider: $('[data-ai-route="provider"]')?.value, tasks, media };
+}
+// After a "Runs on" change: offer only helpers that fit the new choice (a helper that no longer fits goes back to None)
+function refreshHelpers() {
+  const live = liveRoutes();
+  for (const sel of $$('[data-helper-task]')) {
+    const t = sel.dataset.helperTask, keep = sel.value;
+    sel.innerHTML = helperOptions(t, mainOf(t, S.data.ai, live), keep);
+    if (![...sel.options].some(o => o.value === keep)) sel.value = 'none';
+  }
+  const sends = $('#media-sends');
+  if (sends) sends.textContent = mediaSends(S.data.ai, live.media);
+}
 function aiRoutesBody() {
   const tasks = {};
   for (const sel of $$('[data-ai-route]')) if (sel.dataset.aiRoute !== 'provider') tasks[sel.dataset.aiRoute] = sel.value || null;
-  return { provider: $('[data-ai-route="provider"]').value, tasks };
-}
-function mediaChoicesBody() {
-  return { tasks: Object.fromEntries($$('[data-media-task]').map(s => [s.dataset.mediaTask, s.value])) };
-}
-function helperChoicesBody() {
-  return { helpers: Object.fromEntries($$('[data-helper-task]').map(s => [s.dataset.helperTask, s.value === 'none' ? null : s.value])) };
+  for (const sel of $$('[data-media-task]')) tasks[sel.dataset.mediaTask] = sel.value;
+  const helpers = Object.fromEntries($$('[data-helper-task]').map(sel => [sel.dataset.helperTask, sel.value === 'none' ? null : sel.value]));
+  return { provider: $('[data-ai-route="provider"]').value, tasks, helpers };
 }
 const selectedMediaProvider = (ai, task) => ai.media_tasks?.[task]?.selected || 'local';
 async function confirmEstimate(path, title) {
@@ -2980,21 +3002,21 @@ document.addEventListener('click', async e => {
       try { await saveAi({ rating_formula: {} }); refresh(); toast('Default formula restored'); }
       catch (err) { toast(err.message, true); }
       break;
-    case 'ai-save-routes': try { await saveAi(aiRoutesBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
-    case 'ai-save-media': {
+    case 'ai-save-routes': {
       try {
-        const body = mediaChoicesBody(), provider = body.tasks.embed;
-        const previous = selectedMediaProvider(S.data.ai, 'embed');
+        const body = aiRoutesBody(), embed = body.tasks.embed, previous = selectedMediaProvider(S.data.ai, 'embed');
+        if (embed && embed !== previous && embed !== 'local' && !await confirmEstimate('/api/embed/estimate?provider=' + encodeURIComponent(embed), 'Build the meaning index with ' + (S.data.ai.providers[embed]?.label || embed))) {
+          body.tasks.embed = previous;   // keep the index where it is; save the rest
+        }
         await saveAi(body);
-        if (provider && provider !== previous) {
-          if (provider !== 'local' && !await confirmEstimate('/api/embed/estimate', 'Switch the meaning index provider')) { await saveAi({ tasks: { embed: previous } }); refresh(); break; }
-          const r = await api('/api/embed/switch', { provider });
-          S.data.ai = r.ai; if (r.job) await queued({ after: [], ...r.job }, 'Meaning index rebuild'); else { refresh(); toast('Saved. An index update is already running'); }
-        } else { refresh(); toast('Media choices saved'); }
+        if (body.tasks.embed && body.tasks.embed !== previous) {   // a new index provider builds its index (the old one is kept)
+          const r = await api('/api/embed/switch', { provider: body.tasks.embed });
+          S.data.ai = r.ai; refresh();
+          if (r.job) await queued({ after: [], ...r.job }, 'Meaning index build'); else toast('Saved. An index update is already running');
+        } else { refresh(); toast('Saved'); }
       } catch (err) { toast(err.message, true); }
       break;
     }
-    case 'ai-save-helpers': try { await saveAi(helperChoicesBody()); refresh(); toast('Helper choices saved'); } catch (err) { toast(err.message, true); } break;
     case 'ai-clear-key': try { await saveAi({ edit: el.dataset.p, config: { api_key: '__clear__' } }); refresh(); toast('Key removed'); } catch (err) { toast(err.message, true); } break;
     case 'ai-test': {
       const k = el.dataset.p, st = () => $('#ai-status');
@@ -3052,6 +3074,7 @@ document.addEventListener('click', async e => {
   }
 });
 document.addEventListener('change', async e => {
+  if (e.target.matches?.('[data-ai-route], [data-media-task]')) refreshHelpers();
   const el = e.target, ch = el.dataset.change;
   if (ch === 'lib') {
     S.lib = +el.value; store.set('ytkb.lib', S.lib);

@@ -255,7 +255,7 @@ On **Settings → Cloud AI**, click **Set up** next to a provider, paste the key
 
 In **Settings → AI by task** (*Which AI does what*), pick a **Default** AI, then optionally a different one for **Categories**, **Ratings**, **Summaries**, **Questions and answers** and **About you** (drafting your interests). Example: a free local model for categories and Claude for ratings. A rating run shows the estimated tokens and cost before it starts. **Summaries**, **Questions and answers** and **About you** use the same AI as ratings unless you pick one.
 
-**Media** (same page): where the heavy steps run. Each is **This computer** unless you choose a cloud service with a key:
+**Transcription, Slide reading and Meaning search index** (same table): where the heavy steps run. Each is **This computer** unless you choose a cloud service with a key:
 
 | Step | Cloud choices | What is sent | Rough cost |
 |---|---|---|---|
@@ -265,7 +265,7 @@ In **Settings → AI by task** (*Which AI does what*), pick a **Default** AI, th
 
 Switching the index to another service builds a new index; the old one is kept, so switching back is instant. Every cloud run shows its estimated cost first and asks before it starts. **Local only** (Settings → Local AI) blocks all of them.
 
-**Helper AI (works at the same time):** for Ratings, Summaries, Transcription and Slide reading you can add a helper: a cloud service when the main AI is local, or this computer when the main AI is cloud. A big batch is shared: each takes the next video when it is free, so the batch finishes sooner, and the task log says which AI did each video. The cost shown before a run is the most the cloud part can cost.
+**Helper** (the table's second column, for Ratings, Summaries, Transcription and Slide reading): a cloud service when the main AI is local, or this computer when the main AI is cloud. A big batch is shared: each takes the next video when it is free, so the batch finishes sooner, and the task log says which AI did each video. The cost shown before a run is the most the cloud part can cost.
 
 ### Settings
 
