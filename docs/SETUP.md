@@ -280,12 +280,13 @@ Settings has a side menu: **General** (default playback speed and theme, kept in
 
 ### Getting around
 
-The top bar holds the main pages and, on the right, Search, Settings and Help:
+The top bar holds the main pages and, on the right, a light/dark switch (moon or sun), Search, Settings and Help. On a phone the pages sit on their own row under the bar:
 
 - **Home**: time left and your finish date (set minutes a day, days a week and speed), today's session, what you're watching, the AI's top picks, and what needs you (suggestions to review, videos to rate, a failed sync, out-of-date knowledge pages, unsorted videos). Opening the dashboard lands here.
 - **Library**: every video, with filters, search and actions. Sort by **AI score** and filter by **Watch / Skim / Skip / Not rated**; **Rate N unrated** and **Skip the N AI skips** (with Undo) appear above the list.
 - **Knowledge**: topic pages built from summaries. The first time, it shows how: per category **Summarise 5**, then **Build** once 3 videos are summarised.
 - **Playlists** and **Categories**.
+- **Tools**: how long any playlist or video takes, without adding it to your library (see Everyday use).
 
 Old links to Plan and Triage open Home and the Library (sorted by AI score). **Ask** is the round chat button at the bottom right: it opens a small panel, and **Open full page** continues the same conversation on the Ask page. **Help** shows this guide, the downloads and the keyboard shortcuts.
 
@@ -294,7 +295,7 @@ Old links to Plan and Triage open Home and the Library (sorted by AI score). **A
 | `/` | Search |
 | `A` | Ask your library |
 | `?` | Show keyboard shortcuts |
-| `G` then `H` `L` `K` `Y` `C` `S` | Home, Library, Knowledge, Playlists, Categories, Settings |
+| `G` then `H` `L` `K` `Y` `C` `T` `S` | Home, Library, Knowledge, Playlists, Categories, Tools, Settings |
 | `G` then `?` | Help |
 | `Esc` | Close the dialog, Ask panel or video panel |
 | `J` / `K` | Next / previous video in the video panel |
@@ -327,6 +328,7 @@ Shortcuts are ignored while you type in a field.
 | Category suggestions after sync | Settings → Sync and details → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
 | Export notes for Obsidian / note apps (Markdown) | Library → Export → Notes (.zip), the selection bar's **Export notes**, or **Export note** in a video's panel | — |
+| How long is a playlist? | **Tools** → paste up to 10 playlist or video links, one per line → **Calculate**. For each: total time at 1× to 2×, a **From video / To video** range (for example 31–100), how many you already have, **Export CSV**, and **Add to library**. With two or more playlists: the combined time counting each video once, and which videos are shared or only in one (**Export only here**). The **Daily planner** gives a finish date from minutes a day, days a week and speed. Private playlists need **Use my YouTube sign-in**. Nothing is saved | — |
 | Export your library | Library → Export → CSV or JSON | `curl -o library.csv "http://127.0.0.1:8765/api/export?format=csv"` (dashboard running) |
 
 ---
@@ -454,6 +456,7 @@ When something fails, the task's card shows the cause and a fix. **Try again** r
 - **YouTube:** read-only. Playlists are read with your browser sign-in, and per-video details are read **without** it.
 - **Cookies:** read locally and sent only to youtube.com; never stored or logged by YourTube.
 - **AI:** only titles, descriptions and transcripts are sent, and only to the AI you choose. A question sends the question and about 8 matching excerpts. With **Local only**, nothing leaves your computer.
+- **Fonts:** Inter and Source Serif 4 are bundled in `web/static` under the SIL Open Font License (`web/static/OFL.txt`), so the dashboard asks no font server.
 - **Dashboard:** listens only on 127.0.0.1 (in Docker the port is published on 127.0.0.1 only) and refuses requests from other websites. It has no password, so on a shared computer other local users could open it.
 - **API keys:** stored in `settings.json`, which is created readable only by you. On NTFS/FAT drives that protection doesn't apply, so prefer environment variables there.
 
