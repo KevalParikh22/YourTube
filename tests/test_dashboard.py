@@ -401,11 +401,19 @@ class DashboardTest(unittest.TestCase):
     def test_static_files(self):
         # Allow-list contains only the approved assets with expected types
         self.assertEqual(set(dashboard.STATIC.keys()),
-                         {"inter.woff2", "source-serif-4.woff2", "icon.svg", "OFL.txt"})
+                         {"inter.woff2", "source-serif-4.woff2", "icon.svg", "OFL.txt", "app.css", "app.js"})
         self.assertEqual(dashboard.STATIC["inter.woff2"][1], "font/woff2")
         self.assertEqual(dashboard.STATIC["source-serif-4.woff2"][1], "font/woff2")
         self.assertEqual(dashboard.STATIC["icon.svg"][1], "image/svg+xml")
         self.assertEqual(dashboard.STATIC["OFL.txt"][1], "text/plain")
+
+        # The page loads the split-out styles and script, which are never cached for long
+        code, _, body = self.raw("/")
+        self.assertIn(b'<link rel="stylesheet" href="/static/app.css">', body)
+        self.assertIn(b'<script src="/static/app.js"></script>', body)
+        code, headers, body = self.raw("/static/app.js")
+        self.assertEqual((code, headers["Cache-Control"]), (200, "no-cache"))
+        self.assertTrue(body.startswith(b"'use strict'"))
 
         # icon.svg placeholder is served with content type and cache header
         code, headers, body = self.raw("/static/icon.svg")
@@ -427,7 +435,8 @@ class DashboardTest(unittest.TestCase):
                     code, headers, body = self.raw(f"/static/{name}")
                     self.assertEqual(code, 200, name)
                     self.assertEqual(headers["Content-Type"], ctype, name)
-                    self.assertEqual(headers["Cache-Control"], "public, max-age=604800", name)
+                    self.assertEqual(headers["Cache-Control"],
+                                     "no-cache" if name in dashboard.NO_CACHE_STATIC else "public, max-age=604800", name)
                     self.assertEqual(body, f"content-{name}".encode(), name)
 
         # Traversal and unknown names give 404

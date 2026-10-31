@@ -50,7 +50,10 @@ STATIC = {
     "source-serif-4.woff2": (os.path.join(STATIC_DIR, "source-serif-4.woff2"), "font/woff2"),
     "icon.svg": (os.path.join(STATIC_DIR, "icon.svg"), "image/svg+xml"),
     "OFL.txt": (os.path.join(STATIC_DIR, "OFL.txt"), "text/plain"),
+    "app.css": (os.path.join(STATIC_DIR, "app.css"), "text/css; charset=utf-8"),
+    "app.js": (os.path.join(STATIC_DIR, "app.js"), "text/javascript; charset=utf-8"),
 }
+NO_CACHE_STATIC = {"app.css", "app.js"}   # change with every update; read from disk per request like index.html
 FRAMES_DIR = os.path.join(os.environ.get("YTKB_DATA_DIR") or ROOT_DIR, "frames")
 _FRAME_PATH = re.compile(r"^/frames/([\w-]{1,32})/(\d{1,6})\.jpg$")   # only frames/<video id>/<second>.jpg
 ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
@@ -563,7 +566,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._error("Not found", 404)
             with open(path, "rb") as f:
                 data = f.read()
-            return self._send(200, data, ctype, extra_headers={"Cache-Control": "public, max-age=604800"})
+            cache = "no-cache" if name in NO_CACHE_STATIC else "public, max-age=604800"
+            return self._send(200, data, ctype, extra_headers={"Cache-Control": cache})
         m = _FRAME_PATH.match(url.path)
         if m:
             path = os.path.join(FRAMES_DIR, m.group(1), m.group(2) + ".jpg")
