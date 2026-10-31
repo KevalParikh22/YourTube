@@ -31,13 +31,13 @@ class AppLogTest(unittest.TestCase):
         now = datetime.now()
         applog.log_task("sync", f"Sync https://youtube.test/?t={token}", False, False,
                         now.isoformat(), (now + timedelta(seconds=3.1)).isoformat(),
-                        "Error: Cookie: session-cookie\nsk-ant-abcdefghijklmno\nAIza12345678901234567890\nregistered-secret-value")
+                        "Error: Cookie: session-cookie\nsk-ant-abcdefghijklmno\nAIza12345678901234567890\ngsk_abcdefghijklmnopqrstuv\nregistered-secret-value")
         log = self.read_log()
         self.assertIn("ERROR", log)
         self.assertIn("Task failed: Sync https://youtube.test/?t=[hidden]", log)
         self.assertIn("kind=sync, 3.1 s", log)
         self.assertIn("Last output:", log)
-        for secret in (token, "session-cookie", "sk-ant-abcdefghijklmno", "AIza12345678901234567890",
+        for secret in (token, "session-cookie", "sk-ant-abcdefghijklmno", "AIza12345678901234567890", "gsk_abcdefghijklmnopqrstuv",
                        "registered-secret-value"):
             self.assertNotIn(secret, log)
 

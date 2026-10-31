@@ -1367,7 +1367,7 @@ def main(argv=None):
     for config in llm.load_settings().get("providers", {}).values():
         if isinstance(config, dict):
             applog.set_secret(config.get("api_key"))
-    for name in ("ANTHROPIC_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"):
+    for name in {p["env"] for p in llm.PROVIDERS.values() if p.get("env")}:
         applog.set_secret(os.environ.get(name))
     url = f"http://127.0.0.1:{args.port}/?t={TOKEN}"
     if args.print_url:

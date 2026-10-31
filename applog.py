@@ -15,7 +15,7 @@ _REDACTIONS = (
     re.compile(r"(?i)([?&](?:api_key|key|token)=)[^&#\s]+"),
     re.compile(r'(?i)(["\'](?:api_key|key|token)["\']\s*:\s*["\'])[^"\']*'),
     re.compile(r"(?i)\b(Authorization|Cookie|x-api-key)\s*:\s*[^\r\n]+"),
-    re.compile(r"sk-ant-[\w-]{10,}|sk-[\w-]{20,}|AIza[\w-]{20,}"),
+    re.compile(r"sk-ant-[\w-]{10,}|sk-[\w-]{20,}|gsk_[\w-]{20,}|AIza[\w-]{20,}"),
 )
 
 
