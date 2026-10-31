@@ -1102,8 +1102,26 @@ class Handler(BaseHTTPRequestHandler):
             # Which provider does which job (None = the default)
             if isinstance(body.get("tasks"), dict):
                 for task, provider in body["tasks"].items():
-                    if task in llm.TASKS and (provider is None or provider in llm.PROVIDERS):
-                        settings["tasks"][task] = provider
+                    if task in llm.MEDIA_TASKS:
+                        if provider is not None and provider not in llm.MEDIA_TASKS[task]["providers"]:
+                            return self._error("Unknown provider")
+                        settings.setdefault("tasks", {})[task] = provider
+                    elif task in llm.TASKS:
+                        if provider is not None and provider not in llm.PROVIDERS:
+                            return self._error("Unknown provider")
+                        settings.setdefault("tasks", {})[task] = provider
+            # Helper AI configuration
+            if "helpers" in body:
+                if not isinstance(body["helpers"], dict):
+                    return self._error("Helpers must be an object")
+                for task, provider in body["helpers"].items():
+                    if task not in llm.HELPER_TASKS:
+                        return self._error("Unknown task")
+                    if provider is not None and provider != "none":
+                        allowed = llm.MEDIA_TASKS[task]["providers"] if task in llm.MEDIA_TASKS else llm.PROVIDERS
+                        if provider not in allowed:
+                            return self._error("Unknown provider")
+                    settings.setdefault("helpers", {})[task] = None if provider in (None, "none") else provider
             if "auto_after_sync" in body:
                 settings["auto_after_sync"] = bool(body["auto_after_sync"])
             if "show_descriptions" in body:

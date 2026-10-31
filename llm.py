@@ -30,8 +30,18 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "label": "Gemini (Google)", "kind": "gemini", "needs_key": True, "env": "GEMINI_API_KEY",
         "model": "gemini-2.5-flash", "models": ["gemini-2.5-flash", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
     },
+    "groq": {
+        "label": "Groq", "kind": "openai", "needs_key": True, "env": "GROQ_API_KEY",
+        "base_url": "https://api.groq.com/openai/v1", "model": "llama-3.3-70b-versatile",
+        "models": ["llama-3.3-70b-versatile"],
+    },
+    "openai": {
+        "label": "OpenAI", "kind": "openai", "needs_key": True, "env": "OPENAI_API_KEY",
+        "base_url": "https://api.openai.com/v1", "model": "gpt-5.4-mini",
+        "models": ["gpt-5.4-mini"],
+    },
     "openai_compat": {
-        "label": "Open-weight models (OpenAI-compatible API)", "kind": "openai", "needs_key": True, "env": "OPENAI_API_KEY",
+        "label": "Open-weight models (OpenAI-compatible API)", "kind": "openai", "needs_key": True, "env": "OPENAI_COMPAT_API_KEY",
         "base_url": "https://openrouter.ai/api/v1", "model": "", "models": [],
     },
     "ollama": {
@@ -50,6 +60,23 @@ TASKS = {"categorize": "Categories", "rate": "Ratings", "summarize": "Summaries"
 # Tasks that follow another task's choice when they have none of their own
 TASK_FOLLOWS = {"ask": "rate", "summarize": "rate", "interests": "rate"}
 
+MEDIA_TASKS: Dict[str, Dict[str, Any]] = {
+    "transcribe": {
+        "label": "Transcription",
+        "providers": ["local", "groq", "openai", "gemini"],
+    },
+    "slides": {
+        "label": "Slide reading",
+        "providers": ["local", "anthropic", "gemini", "openai", "openai_compat"],
+    },
+    "embed": {
+        "label": "Meaning search index",
+        "providers": ["local", "gemini", "openai"],
+    },
+}
+
+HELPER_TASKS = ("rate", "summarize", "transcribe", "slides")
+
 LANGUAGES = [
     "English", "Hindi", "Gujarati", "Marathi", "Bengali", "Tamil", "Telugu",
     "Kannada", "Malayalam", "Punjabi", "Urdu", "Spanish", "French", "German",
@@ -61,6 +88,33 @@ LANGUAGES = [
 PRICES = {
     "claude-opus-5-5": (4.00, 20.00), "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50),
     "gemini-2.5-pro": (1.25, 10.00), "gemini-2.5-flash": (0.30, 2.50), "gemini-2.5-flash-lite": (0.10, 0.40),
+    "gpt-5.4-mini": (0.75, 4.50),
+}
+
+MEDIA_PRICES = {
+    # Transcription: USD per audio hour
+    ("groq", "whisper-large-v3-turbo"): 0.04,
+    ("openai", "whisper-1"): 0.36,
+    ("gemini", "gemini-3.8-flash"): 0.09,
+    ("gemini", "gemini-2.5-flash"): 0.09,
+    # Embeddings: USD per 1M tokens
+    ("gemini", "gemini-embedding-001"): 0.15,
+    ("gemini", "gemini-embedding-2"): 0.20,
+    ("openai", "text-embedding-3-small"): 0.02,
+}
+
+IMAGE_TOKENS = {
+    "anthropic": 440,
+    "gemini": 258,
+    "openai": 258,
+    "openai_compat": 258,
+}
+
+MEDIA_DEFAULT_MODELS = {
+    ("transcribe", "groq"): "whisper-large-v3-turbo",
+    ("transcribe", "openai"): "whisper-1",
+    ("embed", "gemini"): "gemini-embedding-001",
+    ("embed", "openai"): "text-embedding-3-small",
 }
 
 # Ollama defaults: its own default context is small and would silently cut long transcripts
@@ -91,6 +145,7 @@ def default_settings() -> Dict[str, Any]:
         "transcripts": {},        # category -> fetch transcripts? (overrides the music-name default)
         "details_after_sync": False,
         "tasks": {},              # task -> provider, overriding the default for that job
+        "helpers": {},            # task -> helper provider running alongside the main provider
         "interests": "",          # free text: what the user wants to learn, used by ratings
         "language": "English",    # language for summaries and rating reasons
         "local_only": False,      # block every cloud provider
@@ -180,12 +235,22 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
             "blocked": bool(settings.get("local_only")) and not p.get("local"),
         }
         providers[k]["ready"] = _provider_ready(settings, k)
+    media_tasks = {
+        t: {
+            "label": info["label"],
+            "providers": list(info["providers"]),
+            "uses": describe_media(settings, t),
+        }
+        for t, info in MEDIA_TASKS.items()
+    }
+    helpers = {t: (settings.get("helpers") or {}).get(t) for t in HELPER_TASKS}
     return {
         "provider": settings["provider"], "auto_after_sync": settings["auto_after_sync"],
         "providers": providers, "presets": settings["presets"],
         "category_notes": settings["category_notes"], "proposal": settings["proposal"],
         "split": settings.get("split"),
         "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS, "task_follows": TASK_FOLLOWS,
+        "media_tasks": media_tasks, "helpers": helpers,
         "interests": settings["interests"], "language": settings["language"],
         "languages": LANGUAGES,
         "local_only": bool(settings.get("local_only")),
@@ -226,6 +291,95 @@ def _provider_ready(settings: Dict[str, Any], provider: Optional[str]) -> bool:
         return False
     return True
 
+def _media_ready(settings: Dict[str, Any], provider: str) -> bool:
+    if provider == "local":
+        return True
+    if provider not in PROVIDERS:
+        return False
+    if settings.get("local_only") and not PROVIDERS[provider].get("local"):
+        return False
+    cfg = (settings.get("providers") or {}).get(provider, {})
+    if PROVIDERS[provider]["needs_key"] and not _api_key(provider, cfg):
+        return False
+    base = cfg.get("base_url") or PROVIDERS[provider].get("base_url")
+    if PROVIDERS[provider]["kind"] in ("openai", "ollama") and not base:
+        return False
+    return True
+
+def media_provider(settings: Dict[str, Any], task: str) -> str:
+    """The provider a media task uses ('local' or an allowed cloud provider).
+
+    Falls back to 'local' when unconfigured, not allowed, or blocked by local_only.
+    """
+    if task not in MEDIA_TASKS:
+        return "local"
+    chosen = (settings.get("tasks") or {}).get(task) or "local"
+    if chosen not in MEDIA_TASKS[task]["providers"]:
+        return "local"
+    if chosen == "local":
+        return "local"
+    if settings.get("local_only"):
+        return "local"
+    if not _media_ready(settings, chosen):
+        return "local"
+    return chosen
+
+def describe_media(settings: Dict[str, Any], task: str) -> str:
+    provider = media_provider(settings, task)
+    if provider == "local":
+        return "This computer"
+    if provider in PROVIDERS:
+        label = PROVIDERS[provider]["label"]
+        model = MEDIA_DEFAULT_MODELS.get((task, provider)) or (settings.get("providers") or {}).get(provider, {}).get("model", "")
+        return f"{label} · {model}" if model else label
+    return "This computer"
+
+def helper_for(settings: Dict[str, Any], task: str) -> Optional[str]:
+    """The helper provider for a task, or None if no valid helper is configured.
+
+    Follows the local<->cloud rule: helper must be cloud when main is local,
+    and local when main is cloud. Under local_only, returns None.
+    """
+    if settings.get("local_only"):
+        return None
+    if task not in HELPER_TASKS:
+        return None
+    helper = (settings.get("helpers") or {}).get(task)
+    if not helper or helper == "none":
+        return None
+
+    # Main provider for the task
+    if task in MEDIA_TASKS:
+        main = media_provider(settings, task)
+    elif task in TASKS:
+        main = provider_for(settings, task)
+    else:
+        main = None
+
+    if not main or main == "none" or helper == main:
+        return None
+
+    main_is_local = (main == "local") or bool(PROVIDERS.get(main, {}).get("local"))
+    helper_is_local = (helper == "local") or bool(PROVIDERS.get(helper, {}).get("local"))
+
+    # Helper must be cloud when main is local, and local when main is cloud
+    if main_is_local == helper_is_local:
+        return None
+
+    # Validate helper provider for the task type
+    if task in MEDIA_TASKS:
+        if helper not in MEDIA_TASKS[task]["providers"]:
+            return None
+        if not _media_ready(settings, helper):
+            return None
+    else:
+        if helper not in PROVIDERS:
+            return None
+        if not _provider_ready(settings, helper):
+            return None
+
+    return helper
+
 def describe(settings: Dict[str, Any], task: Optional[str] = None) -> str:
     provider = provider_for(settings, task)
     if provider not in PROVIDERS:
@@ -237,6 +391,9 @@ def model_for(settings: Dict[str, Any], task: Optional[str] = None) -> str:
     return settings["providers"].get(provider, {}).get("model", "") if provider in PROVIDERS else ""
 
 def is_local(settings: Dict[str, Any], task: Optional[str] = None) -> bool:
+    if task in MEDIA_TASKS:
+        p = media_provider(settings, task)
+        return p == "local" or bool(PROVIDERS.get(p, {}).get("local"))
     return bool(PROVIDERS.get(provider_for(settings, task) or "", {}).get("local"))
 
 def estimate_cost(settings: Dict[str, Any], task: str, tokens_in: int, tokens_out: int) -> Optional[float]:

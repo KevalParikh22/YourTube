@@ -81,6 +81,64 @@ class DashboardTest(unittest.TestCase):
         self.call("/api/ai/settings", {"provider": "none", "tasks": {"rate": None}, "edit": "anthropic",
                                        "config": {"api_key": "__clear__"}, "language": "English", "interests": ""})
 
+    def test_settings_refuses_unknown_provider_or_task(self):
+        # Unknown provider at top level
+        code, r = self.call("/api/ai/settings", {"provider": "fake_provider"})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Unknown provider")
+
+        # Unknown provider for edit
+        code, r = self.call("/api/ai/settings", {"edit": "fake_provider", "config": {}})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Unknown provider")
+
+        # Unknown provider for text task in tasks
+        code, r = self.call("/api/ai/settings", {"tasks": {"rate": "fake_provider"}})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Unknown provider")
+
+        # Unknown provider for media task in tasks
+        code, r = self.call("/api/ai/settings", {"tasks": {"transcribe": "anthropic"}})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Unknown provider")
+
+        # Unknown task in helpers
+        code, r = self.call("/api/ai/settings", {"helpers": {"unknown_job": "ollama"}})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Unknown task")
+
+        # Unknown provider for text helper
+        code, r = self.call("/api/ai/settings", {"helpers": {"rate": "fake_provider"}})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Unknown provider")
+
+        # Disallowed provider for media helper
+        code, r = self.call("/api/ai/settings", {"helpers": {"transcribe": "anthropic"}})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Unknown provider")
+
+        # Helpers must be an object
+        code, r = self.call("/api/ai/settings", {"helpers": "not_a_dict"})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Helpers must be an object")
+
+        # Valid media task and helper settings save and return public_settings
+        code, r = self.call("/api/ai/settings", {
+            "tasks": {"transcribe": "groq", "slides": "gemini"},
+            "helpers": {"rate": "groq", "transcribe": "local"},
+        })
+        self.assertEqual(code, 200)
+        ai = r["ai"]
+        self.assertEqual(ai["media_tasks"]["transcribe"]["label"], "Transcription")
+        self.assertEqual(ai["helpers"]["rate"], "groq")
+        self.assertEqual(ai["helpers"]["transcribe"], "local")
+
+        # Cleanup
+        self.call("/api/ai/settings", {
+            "tasks": {"transcribe": None, "slides": None},
+            "helpers": {"rate": None, "transcribe": None},
+        })
+
     def test_about_you_validation_and_language(self):
         # Invalid language -> 400
         code, r = self.call("/api/ai/settings", {"language": "Klingon"})

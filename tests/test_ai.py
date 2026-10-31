@@ -192,6 +192,125 @@ class SettingsTest(unittest.TestCase):
         finally:
             del os.environ["GEMINI_API_KEY"]
 
+    def test_public_settings_has_media_tasks_helpers_and_providers(self):
+        s = llm.load_settings(self.path)
+        s["providers"]["groq"]["api_key"] = "g-secret"
+        s["providers"]["openai"]["api_key"] = "o-secret"
+        s["helpers"]["rate"] = "groq"
+        pub = llm.public_settings(s)
+        self.assertNotIn("g-secret", json.dumps(pub))
+        self.assertNotIn("o-secret", json.dumps(pub))
+        self.assertIn("groq", pub["providers"])
+        self.assertIn("openai", pub["providers"])
+        self.assertIn("media_tasks", pub)
+        for t in ("transcribe", "slides", "embed"):
+            self.assertIn(t, pub["media_tasks"])
+            self.assertIn("label", pub["media_tasks"][t])
+            self.assertIn("providers", pub["media_tasks"][t])
+            self.assertIn("uses", pub["media_tasks"][t])
+        self.assertIn("helpers", pub)
+        for t in ("rate", "summarize", "transcribe", "slides"):
+            self.assertIn(t, pub["helpers"])
+        self.assertEqual(pub["helpers"]["rate"], "groq")
+
+    def test_openai_compat_env_rename_keeps_saved_keys(self):
+        self.assertEqual(llm.PROVIDERS["openai_compat"]["env"], "OPENAI_COMPAT_API_KEY")
+        self.assertEqual(llm.PROVIDERS["openai"]["env"], "OPENAI_API_KEY")
+        s = llm.load_settings(self.path)
+        s["providers"]["openai_compat"]["api_key"] = "compat-saved-key"
+        llm.save_settings(s, self.path)
+        reloaded = llm.load_settings(self.path)
+        self.assertEqual(reloaded["providers"]["openai_compat"]["api_key"], "compat-saved-key")
+        os.environ["OPENAI_API_KEY"] = "openai-env-key"
+        try:
+            self.assertEqual(llm._api_key("openai_compat", reloaded["providers"]["openai_compat"]), "compat-saved-key")
+            self.assertEqual(llm._api_key("openai", reloaded["providers"]["openai"]), "openai-env-key")
+        finally:
+            del os.environ["OPENAI_API_KEY"]
+
+    def test_media_provider_fallbacks(self):
+        s = llm.load_settings(self.path)
+        self.assertEqual(llm.media_provider(s, "transcribe"), "local")
+        self.assertEqual(llm.media_provider(s, "unknown_task"), "local")
+
+        # Not allowed provider falls back to local
+        s["tasks"]["transcribe"] = "anthropic"
+        self.assertEqual(llm.media_provider(s, "transcribe"), "local")
+        s["tasks"]["embed"] = "groq"
+        self.assertEqual(llm.media_provider(s, "embed"), "local")
+
+        # Unconfigured provider (no key) falls back to local
+        s["tasks"]["transcribe"] = "groq"
+        self.assertEqual(llm.media_provider(s, "transcribe"), "local")
+
+        # Configured provider succeeds
+        s["providers"]["groq"]["api_key"] = "groq-key"
+        self.assertEqual(llm.media_provider(s, "transcribe"), "groq")
+
+        # Blocked by local_only falls back to local
+        s["local_only"] = True
+        self.assertEqual(llm.media_provider(s, "transcribe"), "local")
+
+    def test_helper_for_rules(self):
+        s = llm.load_settings(self.path)
+        s["providers"]["ollama"]["model"] = "llama3.1:8b"
+        s["providers"]["groq"]["api_key"] = "groq-key"
+        s["providers"]["anthropic"]["api_key"] = "claude-key"
+        s["providers"]["gemini"]["api_key"] = "gemini-key"
+
+        # Local main + cloud helper works
+        s["tasks"]["rate"] = "ollama"
+        s["helpers"]["rate"] = "groq"
+        self.assertEqual(llm.helper_for(s, "rate"), "groq")
+
+        # Cloud main + local helper works
+        s["tasks"]["rate"] = "anthropic"
+        s["helpers"]["rate"] = "ollama"
+        self.assertEqual(llm.helper_for(s, "rate"), "ollama")
+
+        # Both local -> None
+        s["tasks"]["rate"] = "ollama"
+        s["helpers"]["rate"] = "lmstudio"
+        self.assertIsNone(llm.helper_for(s, "rate"))
+
+        # Both cloud -> None
+        s["tasks"]["rate"] = "anthropic"
+        s["helpers"]["rate"] = "gemini"
+        self.assertIsNone(llm.helper_for(s, "rate"))
+
+        # Same provider -> None
+        s["helpers"]["rate"] = "anthropic"
+        self.assertIsNone(llm.helper_for(s, "rate"))
+
+        # Blocked by local_only -> None
+        s["helpers"]["rate"] = "ollama"
+        s["local_only"] = True
+        self.assertIsNone(llm.helper_for(s, "rate"))
+        s["local_only"] = False
+
+        # Media task: local main + cloud helper
+        s["tasks"]["transcribe"] = "local"
+        s["helpers"]["transcribe"] = "groq"
+        self.assertEqual(llm.helper_for(s, "transcribe"), "groq")
+
+        # Media task: cloud main + local helper
+        s["tasks"]["transcribe"] = "groq"
+        s["helpers"]["transcribe"] = "local"
+        self.assertEqual(llm.helper_for(s, "transcribe"), "local")
+
+        # Media task: disallowed helper provider
+        s["helpers"]["transcribe"] = "anthropic"
+        self.assertIsNone(llm.helper_for(s, "transcribe"))
+
+        # Unconfigured helper -> None
+        s["providers"]["groq"]["api_key"] = ""
+        s["tasks"]["transcribe"] = "local"
+        s["helpers"]["transcribe"] = "groq"
+        self.assertIsNone(llm.helper_for(s, "transcribe"))
+
+        # Non-helper task -> None
+        self.assertIsNone(llm.helper_for(s, "categorize"))
+
 
 class ContextTest(unittest.TestCase):
     def test_prompt_carries_context(self):
