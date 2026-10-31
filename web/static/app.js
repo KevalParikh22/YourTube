@@ -22,6 +22,7 @@ const JOB_TEXT = {
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
   embed: ['Updating the meaning index…', 'Meaning index updated', 'Index update stopped or failed. See the log.'],
   remove: ['Removing the playlist from YourTube…', 'Playlist removed from YourTube', 'Removing the playlist failed. See the log.'],
+  backup: ['Backing up the library…', 'Library backup created', 'Library backup failed. See the log.'],
 };
 const DETAIL_LABEL = { done: 'Transcript', no_captions: 'No captions', music: 'Music, no transcript', unavailable: 'Unavailable', failed: 'Failed, will retry' };
 
@@ -31,6 +32,7 @@ const store = {
 };
 const S = {
   data: null,
+  storage: null,
   speed: SPEEDS.includes(+store.get('ytkb.speed')) ? +store.get('ytkb.speed') : 2,
   theme: store.get('ytkb.theme') || 'auto',
   view: { status: 'todo', cat: '', src: '', q: '', sort: 'order' },
@@ -239,6 +241,7 @@ function renderView() {
     v.innerHTML = settingsNav(valid) + settingsContent(valid);
     if (['cloud', 'local', 'routing'].includes(valid)) updateJob();
     if (['local', 'cloud', 'routing'].includes(valid) && !S.local) loadLocal();
+    if (valid === 'storage' && !S.storage) loadStorage();
   }
   else if (r === 'help') { v.innerHTML = '<div class="eyebrow">Help</div><h1 class="display">Help<em>setup, downloads and guide</em></h1>' + viewSetup() + viewLogs() + `<section class="section"><h2 class="h">Keyboard shortcuts</h2>${shortcutTable()}</section>`; if (!S.guide) loadGuide(); }
   else if (r === 'ask') {
@@ -984,6 +987,7 @@ async function taskFinished(t) {
   if (['summarize', 'knowledge', 'remove'].includes(t.kind)) { S.knowledge.list = null; S.knowledge.pages = {}; }
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
+  if (t.kind === 'backup') S.storage = null;
   S.flash = { id: t.id, until: Date.now() + 15000 };
   S.stopPending = false;
   if (!t.stopped) toast(t.ok ? text[1] : text[2], !t.ok);
@@ -1792,7 +1796,7 @@ function viewAbout() {
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
   </section>`;
 }
-const SETTINGS_PAGES = [['general', 'General'], ['about', 'About you'], ['routing', 'AI by task'], ['cloud', 'Cloud AI'], ['local', 'Local AI'], ['sync', 'Sync and details'], ['scoring', 'Scoring']];
+const SETTINGS_PAGES = [['general', 'General'], ['about', 'About you'], ['routing', 'AI by task'], ['cloud', 'Cloud AI'], ['local', 'Local AI'], ['sync', 'Sync and details'], ['storage', 'Storage'], ['scoring', 'Scoring']];
 function settingsNav(cur) {
   const descriptions = {
     general: 'Choose how the dashboard looks and how watch times are shown.',
@@ -1801,6 +1805,7 @@ function settingsNav(cur) {
     cloud: 'Set up cloud AI providers for tasks that use online models.',
     local: 'Check local models and tools available on this computer.',
     sync: 'Choose what YourTube fetches when playlists are synced.',
+    storage: 'See what YourTube keeps on this computer, and manage backups, caches and exports.',
     scoring: 'Adjust how video ratings weigh depth, value, freshness and fit.'
   };
   return `<div class="eyebrow">Settings</div><h1 class="display">Settings<em>${SETTINGS_PAGES.find(([k]) => k === cur)?.[1] || 'General'}</em></h1>
@@ -1812,8 +1817,39 @@ function settingsContent(section) {
   if (section === 'about') return viewAbout() + '</div></div>';
   if (section === 'scoring') return viewScoring() + '</div></div>';
   if (section === 'sync') return viewSyncSettings() + '</div></div>';
+  if (section === 'storage') return viewStorage() + '</div></div>';
   const ai = viewAI();
   return (section === 'cloud' ? ai.cloud : section === 'local' ? viewLocal() + providerCards(Object.entries(S.data.ai.providers).filter(([, p]) => p.local)) : ai.routing) + '</div></div>';
+}
+function storageBytes(bytes) {
+  bytes = Number(bytes) || 0;
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024, i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
+}
+function storageDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value || 'Unknown date') : date.toLocaleString();
+}
+async function loadStorage() {
+  try { S.storage = await api('/api/files'); }
+  catch (e) { S.storage = { error: e.message }; }
+  if (route() === 'settings/storage') refresh();
+}
+function viewStorage() {
+  const data = S.storage;
+  if (!data) return '<section class="section card"><p class="note">Loading storage details…</p></section>';
+  if (data.error) return `<section class="section card"><p class="warn-text">${esc(data.error)}</p><button class="btn btn-sm" data-act="storage-refresh">Try again</button></section>`;
+  const areas = (data.areas || []).map(a => `<tr><td>${esc(a.label)}</td><td class="r">${storageBytes(a.bytes)}</td><td class="r">${Number(a.files) || 0}</td><td class="r">${a.clearable ? `<button class="btn btn-sm" data-act="storage-clear" data-key="${esc(a.key)}" data-label="${esc(a.label)}">Clear</button>` : '—'}</td></tr>`).join('');
+  const backups = (data.backups || []).map(b => `<tr><td>${esc(storageDate(b.created))}</td><td class="r">${storageBytes(b.bytes)}</td><td class="r">${Number(b.videos) || 0}</td><td class="r" style="white-space:nowrap"><button class="btn btn-sm" data-act="storage-restore" data-name="${esc(b.name)}" data-date="${esc(storageDate(b.created))}">Restore</button> <button class="btn btn-sm" data-act="storage-delete" data-area="backups" data-name="${esc(b.name)}">Delete</button></td></tr>`).join('');
+  const exports = (data.exports || []).map(x => `<tr><td>${esc(x.name)}</td><td>${esc(storageDate(x.created))}</td><td class="r">${storageBytes(x.bytes)}</td><td class="r" style="white-space:nowrap"><a class="btn btn-sm" href="/files/exports/${encodeURIComponent(x.name)}" download>Download</a> <button class="btn btn-sm" data-act="storage-delete" data-area="exports" data-name="${esc(x.name)}">Delete</button></td></tr>`).join('');
+  return `<section class="section card storage-card"><h2 class="h">On this computer</h2><p class="note">Data folder: <code>${esc(data.data_dir || '')}</code></p>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Area</th><th class="r">Size</th><th class="r">Files</th><th class="r">Action</th></tr></thead><tbody>${areas || '<tr><td colspan="4">No storage areas found.</td></tr>'}</tbody></table></div></section>
+    <section class="section card storage-card"><h2 class="h">Backups</h2><p class="note">A backup includes your library and taxonomy, but not API keys.</p><div class="actions"><button class="btn btn-dark btn-sm" data-act="storage-backup">Back up now</button></div>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th class="r">Size</th><th class="r">Videos</th><th class="r">Actions</th></tr></thead><tbody>${backups || '<tr><td colspan="4">No backups yet.</td></tr>'}</tbody></table></div></section>
+    <section class="section card storage-card"><h2 class="h">Exports</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Date</th><th class="r">Size</th><th class="r">Actions</th></tr></thead><tbody>${exports || '<tr><td colspan="4">No exports yet.</td></tr>'}</tbody></table></div></section>`;
 }
 function viewSyncSettings() {
   const ai = S.data.ai;
@@ -2330,6 +2366,34 @@ document.addEventListener('click', async e => {
   const act = el.dataset.act, id = el.dataset.id;
   if (el.tagName === 'A' && el.getAttribute('href') === '#/') e.preventDefault();
   switch (act) {
+    case 'storage-refresh': S.storage = null; await loadStorage(); break;
+    case 'storage-backup': {
+      try { await queued(await api('/api/files/backup', {}), 'Library backup'); S.storage = null; await loadStorage(); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'storage-restore': {
+      const name = el.dataset.name, date = el.dataset.date;
+      if (!confirm(`Restore the backup from ${date}? Your current library will first be saved as a safety backup. The current library and taxonomy will be replaced.`)) break;
+      try { S.storage = null; await api('/api/files/restore', { name }); await load(); toast('Backup restored'); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'storage-clear': {
+      const key = el.dataset.key, label = el.dataset.label;
+      const lost = { frames: 'slide pictures (their text stays)', media: 'cached media files', logs: 'log files except today’s log' }[key];
+      if (!lost || !confirm(`Clear ${label}? This permanently removes ${lost}.`)) break;
+      try { const result = await api('/api/files/clear', { key }); toast(`Cleared ${Number(result.removed) || 0} files`); S.storage = null; await loadStorage(); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'storage-delete': {
+      const area = el.dataset.area, name = el.dataset.name;
+      if (!confirm(`Delete ${name}? This permanently removes this ${area === 'backups' ? 'backup' : 'export'}.`)) break;
+      try { await api('/api/files/delete', { area, name }); S.storage = null; await loadStorage(); toast('File deleted'); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'tools-calculate': {
       const links = S.tools.links.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
       if (!links.length) { toast('Paste at least one playlist or video link', true); $('#tools-links')?.focus(); break; }

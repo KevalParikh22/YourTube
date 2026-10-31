@@ -217,6 +217,9 @@
   .tbl a { text-decoration: none; }
   .tbl a:hover { text-decoration: underline; text-underline-offset: 3px; }
   .tbl-wrap { overflow-x: auto; }
+  .storage-card { margin-top: 16px; }
+  .storage-card code { overflow-wrap: anywhere; }
+  .storage-card .tbl { min-width: 480px; }
 
   /* ---------- plan ---------- */
   .meter { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; margin: 8px 0 4px; }
