@@ -229,6 +229,9 @@
     background: var(--sunken); border-radius: 6px; padding: 12px 14px; max-height: 300px; overflow: auto; margin: 10px 0 0;
     font: 12px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; color: var(--ink-2);
   }
+  .log-wrap { position: relative; margin-top: 10px; }
+  .log-wrap .log { margin: 0; }
+  .log-latest { position: absolute; right: 12px; bottom: 12px; z-index: 2; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
   .status-line { font-size: 13px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 8px; }
   .spin { width: 12px; height: 12px; border: 1.5px solid var(--line-strong); border-top-color: var(--ink); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -1309,9 +1312,52 @@ function renderJobs() {
     </div>` : '';
   box.innerHTML = pill + panel;
 }
+function updateLogJump(box) {
+  const log = $('.log', box), btn = $('[data-act="log-latest"]', box);
+  if (!log || !btn) return;
+  const isUp = (log.scrollHeight - log.scrollTop - log.clientHeight) >= 24;
+  btn.style.display = isUp ? '' : 'none';
+}
+function attachLogScroll(log) {
+  if (!log || log.dataset.hasScroll) return;
+  log.dataset.hasScroll = '1';
+  log.addEventListener('scroll', () => {
+    const box = log.closest('#job');
+    if (box) updateLogJump(box);
+  }, { passive: true });
+}
+function setLogText(el, text) {
+  let offsets = null;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) {
+    const range = sel.getRangeAt(0);
+    if (el.contains(range.startContainer) && el.contains(range.endContainer)) {
+      try {
+        const pre = range.cloneRange();
+        pre.selectNodeContents(el);
+        pre.setEnd(range.startContainer, range.startOffset);
+        const start = pre.toString().length;
+        pre.setEnd(range.endContainer, range.endOffset);
+        const end = pre.toString().length;
+        offsets = { start, end };
+      } catch (_) {}
+    }
+  }
+  el.textContent = text;
+  if (offsets && el.firstChild) {
+    try {
+      const node = el.firstChild, len = node.textContent.length;
+      const r = document.createRange();
+      r.setStart(node, Math.min(offsets.start, len));
+      r.setEnd(node, Math.min(offsets.end, len));
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (_) {}
+  }
+}
 function updateJob() {
-  const box = $('#job'), job = S.data.job;
-  if (!box) return;
+  const box = $('#job'), job = S.data?.job;
+  if (!box || !job) return;
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route().startsWith('settings') ? ['pull', 'embed'].includes(job.kind)
     : route() === 'knowledge' ? job.kind === 'knowledge'
@@ -1319,7 +1365,11 @@ function updateJob() {
   const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
-  if (!mine || (!job.log && !job.running) || (job.dismissed && !job.running)) { box.innerHTML = waitLine; return; }
+  if (!mine || (!job.log && !job.running) || (job.dismissed && !job.running)) {
+    box.innerHTML = waitLine;
+    delete box.dataset.jobId;
+    return;
+  }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
   const stopping = !!job.stopping || S.stopPending;
   const stage = job.running ? jobStage(job) : '';
@@ -1327,9 +1377,29 @@ function updateJob() {
     : `<div class="done-banner ${job.stopped ? 'bad' : job.ok ? 'ok' : 'bad'}"><b>${job.stopped ? `Stopped: ${esc(job.label || '')}` : job.ok ? 'Finished' : 'Failed'}</b>
         <span>${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span>
         <button class="btn-text" data-act="job-dismiss" data-id="${job.id}" style="margin-left:auto">Close</button></div>`;
-  box.innerHTML = `<div style="margin-top:18px">${head}</div>${waitLine}<pre class="log">${esc(job.log || '')}</pre>`;
-  const log = $('.log', box);
-  log.scrollTop = log.scrollHeight;
+  const oldLog = $('.log', box);
+  const atBottom = oldLog ? (oldLog.scrollHeight - oldLog.scrollTop - oldLog.clientHeight < 24) : true;
+  const oldScrollTop = oldLog ? oldLog.scrollTop : 0;
+  const same = box.dataset.jobId === String(job.id) && oldLog && $('.job-head', box);
+  let log = oldLog;
+  if (same) {
+    const headEl = $('.job-head', box);
+    if (headEl && headEl.innerHTML !== head) headEl.innerHTML = head;
+    const waitEl = $('.job-wait', box);
+    if (waitEl && waitEl.innerHTML !== waitLine) waitEl.innerHTML = waitLine;
+    const newLog = job.log || '';
+    if (log.textContent !== newLog) setLogText(log, newLog);
+  } else {
+    box.dataset.jobId = String(job.id);
+    box.innerHTML = `<div class="job-head" style="margin-top:18px">${head}</div><div class="job-wait">${waitLine}</div><div class="log-wrap"><pre class="log">${esc(job.log || '')}</pre><button type="button" class="btn btn-sm log-latest" data-act="log-latest" style="display:none">Jump to latest ↓</button></div>`;
+    log = $('.log', box);
+  }
+  if (log) {
+    attachLogScroll(log);
+    if (atBottom) log.scrollTop = log.scrollHeight;
+    else log.scrollTop = oldScrollTop;
+    updateLogJump(box);
+  }
 }
 async function pollJob() {
   if (S.polling) return;
@@ -2816,6 +2886,15 @@ document.addEventListener('click', async e => {
       break;
     case 'job-drop': try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); toast('Removed from the queue'); } catch (err) { toast(err.message, true); } break;
     case 'jobs-toggle': S.jobsOpen = !S.jobsOpen; renderJobs(); break;
+    case 'log-latest': {
+      const box = el.closest('#job') || $('#job');
+      const log = $('.log', box);
+      if (log) {
+        log.scrollTop = log.scrollHeight;
+        updateLogJump(box);
+      }
+      break;
+    }
     case 'job-retry': {
       try { await queued(await api('/api/job/retry', { id: +id }), 'Sync'); await load(); }
       catch (err) { toast(err.message, true); }
