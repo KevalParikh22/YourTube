@@ -3,6 +3,7 @@ import io
 import json
 import os
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -171,6 +172,57 @@ class RunVisualTest(unittest.TestCase):
         with contextlib.redirect_stdout(out), mock.patch("local_visual.model_sees_images", return_value=False):
             self.assertFalse(local_visual.run_visual(["v1x"], download=self.fake_download, sleep=lambda s: None))
         self.assertIn("can't read images", out.getvalue())
+
+    def test_helper_assigns_whole_videos_to_both_readers(self):
+        settings = __import__("llm").default_settings()
+        settings["providers"]["ollama"]["model"] = "qwen3.5:4b"
+        settings["providers"]["anthropic"]["api_key"] = "test-key"
+        settings["tasks"]["slides"] = "local"
+        settings["helpers"]["slides"] = "anthropic"
+        barrier = threading.Barrier(2)
+        seen = {"local": [], "cloud": []}
+
+        def local_read(path):
+            seen["local"].append(os.path.basename(os.path.dirname(path)))
+            if len(seen["local"]) == 1:
+                barrier.wait(timeout=3)
+            return {"content": False, "text": "", "visual": ""}
+
+        def cloud_read(path, _settings, _provider):
+            seen["cloud"].append(os.path.basename(os.path.dirname(path)))
+            if len(seen["cloud"]) == 1:
+                barrier.wait(timeout=3)
+            return {"content": False, "text": "", "visual": ""}
+
+        with mock.patch("llm.load_settings", return_value=settings), \
+             mock.patch("local_visual.available", return_value=True), \
+             mock.patch("local_visual.model_sees_images", return_value=True), \
+             mock.patch("local_visual._cloud_read", side_effect=cloud_read):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                ok = local_visual.run_visual(["v1x", "v2x"], download=self.fake_download,
+                                             extract=self.fake_extract, read=local_read,
+                                             thumb=lambda src, vid, t: f"{int(t):05d}.jpg", sleep=lambda s: None)
+        self.assertTrue(ok)
+        self.assertEqual(len(seen["local"]), 2)
+        self.assertEqual(len(seen["cloud"]), 2)
+        self.assertNotEqual(seen["local"][0], seen["cloud"][0])
+
+    def test_cloud_run_prints_frame_cost(self):
+        import llm
+        settings = llm.default_settings()
+        settings["providers"]["anthropic"]["api_key"] = "test-key"
+        settings["providers"]["anthropic"]["model"] = "claude-haiku-5-5"
+        settings["tasks"]["slides"] = "anthropic"
+        out = io.StringIO()
+        with mock.patch("llm.load_settings", return_value=settings), \
+             contextlib.redirect_stdout(out):
+            self.assertTrue(local_visual.run_visual(["v1x"], download=self.fake_download,
+                                                    extract=self.fake_extract,
+                                                    read=lambda p: {"content": False, "text": "", "visual": ""},
+                                                    sleep=lambda s: None))
+        self.assertIn("about $0.000", out.getvalue())
+        self.assertIn("Frames are sent", out.getvalue())
 
 
 class ReadFrameTest(unittest.TestCase):

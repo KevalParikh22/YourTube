@@ -1,4 +1,5 @@
 import json
+import io
 import re
 import os
 import tempfile
@@ -227,6 +228,43 @@ class SettingsTest(unittest.TestCase):
             self.assertEqual(llm._api_key("openai", reloaded["providers"]["openai"]), "openai-env-key")
         finally:
             del os.environ["OPENAI_API_KEY"]
+
+
+class VisionRequestTest(unittest.TestCase):
+    def setUp(self):
+        self.path = os.path.join(tempfile.mkdtemp(), "settings.json")
+
+    def test_see_builds_provider_image_requests(self):
+        fixtures = {
+            "anthropic": {"content": [{"type": "text", "text": '{"content":true}'}]},
+            "gemini": {"candidates": [{"content": {"parts": [{"text": '{"content":true}'}]}}]},
+            "openai": {"choices": [{"message": {"content": '{"content":true}'}}]},
+        }
+        for provider, response in fixtures.items():
+            with self.subTest(provider=provider):
+                settings = llm.default_settings()
+                settings["providers"][provider]["api_key"] = "test-key"
+                settings["providers"][provider]["model"] = "vision-test"
+                if provider == "openai":
+                    settings["providers"][provider]["base_url"] = "https://api.example/v1"
+                reply = mock.MagicMock()
+                reply.__enter__.return_value = io.BytesIO(json.dumps(response).encode())
+                with mock.patch("urllib.request.urlopen", return_value=reply) as opened:
+                    self.assertEqual(llm.see(settings, provider, b"jpeg-bytes", "Read it"), '{"content":true}')
+                req = opened.call_args.args[0]
+                body = json.loads(req.data)
+                encoded = "anBlZy1ieXRlcw=="
+                if provider == "anthropic":
+                    img = body["messages"][0]["content"][0]
+                    self.assertEqual((img["type"], img["source"]["media_type"], img["source"]["data"]),
+                                     ("image", "image/jpeg", encoded))
+                elif provider == "gemini":
+                    self.assertEqual(body["contents"][0]["parts"][0]["inline_data"],
+                                     {"mime_type": "image/jpeg", "data": encoded})
+                else:
+                    content = body["messages"][0]["content"]
+                    self.assertEqual(content[1]["image_url"]["url"], f"data:image/jpeg;base64,{encoded}")
+                    self.assertEqual(body["response_format"], {"type": "json_object"})
 
     def test_media_provider_fallbacks(self):
         s = llm.load_settings(self.path)
