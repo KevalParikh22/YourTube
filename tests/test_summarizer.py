@@ -132,5 +132,132 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(self.call("/api/summary?id=nope"), (200, {"summary": None, "moments": {}}))
 
 
+class HelperSummarizeTest(unittest.TestCase):
+    def setUp(self):
+        import time
+        import llm
+        self.time = time
+        self.reply = json.dumps({
+            **GOOD,
+            "claims": [{"t": "4:10", "kind": "number", "text": "Helper separate test statement"}],
+        })
+        storage.save_playlist(playlist("PLSH"), [video(f"hs{i}", f"Sum Video {i}", duration=600) for i in range(1, 6)])
+        for i in range(1, 6):
+            storage.save_details(f"hs{i}", {"status": "done", "segments": [{"start": 10, "text": f"topic line {i}"}]})
+        s = llm.load_settings()
+        s.update(provider="ollama", tasks={"summarize": None}, helpers={"summarize": "anthropic"})
+        s["providers"]["ollama"]["model"] = "qwen3.5:4b"
+        s["providers"]["anthropic"] = {"model": "claude-haiku-5-5", "api_key": "fake-key", "base_url": ""}
+        llm.save_settings(s)
+
+    def tearDown(self):
+        import llm
+        with storage.get_connection() as conn:
+            conn.execute("DELETE FROM search_docs WHERE video_id LIKE 'hs%'")
+            conn.execute("DELETE FROM video_summaries WHERE video_id LIKE 'hs%'")
+            conn.execute("DELETE FROM videos WHERE video_id LIKE 'hs%'")
+        s = llm.load_settings()
+        s["provider"] = "none"
+        s.get("helpers", {}).pop("summarize", None)
+        llm.save_settings(s)
+
+    def test_summarizes_with_two_completers_one_slow_and_counts_line_per_worker(self):
+        import llm
+
+        def fake_make_completer(settings, task=None):
+            provider = llm.provider_for(settings, task)
+            if provider == "anthropic":
+                def slow_call(system, prompt):
+                    self.time.sleep(0.04)
+                    return self.reply
+                return slow_call
+            else:
+                def fast_call(system, prompt):
+                    self.time.sleep(0.005)
+                    return self.reply
+                return fast_call
+
+        out = io.StringIO()
+        with mock.patch("llm.make_completer", side_effect=fake_make_completer), \
+             mock.patch("summarizer.candidates", return_value=[]), \
+             contextlib.redirect_stdout(out):
+            ok = summarizer.run_summarize([f"hs{i}" for i in range(1, 5)])
+
+        self.assertTrue(ok)
+        output = out.getvalue()
+        # All 4 videos summarised
+        for i in range(1, 5):
+            self.assertIsNotNone(storage.get_summary(f"hs{i}"))
+
+        # Both workers did some
+        models = {storage.get_summary(f"hs{i}")["model"] for i in range(1, 5)}
+        self.assertIn("qwen3.5:4b", models)
+        self.assertIn("claude-haiku-5-5", models)
+
+        # Worker tags in progress lines
+        self.assertIn("· qwen3.5:4b", output)
+        self.assertIn("· claude-haiku-5-5", output)
+
+        # Summary line per worker
+        self.assertIn("Summarised 4 videos: ", output)
+        self.assertIn("by Local: Ollama · qwen3.5:4b", output)
+        self.assertIn("by Claude (Anthropic) · claude-haiku-5-5", output)
+
+    def test_helper_stop_halts_both(self):
+        stop_flag = False
+
+        def fake_make_completer(settings, task=None):
+            def call(system, prompt):
+                nonlocal stop_flag
+                stop_flag = True
+                self.time.sleep(0.02)
+                return self.reply
+            return call
+
+        out = io.StringIO()
+        with mock.patch("llm.make_completer", side_effect=fake_make_completer), \
+             mock.patch("summarizer.candidates", return_value=[]), \
+             contextlib.redirect_stdout(out):
+            summarizer.run_summarize([f"hs{i}" for i in range(1, 5)], should_stop=lambda: stop_flag)
+
+        self.assertIn("Stopped. Summaries so far are saved.", out.getvalue())
+        summarized = [storage.get_summary(f"hs{i}") for i in range(1, 5) if storage.get_summary(f"hs{i}")]
+        self.assertLess(len(summarized), 4)
+
+    def test_three_errors_in_a_row_stops_one_worker_and_other_finishes(self):
+        import llm
+
+        def fake_make_completer(settings, task=None):
+            provider = llm.provider_for(settings, task)
+            if provider == "ollama":
+                def failing_call(system, prompt):
+                    self.time.sleep(0.005)
+                    raise LLMError("ollama down")
+                return failing_call
+            else:
+                def healthy_call(system, prompt):
+                    self.time.sleep(0.01)
+                    return self.reply
+                return healthy_call
+
+        out = io.StringIO()
+        with mock.patch("llm.make_completer", side_effect=fake_make_completer), \
+             mock.patch("summarizer.candidates", return_value=[]), \
+             contextlib.redirect_stdout(out):
+            ok = summarizer.run_summarize([f"hs{i}" for i in range(1, 6)])
+
+        self.assertTrue(ok)
+        output = out.getvalue()
+        self.assertIn("Summarised 2 videos: 0 by Local: Ollama · qwen3.5:4b, 2 by Claude (Anthropic) · claude-haiku-5-5.", output)
+        self.assertIn("3 failed", output)
+
+    def test_estimate_with_helper(self):
+        est = summarizer.estimate(["hs1", "hs2"])
+        self.assertEqual(est["videos"], 2)
+        self.assertIn("Ollama", est["uses"])
+        self.assertIn("Claude", est["uses"])
+        self.assertEqual(est["cost_note"], "less if the local model keeps up")
+
+
 if __name__ == "__main__":
     unittest.main()

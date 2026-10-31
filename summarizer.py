@@ -153,6 +153,17 @@ def summarize_video(video: Dict[str, Any], segments: List[Dict[str, Any]], setti
     return {**summary, "language": settings.get("language") or "English"}
 
 
+def _summarize_one(video: Dict[str, Any], complete: Callable[[str, str], str], budget: int, model: str, settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Summarises a single video, saves to DB and returns summary dict, or None if no segments."""
+    import storage
+    segments = storage.get_segments(video["video_id"])
+    if not segments:
+        return None
+    summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget)
+    storage.save_summary(video["video_id"], summary, model=model)
+    return summary
+
+
 def _videos(video_ids: List[str]) -> List[Dict[str, Any]]:
     import storage
     return [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
@@ -171,14 +182,31 @@ def estimate(video_ids: List[str]) -> Dict[str, Any]:
         with_transcript += bool(segments)
         chars += len(build_prompt(v, segments, settings, [], budget)) + len(SYSTEM) + 2000
     tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos)
-    return {"videos": len(videos), "with_transcript": with_transcript, "tokens_in": tokens_in, "tokens_out": tokens_out,
-            "cost": llm.estimate_cost(settings, "summarize", tokens_in, tokens_out),
-            "uses": llm.describe(settings, "summarize"), "ready": llm.is_configured(settings, "summarize")}
+    cost = llm.estimate_cost(settings, "summarize", tokens_in, tokens_out)
+    uses = llm.describe(settings, "summarize")
+    helper = llm.helper_for(settings, "summarize")
+    cost_note = None
+    if helper:
+        helper_settings = dict(settings, tasks={**settings.get("tasks", {}), "summarize": helper})
+        cloud_cost = llm.estimate_cost(helper_settings, "summarize", tokens_in, tokens_out)
+        uses = f"{uses} + {llm.describe(helper_settings, 'summarize')}"
+        if cost == 0.0 and cloud_cost is not None:
+            cost = cloud_cost
+            cost_note = "less if the local model keeps up"
+        elif cloud_cost == 0.0 and cost is not None:
+            cost_note = "less if the local model keeps up"
+    out = {"videos": len(videos), "with_transcript": with_transcript, "tokens_in": tokens_in, "tokens_out": tokens_out,
+           "cost": cost, "uses": uses, "ready": llm.is_configured(settings, "summarize")}
+    if cost_note:
+        out["cost_note"] = cost_note
+    return out
 
 
 def run_summarize(video_ids: List[str], should_stop: Callable[[], bool] = lambda: False) -> bool:
     """Summarises the given videos (those with a transcript). Prints progress for the job log."""
+    import threading
     import llm
+    import parallel
     import storage
     settings = llm.load_settings()
     videos = _videos(video_ids)
@@ -189,25 +217,90 @@ def run_summarize(video_ids: List[str], should_stop: Callable[[], bool] = lambda
         print(f"Error: {e}")
         return False
     budget, model = llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE), llm.model_for(settings, "summarize")
+
+    helper = llm.helper_for(settings, "summarize")
+    if not helper:
+        done = failed = 0
+        for n, v in enumerate(videos, 1):
+            if should_stop():
+                print("Stopped. Summaries so far are saved.")
+                break
+            try:
+                summary = _summarize_one(v, complete, budget, model, settings)
+            except LLMError as e:
+                failed += 1
+                print(f"   [{n}/{len(videos)}] Warning: {v['title'][:60]}: {e}")
+                continue
+            if summary is None:
+                print(f"   [{n}/{len(videos)}] Skipped (no transcript yet: fetch details or transcribe it first): {v['title'][:60]}")
+                continue
+            done += 1
+            print(f"   [{n}/{len(videos)}] {len(summary['minutes'])} topics, {len(summary['claims'])} claims: {v['title'][:60]}")
+        print(f"Summarised {done} videos" + (f", {failed} failed" if failed else "") + ".")
+        return failed == 0 or done > 0
+
+    # Helper AI: two workers share the batch
+    helper_settings = dict(settings, tasks={**settings.get("tasks", {}), "summarize": helper})
+    try:
+        helper_complete = llm.make_completer(helper_settings, "summarize")
+    except LLMError as e:
+        print(f"Error: {e}")
+        return False
+    helper_budget = llm.context_chars(helper_settings, "summarize", CHAR_BUDGET_REMOTE)
+    helper_model = llm.model_for(helper_settings, "summarize")
+
+    main_label = llm.describe(settings, "summarize")
+    helper_label = llm.describe(helper_settings, "summarize")
+    if helper_label == main_label:
+        helper_label = f"{helper_label} (helper)"
+    main_tag = llm.model_for(settings, "summarize")
+    helper_tag = llm.model_for(helper_settings, "summarize")
+
+    progress_lock = threading.Lock()
+    progress = 0
     done = failed = 0
-    for n, v in enumerate(videos, 1):
-        if should_stop():
-            print("Stopped. Summaries so far are saved.")
-            break
-        segments = storage.get_segments(v["video_id"])
-        if not segments:
-            print(f"   [{n}/{len(videos)}] Skipped (no transcript yet: fetch details or transcribe it first): {v['title'][:60]}")
-            continue
-        try:
-            summary = summarize_video(v, segments, settings, complete, candidates(v["video_id"], v, segments), budget)
-        except LLMError as e:
+    worker_done = {main_label: 0, helper_label: 0}
+
+    def _make_worker(comp, bgt, mdl, tag, label):
+        def _worker(v):
+            nonlocal progress, done
+            summary = _summarize_one(v, comp, bgt, mdl, settings)
+            if summary is None:
+                with progress_lock:
+                    progress += 1
+                    n = progress
+                    line = f"   [{n}/{len(videos)}] Skipped (no transcript yet: fetch details or transcribe it first): {v['title'][:60]}"
+                parallel.safe_print(line)
+                return
+            with progress_lock:
+                progress += 1
+                n = progress
+                done += 1
+                worker_done[label] += 1
+                line = f"   [{n}/{len(videos)}] {len(summary['minutes'])} topics, {len(summary['claims'])} claims: {v['title'][:60]} · {tag}"
+            parallel.safe_print(line)
+        return _worker
+
+    def _on_error(worker_name, item, exc):
+        nonlocal progress, failed
+        with progress_lock:
+            progress += 1
+            n = progress
             failed += 1
-            print(f"   [{n}/{len(videos)}] Warning: {v['title'][:60]}: {e}")
-            continue
-        storage.save_summary(v["video_id"], summary, model=model)
-        done += 1
-        print(f"   [{n}/{len(videos)}] {len(summary['minutes'])} topics, {len(summary['claims'])} claims: {v['title'][:60]}")
-    print(f"Summarised {done} videos" + (f", {failed} failed" if failed else "") + ".")
+            line = f"   [{n}/{len(videos)}] Warning: {item['title'][:60]}: {exc}"
+        parallel.safe_print(line)
+
+    workers = {
+        main_label: _make_worker(complete, budget, model, main_tag, main_label),
+        helper_label: _make_worker(helper_complete, helper_budget, helper_model, helper_tag, helper_label),
+    }
+
+    parallel.share(videos, workers, should_stop=should_stop, on_error=_on_error)
+    if should_stop():
+        print("Stopped. Summaries so far are saved.")
+
+    by_worker = ", ".join(f"{cnt} by {name}" for name, cnt in worker_done.items())
+    print(f"Summarised {done} videos: {by_worker}." + (f", {failed} failed" if failed else "") + ".")
     return failed == 0 or done > 0
 
 
