@@ -14,6 +14,7 @@ never returned to the browser.
 import os
 import re
 import json
+import base64
 import urllib.request
 import urllib.error
 from typing import Any, Callable, Dict, List, Optional
@@ -490,6 +491,50 @@ def _openai(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
         return data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError):
         raise LLMError(f"Unexpected response from {cfg['base_url']}") from None
+
+def see(settings: Dict[str, Any], provider: str, image_bytes: bytes, prompt: str) -> str:
+    """Ask a configured cloud vision provider to read one JPEG frame."""
+    if provider not in ("anthropic", "gemini", "openai", "openai_compat"):
+        raise LLMError("Unsupported vision provider")
+    cfg = (settings.get("providers") or {}).get(provider, {})
+    key = _api_key(provider, cfg)
+    if not cfg.get("model") or not key:
+        raise LLMError(f"{PROVIDERS[provider]['label']} is not configured")
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    kind = PROVIDERS[provider]["kind"]
+    if kind == "anthropic":
+        data = _post_json("https://api.anthropic.com/v1/messages", {
+            "model": cfg["model"], "max_tokens": 2048, "temperature": 0,
+            "messages": [{"role": "user", "content": [
+                {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": encoded}},
+                {"type": "text", "text": prompt},
+            ]}],
+        }, {"x-api-key": key, "anthropic-version": "2023-06-01"})
+        try:
+            return "".join(x.get("text", "") for x in data["content"] if x.get("type") == "text")
+        except (KeyError, TypeError):
+            raise LLMError("Unexpected response from Claude") from None
+    if kind == "gemini":
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{cfg['model']}:generateContent"
+        data = _post_json(url, {"contents": [{"role": "user", "parts": [
+            {"inline_data": {"mime_type": "image/jpeg", "data": encoded}}, {"text": prompt},
+        ]}], "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}},
+                           {"x-goog-api-key": key})
+        try:
+            return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
+        except (KeyError, IndexError, TypeError):
+            raise LLMError("Gemini returned no vision answer") from None
+    data = _post_json(cfg["base_url"].rstrip("/") + "/chat/completions", {
+        "model": cfg["model"], "temperature": 0, "response_format": {"type": "json_object"},
+        "messages": [{"role": "user", "content": [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
+        ]}],
+    }, {"Authorization": f"Bearer {key}"})
+    try:
+        return data["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError):
+        raise LLMError("Unexpected response from vision provider") from None
 
 def _ollama(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
     body: Dict[str, Any] = {

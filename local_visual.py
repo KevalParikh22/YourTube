@@ -9,12 +9,14 @@ and whether the frame has real content); keep small thumbnails; delete the video
 Design numbers come from the spike (docs/PRD-Phase-2.5.md §3).
 """
 import base64
+import io
 import json
 import os
 import random
 import re
 import shutil
 import subprocess
+import threading
 import time
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -149,6 +151,12 @@ def read_frame(path: str, model: str, base_url: str) -> Dict[str, Any]:
                                  headers={"Content-Type": "application/json"}, method="POST")
     with urllib.request.urlopen(req, timeout=600) as r:
         reply = json.load(r).get("message", {}).get("content", "")
+    return _parse_read(reply, llm)
+
+
+def _parse_read(reply: str, llm=None) -> Dict[str, Any]:
+    if llm is None:
+        import llm
     data = llm.parse_json(reply)
     if not isinstance(data, dict):
         raise ValueError("vision model did not return an object")
@@ -156,6 +164,18 @@ def read_frame(path: str, model: str, base_url: str) -> Dict[str, Any]:
     content = content if isinstance(content, bool) else str(content).strip().lower() in ("true", "yes", "1")
     return {"content": content, "text": str(data.get("text") or "").strip()[:4000],
             "visual": " ".join(str(data.get("visual") or "").split())[:400]}
+
+
+def _cloud_read(path: str, settings: Dict[str, Any], provider: str) -> Dict[str, Any]:
+    from PIL import Image
+    import llm
+    with Image.open(path) as image:
+        image = image.convert("RGB")
+        if image.width > 768:
+            image.thumbnail((768, 768))
+        buf = io.BytesIO()
+        image.save(buf, "JPEG", quality=85)
+    return _parse_read(llm.see(settings, provider, buf.getvalue(), PROMPT), llm)
 
 
 def save_thumb(src: str, video_id: str, t: float) -> str:
@@ -193,32 +213,56 @@ def run_visual(
     print(f"Reading slides and whiteboards: {len(queue)} video{'s' if len(queue) != 1 else ''}.")
     if not queue:
         return True
+    main_provider = llm.media_provider(settings, "slides")
+    helper = llm.helper_for(settings, "slides")
     model, base = vision_model(settings), settings["providers"]["ollama"].get("base_url")
-    if read is None:
-        if not available():
-            print("Error: Reading slides needs ffmpeg and Pillow. Run: bash scripts/setup.sh --local-ai")
-            return False
-        if not model or not model_sees_images(base, model):
-            print(f"Error: The vision model ({model or 'none'}) isn't available in Ollama or can't read images. "
-                  "Choose one in Settings → AI (e.g. qwen3.5:4b).")
-            return False
-        read = lambda path: read_frame(path, model, base)
+    readers: Dict[str, Callable[[str], Dict[str, Any]]] = {}
+    providers = [main_provider] + ([helper] if helper else [])
+    for provider in providers:
+        if read is not None and provider == main_provider:
+            readers[provider] = read
+        elif provider == "local":
+            if not available():
+                print("Error: Reading slides needs ffmpeg and Pillow. Run: bash scripts/setup.sh --local-ai")
+                return False
+            if not model or not model_sees_images(base, model):
+                print(f"Error: The vision model ({model or 'none'}) isn't available in Ollama or can't read images. "
+                      "Choose one in Settings → AI (e.g. qwen3.5:4b).")
+                return False
+            readers[provider] = lambda path, m=model, b=base: read_frame(path, m, b)
+        else:
+            readers[provider] = lambda path, p=provider: _cloud_read(path, settings, p)
     height = int(settings.get("visual_height") or 480)
     download = download or (lambda vid: download_video(vid, height))
     minutes = estimate_minutes(sum(v.get("duration_seconds") or 0 for v in queue))
-    print(f"   Vision model {model}, {height}p frames. About {max(1, round(minutes))} min plus downloads. "
+    label = llm.PROVIDERS[main_provider]["label"] if main_provider != "local" else f"Ollama {model}"
+    if main_provider != "local":
+        cfg = settings["providers"][main_provider]
+        price = llm.PRICES.get(cfg.get("model"), (None, None))[0]
+        frames_est = max(1, round(sum(v.get("duration_seconds") or 0 for v in queue) / 60 * FRAMES_PER_MINUTE))
+        token_cost = (frames_est * llm.IMAGE_TOKENS.get(llm.PROVIDERS[main_provider]["kind"], 258) / 1_000_000 * price
+                      if price is not None else None)
+        cost_line = f"about ${token_cost:.5f}" if token_cost is not None else "cost unavailable for this model"
+        print(f"   Vision model {label} · {cost_line} for {frames_est} frames. "
+              "Frames are sent to the provider; videos are deleted after reading and small thumbnails are kept.")
+    else:
+        print(f"   Vision model {label}, {height}p frames. About {max(1, round(minutes))} min plus downloads. "
           "Videos are deleted after reading; small thumbnails are kept.")
     _clear_cache()
     for v in queue:
         storage.set_job(v["video_id"], "visual", status="queued", error=None, progress=0)
 
     done = failed = 0
+    count_lock = threading.Lock()
+    bot = [False]   # a bot check in either worker stops both
     try:
-        for n, v in enumerate(queue, 1):
+        def process(v: Dict[str, Any], provider: str, n: int) -> None:
+            nonlocal done, failed
             vid, label = v["video_id"], (v.get("title") or v["video_id"])[:60]
+            worker_label = f"Ollama {model}" if provider == "local" else llm.PROVIDERS[provider]["label"]
             if should_stop():
                 print("Stopped. Finished videos are saved; run again for the rest.")
-                break
+                return
             timings: Dict[str, float] = {}
             work = os.path.join(CACHE, vid)
             path = None
@@ -238,7 +282,7 @@ def run_visual(
                 for i, (ts, frame) in enumerate(frames, 1):
                     if should_stop():
                         raise InterruptedError("stopped")
-                    r = read(frame)
+                    r = readers[provider](frame)
                     if r["content"] and (r["text"] or r["visual"]):
                         kept.append({"t": round(ts, 1), "text": r["text"], "visual": r["visual"], "thumb": thumb(frame, vid, ts)})
                     storage.set_job(vid, "visual", progress=round(i / max(1, len(frames)), 2))
@@ -246,19 +290,22 @@ def run_visual(
                 timings["frames"], timings["kept"] = len(frames), len(kept)
                 storage.save_visuals(vid, kept)
                 storage.set_job(vid, "visual", status="done", progress=1.0, timings=timings)
-                done += 1
+                with count_lock:
+                    done += 1
                 print(f"   [{n}/{len(queue)}] ✓ {label} · {len(kept)} of {len(frames)} frames had content · "
-                      f"{timings['read_s']:.0f} s reading")
+                      f"{timings['read_s']:.0f} s reading · {worker_label}")
             except BotCheck:
                 storage.set_job(vid, "visual", status="queued")
                 print("YouTube asked to confirm we're not a bot. Stopping; try again in an hour or two.")
-                return False
+                bot[0] = True
+                raise BotCheck("YouTube bot check")
             except InterruptedError:
                 storage.set_job(vid, "visual", status="queued")
                 print("Stopped mid-video; it will start over next time.")
-                break
+                return
             except Exception as e:   # one bad video shouldn't stop the run
-                failed += 1
+                with count_lock:
+                    failed += 1
                 storage.set_job(vid, "visual", status="failed", error=str(e)[:300], timings=timings)
                 print(f"   [{n}/{len(queue)}] Warning: {label}: {str(e)[:120]}")
             finally:
@@ -266,8 +313,26 @@ def run_visual(
                     os.remove(path)            # videos are temporary (Phase 2.5 rule)
                 shutil.rmtree(work, ignore_errors=True)
             if n < len(queue):
-                _cool_down(sleep)
+                if provider == "local":   # only the local worker heats the GPU
+                    _cool_down(sleep)
                 sleep(DOWNLOAD_DELAY + random.uniform(0, DOWNLOAD_DELAY / 2))
+        try:
+            if helper:
+                from parallel import share
+                workers = {p: (lambda item, p=p: process(item[1], p, item[0])) for p in providers}
+                def on_error(name, item, exc):
+                    print(f"Warning: {name} failed on {item[1].get('video_id')}: {str(exc)[:120]}")
+                share(list(enumerate(queue, 1)), workers, lambda: should_stop() or bot[0], on_error)
+                if bot[0]:
+                    return False
+            else:
+                for n, v in enumerate(queue, 1):
+                    if should_stop():
+                        print("Stopped. Finished videos are saved; run again for the rest.")
+                        break
+                    process(v, main_provider, n)
+        except BotCheck:
+            return False
     finally:
         _clear_cache()
     print(f"{done} read" + (f", {failed} failed" if failed else "") + ".")
