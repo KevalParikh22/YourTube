@@ -4,39 +4,43 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>YourTube</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23b5522b'/%3E%3Cpath d='M14 10v20l16-10z' fill='white'/%3E%3Cpath d='m7 21 3 3 5-6' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
 <style>
+  /* Bundled (web/static, SIL OFL): the app works offline and asks no other host for fonts */
+  @font-face { font-family: "Inter"; src: url("/static/inter.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  @font-face { font-family: "Source Serif 4"; src: url("/static/source-serif-4.woff2") format("woff2"); font-weight: 200 900; font-display: swap; }
   :root {
-    --bg: #faf9f7;
-    --raised: #ffffff;
-    --sunken: #f2f0ec;
-    --line: #e7e4df;
-    --line-strong: #d6d2cb;
-    --ink: #1d1c1a;
-    --ink-2: #57534d;
-    --ink-3: #706b64;
-    --accent: #b5522b;
+    --bg: #f5f2ea;
+    --raised: #fffdf8;
+    --sunken: #ece8de;
+    --line: #e3ddd0;
+    --line-strong: #cfc7b6;
+    --ink: #1e2228;
+    --ink-2: #4f5560;
+    --ink-3: #5d636e;
+    --accent: #2e4a7d;
     --accent-ink: #ffffff;
     --done: #3f7a54;
     --watch: #2f7a4b; --watch-bg: #e3f1e7;
-    --skim: #9a6a0c; --skim-bg: #f8edd3;
-    --skip: #7d776f; --skip-bg: #eeebe6;
+    --skim: #8a5f0a; --skim-bg: #f8edd3;
+    --skip: #6c675f; --skip-bg: #eeebe6;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
     --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #151413; --raised: #1c1b19; --sunken: #242220; --line: #2b2926; --line-strong: #3a3733;
-      --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #aaa49b;
-      --accent: #e0805a; --accent-ink: #1a1009; --done: #7fbf93;
+      --bg: #14161a; --raised: #1b1e23; --sunken: #22262c; --line: #2a2e35; --line-strong: #3a3f48;
+      --ink: #e8e6e1; --ink-2: #b4b2ac; --ink-3: #9a9892;
+      --accent: #9db4e0; --accent-ink: #10182a; --done: #7fbf93;
       --watch: #86cf9d; --watch-bg: #1d3325; --skim: #e7bd62; --skim-bg: #392d14; --skip: #a39d94; --skip-bg: #2a2825;
       color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #151413; --raised: #1c1b19; --sunken: #242220; --line: #2b2926; --line-strong: #3a3733;
-    --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #aaa49b;
-    --accent: #e0805a; --accent-ink: #1a1009; --done: #7fbf93;
+    --bg: #14161a; --raised: #1b1e23; --sunken: #22262c; --line: #2a2e35; --line-strong: #3a3f48;
+    --ink: #e8e6e1; --ink-2: #b4b2ac; --ink-3: #9a9892;
+    --accent: #9db4e0; --accent-ink: #10182a; --done: #7fbf93;
     --watch: #86cf9d; --watch-bg: #1d3325; --skim: #e7bd62; --skim-bg: #392d14; --skip: #a39d94; --skip-bg: #2a2825;
     color-scheme: dark;
   }
@@ -45,7 +49,7 @@
   html, body { margin: 0; }
   body {
     background: var(--bg); color: var(--ink);
-    font: 14px/1.5 var(--sans); font-feature-settings: "cv11", "ss01";
+    font: 14.5px/1.55 var(--sans); font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
   }
   a { color: inherit; }
@@ -62,14 +66,17 @@
     backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
   }
   .bar-in { max-width: 1160px; margin: 0 auto; padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 28px; }
-  .logo { font-size: 17px; font-weight: 700; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
+  .logo { display: inline-flex; align-items: center; gap: 9px; font: 600 19px/1 var(--serif); letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
+  .logo svg { width: 26px; height: 26px; flex: 0 0 26px; }
+  .logo .mark-bg { fill: var(--accent); } .logo .mark-fg { fill: var(--bg); }
+  .logo b { font-weight: inherit; color: var(--accent); }
   .tabs { display: flex; gap: 22px; height: 100%; min-width: 0; flex: 0 0 auto; }   /* the task pill shrinks, the menu never does */
   .tabs a {
     display: flex; align-items: center; height: 100%; text-decoration: none; color: var(--ink-3); font-weight: 500;
     border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
   }
   .tabs a:hover { color: var(--ink); }
-  .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); }
+  .tabs a.on { color: var(--ink); border-bottom-color: var(--accent); }
   .bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
   #jobs { min-width: 0; display: flex; }
   .bar-icon { width: 36px; height: 36px; flex: 0 0 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
@@ -104,8 +111,8 @@
   }
   .btn:hover { border-color: var(--ink-3); }
   .btn:disabled { opacity: .5; cursor: default; }
-  .btn-dark { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-  .btn-dark:hover { border-color: var(--ink); opacity: .9; }
+  .btn-dark { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn-dark:hover { border-color: var(--accent); opacity: .9; }
   .btn-text { border: 0; background: none; padding: 0 6px; height: 28px; color: var(--ink-2); cursor: pointer; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; }
   .btn-text:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
   .btn-sm { height: 28px; padding: 0 10px; font-size: 12.5px; }
@@ -116,8 +123,8 @@
   /* ---------- page ---------- */
   .page { max-width: 1160px; margin: 0 auto; padding: 40px 32px 96px; }
   .eyebrow { font-size: 12.5px; color: var(--ink-3); font-weight: 500; letter-spacing: .02em; }
-  .display { font-weight: 600; font-size: 32px; line-height: 1.1; letter-spacing: -.02em; margin: 6px 0 8px; }
-  .display em { font-style: normal; color: var(--ink-3); font-size: 22px; letter-spacing: 0; margin-left: 8px; }
+  .display { font: 600 34px/1.12 var(--serif); letter-spacing: -.015em; margin: 6px 0 8px; }
+  .display em { font: 400 19px var(--sans); color: var(--ink-3); letter-spacing: 0; margin-left: 10px; }
   .lede { margin: 0; color: var(--ink-2); font-size: 15px; }
   .progress { height: 3px; background: var(--line); border-radius: 2px; margin-top: 22px; overflow: hidden; display: flex; }
   .progress i { display: block; background: var(--done); }
@@ -494,8 +501,8 @@
     .s-row { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
     .hit { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .bar-in { padding: 0 16px; gap: 8px; }
-    .logo { display: none; }
-    .tabs { flex: 1 1 auto; gap: 14px; overflow-x: auto; scrollbar-width: none; }
+    .logo span { display: none; }
+    .tabs { flex: 1 1 auto; gap: 14px; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
     .bar-right { flex: 0 0 auto; }   /* here the menu scrolls instead */
     .tabs a { font-size: 13.5px; }
   }
@@ -522,11 +529,12 @@
   }
   @media (max-width: 640px) {
     .bar-in { padding: 0 16px; gap: 8px; }
-    .logo { display: none; }
-    .tabs { flex: 1 1 auto; gap: 16px; overflow-x: auto; scrollbar-width: none; }
+    .logo span { display: none; }
+    .tabs { flex: 1 1 auto; gap: 16px; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
     .bar-right { gap: 2px; }
+    #libpick select { max-width: 104px; }
     .page { padding: 28px 16px 72px; }
-    .display { font-size: 32px; }
+    .display { font-size: 30px; }
     .display em { display: block; margin: 4px 0 0; font-size: 18px; }
     .row { grid-template-columns: 26px 72px minmax(0, 1fr) auto; gap: 10px; }
     .row .pick { display: none; }
@@ -537,7 +545,7 @@
 <a class="skip-link" href="#view">Skip to content</a>
 <header class="bar">
   <div class="bar-in">
-    <a class="logo" href="#/home">YourTube</a>
+    <a class="logo" href="#/home" aria-label="YourTube home"><svg viewBox="0 0 40 40" aria-hidden="true"><rect class="mark-bg" width="40" height="40" rx="10"/><path class="mark-fg" d="M12 0h16v31l-8-6-8 6z"/><path class="mark-bg" d="M17 9v10l8-5z"/></svg><span>Your<b>Tube</b></span></a>
     <span id="libpick"></span>
     <nav class="tabs" id="tabs"></nav>
     <div class="bar-right">
@@ -750,6 +758,7 @@ function renderBar() {
     ? `<select data-change="lib" aria-label="Library" class="libsel">${S.data.libraries.map(l => `<option value="${l.id}" ${S.lib === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         <option value="0" ${S.lib === 0 ? 'selected' : ''}>All libraries</option></select>` : '';
   $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}"${tab === k ? ' aria-current="page"' : ''}>${l}</a>`).join('');
+  { const on = $('#tabs a.on'), nav = $('#tabs'); if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - nav.offsetLeft - 8; }   // phone: the menu scrolls, keep this page's tab in view
   $('#gsearch-btn').classList.toggle('on', r === 'search');
   $('#settings-btn').classList.toggle('on', tab === 'settings');
   $('#help-btn').classList.toggle('on', r === 'help');
