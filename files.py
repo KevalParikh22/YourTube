@@ -95,7 +95,7 @@ def _prune_backups(protect=None):
                 shutil.rmtree(sibling)
 
 
-def backup(note=""):
+def backup(note="", protect=None):
     import storage
     import classifier
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -127,13 +127,52 @@ def backup(note=""):
             src = os.path.join(taxonomy_folder, item)
             if os.path.isfile(src) and not os.path.islink(src):
                 shutil.copy2(src, os.path.join(taxonomy_dir, item))
-    _prune_backups()
+    _prune_backups(protect)
     print(f"Backed up the library to backups/{name}.")
     return name
 
 
+def restore(name):
+    """
+    Replaces the live library with a backup. A safety backup of the current library is made first.
+    The caller makes sure no task is running. Returns the safety backup's name.
+    """
+    import storage
+    import classifier
+    path = get_saved("backups", name)
+    if path is None or not re.fullmatch(r"yourtube-\d{8}-\d{6}(?:-\d+)?\.db", name):
+        raise FileNotFoundError(name)
+    with closing(sqlite3.connect("file:" + os.path.abspath(path) + "?mode=ro", uri=True)) as src:
+        if src.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+            raise ValueError("This backup is damaged; the library was not changed")
+    safety = backup(protect=path)   # newest, so pruning keeps it; the chosen one is protected too
+    with storage.get_connection(storage.DB_PATH) as live:
+        before = live.execute("SELECT value FROM meta WHERE key = 'index'").fetchone()
+    # The backup API in reverse: copies every page under one write lock, safe with the app's open connections
+    with closing(sqlite3.connect("file:" + os.path.abspath(path) + "?mode=ro", uri=True)) as src, \
+            closing(sqlite3.connect(storage.DB_PATH, timeout=30)) as live:
+        src.backup(live)
+    folder = os.path.splitext(path)[0]
+    taxonomy_folder = os.path.dirname(classifier.TAXONOMY_PATH) or "."
+    if os.path.isdir(folder) and not os.path.islink(folder):
+        for item in os.listdir(folder):
+            item_path = os.path.join(folder, item)
+            if item.endswith(".json") and os.path.isfile(item_path) and not os.path.islink(item_path):
+                shutil.copy2(item_path, os.path.join(taxonomy_folder, item))
+    storage.init_db(storage.DB_PATH)   # migrates a backup made by an older version
+    with storage.get_connection(storage.DB_PATH) as live:
+        # Past both versions, so in-memory search caches always notice the swap
+        live.execute("INSERT INTO meta (key, value) VALUES ('index', ?) ON CONFLICT(key) DO UPDATE SET value = MAX(value, excluded.value - 1) + 1",
+                     ((before[0] if before else 0) + 1,))
+        live.commit()
+    print(f"Restored {name}. The library before it is saved as {safety}.")
+    return safety
+
+
 def list_backups():
-    folder = _backup_dir()
+    folder = os.path.join(DATA_DIR, "backups")
+    if not os.path.isdir(folder):
+        return []
     result = []
     for name in os.listdir(folder):
         if not re.fullmatch(r"yourtube-\d{8}-\d{6}(?:-\d+)?\.db", name):

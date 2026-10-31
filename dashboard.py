@@ -22,6 +22,7 @@ from http.cookies import SimpleCookie
 import webbrowser
 import contextvars
 import shutil
+import sqlite3
 from datetime import datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
@@ -996,6 +997,20 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/files/backup":
                 return self._queued(JOB.start("backup", "Back up library", files.backup, lane="local"))
+            if path == "/api/files/restore":
+                name = body.get("name")
+                if not isinstance(name, str):
+                    return self._error("name is required")
+                with JOB.lock:   # nothing can start while the library is swapped
+                    if any(l.state["running"] or l.pending for l in JOB.lanes.values()):
+                        return self._error("Wait for the running tasks to finish, or stop them, then restore.", 409)
+                    try:
+                        safety = files.restore(name)
+                    except FileNotFoundError:
+                        return self._error("Backup not found", 404)
+                    except (ValueError, sqlite3.Error) as e:
+                        return self._error(f"Restore failed: {e}", 500)
+                return self._json({"ok": True, "safety": safety})
             if path == "/api/files/clear":
                 key = body.get("key")
                 if not isinstance(key, str):

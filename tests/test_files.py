@@ -113,3 +113,47 @@ class FilesTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 files.delete("exports", "../settings.json")
 
+
+
+class RestoreTest(FilesTest):
+    def titles(self):
+        with storage.get_connection(self.db) as conn:
+            return [r[0] for r in conn.execute("SELECT title FROM videos ORDER BY video_id")]
+
+    def test_round_trip_keeps_a_safety_backup_and_settings(self):
+        settings = os.path.join(self.root, "settings.json")
+        with open(settings, "w") as f:
+            f.write('{"api_key":"secret"}')
+        with open(self.taxonomy, "w") as f:
+            f.write('{"Old": []}')
+        with mock.patch.object(files, "DATA_DIR", self.root), mock.patch.object(storage, "DB_PATH", self.db), \
+                mock.patch.object(classifier, "TAXONOMY_PATH", self.taxonomy):
+            name = files.backup()
+            with storage.get_connection(self.db) as conn:
+                conn.execute("UPDATE videos SET title = 'Changed'")
+                conn.execute("INSERT INTO videos(video_id,title,url) VALUES('v2','New','https://youtu.be/v2')")
+            with open(self.taxonomy, "w") as f:
+                f.write('{"New": []}')
+            before = storage.index_version(self.db)
+            safety = files.restore(name)
+            self.assertEqual(self.titles(), ["Video"])
+            with open(self.taxonomy) as f:
+                self.assertEqual(f.read(), '{"Old": []}')
+            self.assertNotEqual(storage.index_version(self.db), before)
+            # the safety backup holds the library as it was just before
+            with sqlite3.connect(f"file:{os.path.join(self.root, 'backups', safety)}?mode=ro", uri=True) as conn:
+                self.assertEqual(conn.execute("SELECT COUNT(*) FROM videos").fetchone()[0], 2)
+            with self.assertRaises(FileNotFoundError):
+                files.restore("../settings.json")
+        with open(settings) as f:
+            self.assertEqual(f.read(), '{"api_key":"secret"}')
+
+    def test_older_backup_is_migrated(self):
+        with mock.patch.object(files, "DATA_DIR", self.root), mock.patch.object(storage, "DB_PATH", self.db), \
+                mock.patch.object(classifier, "TAXONOMY_PATH", self.taxonomy):
+            name = files.backup()
+            with sqlite3.connect(os.path.join(self.root, "backups", name)) as conn:
+                conn.execute("DROP TABLE ask_history")
+            files.restore(name)
+            with storage.get_connection(self.db) as conn:
+                self.assertTrue(conn.execute("SELECT name FROM sqlite_master WHERE name = 'ask_history'").fetchone())
