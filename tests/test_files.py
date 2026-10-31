@@ -134,11 +134,14 @@ class RestoreTest(FilesTest):
                 conn.execute("INSERT INTO videos(video_id,title,url) VALUES('v2','New','https://youtu.be/v2')")
             with open(self.taxonomy, "w") as f:
                 f.write('{"New": []}')
+            with open(os.path.join(self.root, "taxonomy-2.json"), "w") as f:
+                f.write("{}")
             before = storage.index_version(self.db)
             safety = files.restore(name)
             self.assertEqual(self.titles(), ["Video"])
             with open(self.taxonomy) as f:
                 self.assertEqual(f.read(), '{"Old": []}')
+            self.assertFalse(os.path.exists(os.path.join(self.root, "taxonomy-2.json")))
             self.assertNotEqual(storage.index_version(self.db), before)
             # the safety backup holds the library as it was just before
             with sqlite3.connect(f"file:{os.path.join(self.root, 'backups', safety)}?mode=ro", uri=True) as conn:

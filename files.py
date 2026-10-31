@@ -95,9 +95,19 @@ def _prune_backups(protect=None):
                 shutil.rmtree(sibling)
 
 
+def _taxonomy_files():
+    """The category files: library 1's taxonomy.json plus taxonomy-N.json for the others (classifier.taxonomy_path)."""
+    import classifier
+    folder = os.path.dirname(classifier.TAXONOMY_PATH) or "."
+    stem, ext = os.path.splitext(os.path.basename(classifier.TAXONOMY_PATH))
+    library_file = re.compile(re.escape(stem) + r"(-\d+)?" + re.escape(ext))
+    names = [n for n in (os.listdir(folder) if os.path.isdir(folder) else [])
+             if library_file.fullmatch(n) and os.path.isfile(os.path.join(folder, n)) and not os.path.islink(os.path.join(folder, n))]
+    return folder, names
+
+
 def backup(note="", protect=None):
     import storage
-    import classifier
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     folder = _backup_dir()
     name = f"yourtube-{stamp}.db"
@@ -118,15 +128,9 @@ def backup(note="", protect=None):
         dst.close()
     taxonomy_dir = os.path.splitext(target)[0]
     os.makedirs(taxonomy_dir, exist_ok=True)
-    taxonomy_folder = os.path.dirname(classifier.TAXONOMY_PATH) or "."
-    stem, ext = os.path.splitext(os.path.basename(classifier.TAXONOMY_PATH))
-    # library 1's file plus taxonomy-N for the others (classifier.taxonomy_path)
-    library_file = re.compile(re.escape(stem) + r"(-\d+)?" + re.escape(ext) + "$")
-    for item in (os.listdir(taxonomy_folder) if os.path.isdir(taxonomy_folder) else []):
-        if library_file.fullmatch(item):
-            src = os.path.join(taxonomy_folder, item)
-            if os.path.isfile(src) and not os.path.islink(src):
-                shutil.copy2(src, os.path.join(taxonomy_dir, item))
+    taxonomy_folder, names = _taxonomy_files()
+    for item in names:
+        shutil.copy2(os.path.join(taxonomy_folder, item), os.path.join(taxonomy_dir, item))
     _prune_backups(protect)
     print(f"Backed up the library to backups/{name}.")
     return name
@@ -138,7 +142,6 @@ def restore(name):
     The caller makes sure no task is running. Returns the safety backup's name.
     """
     import storage
-    import classifier
     path = get_saved("backups", name)
     if path is None or not re.fullmatch(r"yourtube-\d{8}-\d{6}(?:-\d+)?\.db", name):
         raise FileNotFoundError(name)
@@ -153,12 +156,14 @@ def restore(name):
             closing(sqlite3.connect(storage.DB_PATH, timeout=30)) as live:
         src.backup(live)
     folder = os.path.splitext(path)[0]
-    taxonomy_folder = os.path.dirname(classifier.TAXONOMY_PATH) or "."
     if os.path.isdir(folder) and not os.path.islink(folder):
-        for item in os.listdir(folder):
-            item_path = os.path.join(folder, item)
-            if item.endswith(".json") and os.path.isfile(item_path) and not os.path.islink(item_path):
-                shutil.copy2(item_path, os.path.join(taxonomy_folder, item))
+        taxonomy_folder, live_names = _taxonomy_files()
+        saved = {n for n in os.listdir(folder) if n.endswith(".json") and os.path.isfile(os.path.join(folder, n))
+                 and not os.path.islink(os.path.join(folder, n))}
+        for item in saved:
+            shutil.copy2(os.path.join(folder, item), os.path.join(taxonomy_folder, item))
+        for item in set(live_names) - saved:   # a library made after the backup must not leave its categories behind
+            os.remove(os.path.join(taxonomy_folder, item))
     storage.init_db(storage.DB_PATH)   # migrates a backup made by an older version
     with storage.get_connection(storage.DB_PATH) as live:
         # Past both versions, so in-memory search caches always notice the swap
