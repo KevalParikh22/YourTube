@@ -301,6 +301,39 @@ class RunAsrTest(unittest.TestCase):
         self.assertEqual(models, {"groq:whisper-large-v3-turbo", "small"},
                          {vid: storage.get_details(vid) for vid in ("h1", "h2")})
 
+    def test_failing_cloud_helper_retires_and_local_finishes_the_rest(self):
+        import cloud_asr
+        import llm
+        from unittest import mock
+        settings = llm.load_settings()
+        settings["tasks"]["transcribe"] = "local"
+        settings["helpers"]["transcribe"] = "groq"
+        settings["providers"]["groq"]["api_key"] = "test-key"
+        ids = [f"rf{i}" for i in range(8)]
+        storage.save_playlist(playlist("RETIRE"), [video(v, f"Retire {v}") for v in ids])
+        for vid in ids:
+            storage.save_details(vid, {"status": "no_captions"})
+        local_factory = lambda name, dev, compute: (lambda samples, progress: ([{"start": 0, "dur": 1, "text": "local"}], "en"))
+        with mock.patch("local_asr.available", return_value=True), mock.patch("local_asr.device", return_value="cpu"), \
+                mock.patch.object(cloud_asr, "transcribe", side_effect=cloud_asr.CloudASRError("HTTP 401")), \
+                mock.patch("local_asr._cool_down"), contextlib.redirect_stdout(io.StringIO()):
+            local_asr.run_asr(ids, download=self.fake_download, make_transcriber=local_factory,
+                              decode_audio=lambda p: [0.0] * 16000, sleep=lambda s: None, settings=settings)
+        failed = [v for v in ids if storage.get_details(v).get("asr_model") is None]
+        self.assertLessEqual(len(failed), 3)    # the cloud worker stopped after three failures in a row
+
+    def test_estimate_counts_a_cloud_helper(self):
+        import llm
+        settings = llm.load_settings()
+        settings["tasks"]["transcribe"] = "local"
+        settings["helpers"]["transcribe"] = "groq"
+        settings["providers"]["groq"]["api_key"] = "test-key"
+        storage.save_playlist(playlist("EST"), [video("e1", "Estimate one", duration=3600)])
+        storage.save_details("e1", {"status": "no_captions"})
+        r = local_asr.estimate(["e1"], settings=settings)
+        self.assertEqual((r["engine"], r["helper"], r["cost"]), ("local", "groq", 0.04))
+        self.assertIn("Groq", r["sends"])
+
     def test_helper_honors_stop_before_claiming_items(self):
         import llm
         storage.save_playlist(playlist("STOP"), [video("s1", "Stop one"), video("s2", "Stop two")])

@@ -2079,7 +2079,11 @@ function viewAI() {
     ${Object.entries(ai.helpers || {}).map(([t, value]) => {
       const labels = ai.task_labels || {}, media = ai.media_tasks?.[t];
       const main = media ? (media.selected || 'local') : (ai.tasks[t] || ai.provider);
-      const candidates = Object.entries(ai.providers).filter(([k, p]) => p.ready && ((main === 'local') !== !!p.local));
+      const mainLocal = main === 'local' || !!ai.providers[main]?.local;   // a helper is cloud for a local main AI, and the other way round
+      const candidates = media
+        ? media.providers.filter(k => k !== main && (k === 'local') !== mainLocal && (k === 'local' || ai.providers[k]?.ready))
+            .map(k => [k, k === 'local' ? { label: 'This computer' } : ai.providers[k]])
+        : Object.entries(ai.providers).filter(([k, p]) => p.ready && !!p.local !== mainLocal);
       return `<div class="route"><label class="field-label" style="margin:0" for="helper-${esc(t)}">${esc(media?.label || labels[t] || t)}</label><select id="helper-${esc(t)}" data-helper-task="${esc(t)}" style="width:100%"><option value="none" ${!value ? 'selected' : ''}>None</option>${candidates.map(([k,p]) => `<option value="${esc(k)}" ${value === k ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>`;
     }).join('')}
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-helpers">Save helpers</button></div>
@@ -2324,6 +2328,7 @@ function helperChoicesBody() {
 const selectedMediaProvider = (ai, task) => ai.media_tasks?.[task]?.selected || 'local';
 async function confirmEstimate(path, title) {
   const estimate = await api(path);
+  if (estimate.engine === 'local' && !estimate.cost) return true;   // nothing leaves this computer
   if (estimate.cost == null) return confirm(`${title}. ${estimate.sends || ''} Cost estimate unavailable. Continue?`);
   return confirm(`${title}. Estimated cost: $${Number(estimate.cost).toFixed(4)}. ${estimate.sends || ''} Continue?`);
 }
@@ -2715,8 +2720,7 @@ document.addEventListener('click', async e => {
       break;
     case 'vis-run': case 'vis-one': {
       try {
-        if (selectedMediaProvider(S.data.ai, 'slides') !== 'local' &&
-            !await confirmEstimate('/api/visuals/plan', 'Read slides using the selected cloud provider')) break;
+        if (!await confirmEstimate('/api/visuals/plan', 'Read slides')) break;
         const res = await api('/api/visuals', act === 'vis-one' ? { ids: [id] } : {});
         S.busy = { visual: act === 'vis-one' ? [id] : videos().filter(v => v.has_visuals === 1 || S.data.visual_categories[v.category]).map(v => v.video_id) };
         await queued(res, 'Slide reading'); renderDrawer();
@@ -2731,8 +2735,7 @@ document.addEventListener('click', async e => {
     }
     case 'asr-run': case 'asr-one': {
       try {
-        if (selectedMediaProvider(S.data.ai, 'transcribe') !== 'local' &&
-            !await confirmEstimate('/api/asr/plan', 'Transcribe audio using the selected cloud provider')) break;
+        if (!await confirmEstimate('/api/asr/plan', 'Transcribe audio')) break;
         const res = await api('/api/asr', act === 'asr-one' ? { ids: [id] } : {});
         S.busy = { asr: act === 'asr-one' ? [id] : videos().filter(v => v.details?.asr_reason).map(v => v.video_id) };
         await queued(res, 'Local transcription'); renderDrawer();

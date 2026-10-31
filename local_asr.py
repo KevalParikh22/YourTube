@@ -122,7 +122,13 @@ def estimate(video_ids: Optional[List[str]] = None, settings: Optional[Dict[str,
     cands = storage.videos_needing_asr(video_ids)
     engine = llm.media_provider(settings, "transcribe")
     audio = sum(v.get("duration_seconds") or 0 for v in cands)
-    cost = estimate_cost(settings, audio)
+    helper = llm.helper_for(settings, "transcribe")
+    cloud = engine if engine != "local" else (helper if helper and helper != "local" else None)
+    # with a cloud helper: the most it can cost (as if the cloud did every video)
+    cost = estimate_cost(dict(settings, tasks={**(settings.get("tasks") or {}), "transcribe": cloud}), audio) if cloud else 0.0
+    sends = (f"Audio is uploaded to {llm.PROVIDERS[cloud]['label']} for transcription"
+             + (" (for the videos the helper takes; the cost shown is the most it can be)." if cloud != engine else ".")
+             if cloud else "Nothing is sent; audio is processed locally.")
     if engine == "local":
         dev = device() if available() else "cpu"
         model = choose_model(settings, dev)[0]
@@ -144,6 +150,8 @@ def estimate(video_ids: Optional[List[str]] = None, settings: Optional[Dict[str,
         "audio_s": audio,
         "minutes": mins,
         "cost": cost,
+        "helper": helper,
+        "sends": sends,
     }
 
 
@@ -408,6 +416,8 @@ def run_asr(
                 failed += 1
             storage.set_job(vid, "asr", status="failed", error=str(e)[:300], timings=timings)
             parallel.safe_print(f"   {prefix}Warning: {label}: {str(e)[:120]}")
+            if helper:   # let parallel.share count it: a worker failing three times in a row stops, the other carries on
+                raise
             return False
         finally:
             if path and os.path.exists(path):

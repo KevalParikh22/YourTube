@@ -308,6 +308,8 @@ def run_visual(
                     failed += 1
                 storage.set_job(vid, "visual", status="failed", error=str(e)[:300], timings=timings)
                 print(f"   [{n}/{len(queue)}] Warning: {label}: {str(e)[:120]}")
+                if helper:   # let parallel.share count it: a worker failing three times in a row stops
+                    raise
             finally:
                 if path and os.path.exists(path):
                     os.remove(path)            # videos are temporary (Phase 2.5 rule)

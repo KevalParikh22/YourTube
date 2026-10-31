@@ -659,14 +659,17 @@ class Handler(BaseHTTPRequestHandler):
             base = settings["providers"]["ollama"].get("base_url")
             engine = llm.media_provider(settings, "slides")
             frames = max(1, round(secs / 60 * local_visual.FRAMES_PER_MINUTE)) if cands else 0
-            if engine == "local":
+            helper = llm.helper_for(settings, "slides")
+            cloud = engine if engine != "local" else (helper if helper and helper != "local" else None)
+            if cloud is None:
                 cost, sends = 0.0, "Nothing is sent; video downloads and frame analysis run locally."
-            else:
-                cfg = settings["providers"][engine]
+            else:   # with a cloud helper: the most it can cost (as if the cloud read every video)
+                cfg = settings["providers"][cloud]
                 price = llm.PRICES.get(cfg.get("model"), (None, None))[0]
-                tokens = frames * llm.IMAGE_TOKENS.get(llm.PROVIDERS[engine]["kind"], 258)
+                tokens = frames * llm.IMAGE_TOKENS.get(llm.PROVIDERS[cloud]["kind"], 258)
                 cost = round(tokens / 1_000_000 * price, 5) if price is not None else None
-                sends = f"About {frames} slide frames are sent to {llm.PROVIDERS[engine]['label']}."
+                sends = f"About {frames} slide frames are sent to {llm.PROVIDERS[cloud]['label']}" + (
+                    " (at most: the helper shares the work)." if cloud != engine else ".")
             return self._json({"available": local_visual.available(), "model": model, "engine": engine,
                                "model_ok": bool(model) and local_visual.model_sees_images(base, model),
                                "videos": len(cands), "seconds": secs,
@@ -677,8 +680,6 @@ class Handler(BaseHTTPRequestHandler):
             ids = (qs.get("ids") or [""])[0].split(",") if "ids" in qs else None
             ids = [i.strip() for i in ids if i.strip()] if ids else None
             estimate = local_asr.estimate(ids)
-            estimate["sends"] = ("Nothing is sent; audio is processed locally." if estimate["engine"] == "local"
-                                  else f"Audio is uploaded to {llm.PROVIDERS[estimate['engine']]['label']} for transcription.")
             return self._json(estimate)
         if url.path == "/api/search":
             q = (qs.get("q") or [""])[0][:200]
@@ -1017,8 +1018,6 @@ class Handler(BaseHTTPRequestHandler):
                 if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
                     return self._error("ids must be a list of video IDs")
                 estimate = local_asr.estimate(ids)
-                estimate["sends"] = ("Nothing is sent; audio is processed locally." if estimate["engine"] == "local"
-                                      else f"Audio is uploaded to {llm.PROVIDERS[estimate['engine']]['label']} for transcription.")
                 return self._json(estimate)
 
             if path == "/api/asr":
