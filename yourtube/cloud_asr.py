@@ -12,7 +12,7 @@ from typing import Any, Callable, Dict, List, Tuple
 
 import llm
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MEDIA_CACHE = os.path.join(os.environ.get("YTKB_DATA_DIR") or ROOT, "media_cache")
 CHUNK_SECONDS = 600
 TIMEOUT = 300

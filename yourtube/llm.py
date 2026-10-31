@@ -19,7 +19,7 @@ import urllib.request
 import urllib.error
 from typing import Any, Callable, Dict, List, Optional
 
-_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(__file__)
+_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SETTINGS_PATH = os.environ.get("YTKB_SETTINGS") or os.path.join(_DATA_DIR, "settings.json")
 
 PROVIDERS: Dict[str, Dict[str, Any]] = {

@@ -4,7 +4,10 @@ so tests never touch the real yt_kb.db, taxonomy.json or settings.json.
 Run from the project root: python -m unittest
 """
 import os
+import sys
 import tempfile
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "yourtube"))
 
 _TMP = tempfile.mkdtemp(prefix="ytkb-tests-")
 os.environ["YTKB_DB"] = os.path.join(_TMP, "default.db")

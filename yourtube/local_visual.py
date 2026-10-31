@@ -21,7 +21,7 @@ import time
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DATA_DIR = os.environ.get("YTKB_DATA_DIR") or ROOT
 CACHE = os.path.join(_DATA_DIR, "media_cache", "visual")   # temporary video and raw frames
 FRAMES = os.path.join(_DATA_DIR, "frames")                 # kept thumbnails: frames/<video_id>/<second>.jpg (git-ignored)

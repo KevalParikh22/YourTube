@@ -7,7 +7,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "yourtube"))
 MEDIA = os.path.join(ROOT, "media_cache", "spike")
 RESULTS = os.path.join(MEDIA, "results.json")
 os.makedirs(MEDIA, exist_ok=True)
