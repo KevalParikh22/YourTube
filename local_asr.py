@@ -86,6 +86,66 @@ def choose_model(settings: Dict[str, Any], dev: str) -> (str, str):
     return (default_name if name == "auto" else name), compute
 
 
+PROVIDER_NAMES = {"groq": "Groq", "openai": "OpenAI", "gemini": "Gemini"}
+
+
+def cloud_model(settings: Dict[str, Any], provider: str) -> str:
+    """The model name for a cloud transcription provider."""
+    import llm
+    cfg = (settings.get("providers") or {}).get(provider) or {}
+    return llm.MEDIA_DEFAULT_MODELS.get(("transcribe", provider)) or cfg.get("model") or "gemini-3.8-flash"
+
+
+def estimate_cost(settings: Dict[str, Any], audio_seconds: float) -> Optional[float]:
+    """Estimated USD for transcription, 0.0 for local, or None if price is unknown."""
+    import llm
+    engine = llm.media_provider(settings, "transcribe")
+    if engine == "local":
+        return 0.0
+    model = cloud_model(settings, engine)
+    price = llm.MEDIA_PRICES.get((engine, model))
+    if price is None and engine == "gemini":
+        price = 0.09
+    if price is None:
+        return None
+    cost = max(0.0, audio_seconds) / 3600.0 * price
+    return round(cost, 2)
+
+
+def estimate(video_ids: Optional[List[str]] = None, settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """What a transcription run would need: candidate count, audio time, device/engine and cost."""
+    import llm
+    import storage
+    if settings is None:
+        settings = llm.load_settings()
+    cands = storage.videos_needing_asr(video_ids)
+    engine = llm.media_provider(settings, "transcribe")
+    audio = sum(v.get("duration_seconds") or 0 for v in cands)
+    cost = estimate_cost(settings, audio)
+    if engine == "local":
+        dev = device() if available() else "cpu"
+        model = choose_model(settings, dev)[0]
+        avail = available()
+        mins = round(estimate_minutes(audio, dev) + len(cands) * 10 / 60, 1)
+    else:
+        dev = "cloud"
+        model = cloud_model(settings, engine)
+        avail = shutil.which("ffmpeg") is not None
+        mins = round(len(cands) * 15 / 60, 1)
+    return {
+        "engine": engine,
+        "available": avail,
+        "device": dev,
+        "model": model,
+        "videos": len(cands),
+        "no_captions": sum(v["reason"] == "no_captions" for v in cands),
+        "wrong_script": sum(v["reason"] == "wrong_script" for v in cands),
+        "audio_s": audio,
+        "minutes": mins,
+        "cost": cost,
+    }
+
+
 def estimate_minutes(audio_seconds: float, dev: str) -> float:
     """Rough minutes for a run: transcription at the measured speed plus ~10 s per video for downloads."""
     return audio_seconds / SPEED[dev] / 60
@@ -210,28 +270,53 @@ def run_asr(
     make_transcriber: Callable[[str, str, str], Callable] = Transcriber,
     decode_audio: Callable[[str], Any] = decode,
     sleep: Callable[[float], None] = time.sleep,
+    transcribe_cloud: Optional[Callable] = None,
+    settings: Optional[Dict[str, Any]] = None,
 ) -> bool:
-    """Transcribes candidate videos (or the given ones) locally. Prints progress for the job log."""
+    """Transcribes candidate videos (or the given ones). Prints progress for the job log."""
     import llm
     import storage
 
-    settings = llm.load_settings()
+    if settings is None:
+        settings = llm.load_settings()
+    engine = llm.media_provider(settings, "transcribe")
     queue = storage.videos_needing_asr(video_ids)
-    print(f"Local transcription: {len(queue)} video{'s' if len(queue) != 1 else ''}"
-          + (f" ({sum(1 for v in queue if v.get('reason') == 'no_captions')} without captions, "
-             f"{sum(1 for v in queue if v.get('reason') == 'wrong_script')} with captions in the wrong script)" if queue else "") + ".")
-    if not queue:
-        return True
-    if not available():
-        print("Error: Local transcription needs faster-whisper and ffmpeg. Run: bash scripts/setup.sh --local-ai")
-        return False
-    _clear_cache()
-    dev = device() if make_transcriber is Transcriber else "cpu"
-    name, compute = choose_model(settings, dev)
-    transcriber_factory = MlxTranscriber if dev == "mlx" and make_transcriber is Transcriber else make_transcriber
-    hours = sum(v.get("duration_seconds") or 0 for v in queue) / 3600
-    print(f"   {name} on {'the GPU' if dev in ('cuda', 'mlx') else 'the CPU'}. About {max(1, round(estimate_minutes(hours * 3600, dev)))} min "
-          f"for {hours:.1f} h of audio, plus downloads. Audio is deleted after each video.")
+
+    if engine == "local":
+        print(f"Local transcription: {len(queue)} video{'s' if len(queue) != 1 else ''}"
+              + (f" ({sum(1 for v in queue if v.get('reason') == 'no_captions')} without captions, "
+                 f"{sum(1 for v in queue if v.get('reason') == 'wrong_script')} with captions in the wrong script)" if queue else "") + ".")
+        if not queue:
+            return True
+        if not available():
+            print("Error: Local transcription needs faster-whisper and ffmpeg. Run: bash scripts/setup.sh --local-ai")
+            return False
+        _clear_cache()
+        dev = device() if make_transcriber is Transcriber else "cpu"
+        name, compute = choose_model(settings, dev)
+        transcriber_factory = MlxTranscriber if dev == "mlx" and make_transcriber is Transcriber else make_transcriber
+        hours = sum(v.get("duration_seconds") or 0 for v in queue) / 3600
+        print(f"   {name} on {'the GPU' if dev in ('cuda', 'mlx') else 'the CPU'}. About {max(1, round(estimate_minutes(hours * 3600, dev)))} min "
+              f"for {hours:.1f} h of audio, plus downloads. Audio is deleted after each video.")
+    else:
+        hours = sum(v.get("duration_seconds") or 0 for v in queue) / 3600
+        cloud_mod = cloud_model(settings, engine)
+        provider_name = PROVIDER_NAMES.get(engine, engine.capitalize())
+        cost = estimate_cost(settings, hours * 3600)
+        cost_val = 0.0 if cost is None else cost
+        print(f"{provider_name} {cloud_mod} · about ${cost_val:.2f} for {hours:.1f} h of audio. Audio is uploaded to {provider_name}, then deleted here.")
+        if not queue:
+            return True
+        if shutil.which("ffmpeg") is None:
+            print("Error: Transcription needs ffmpeg. Run: bash scripts/setup.sh")
+            return False
+        _clear_cache()
+        print(f"   {len(queue)} video{'s' if len(queue) != 1 else ''}"
+              + (f" ({sum(1 for v in queue if v.get('reason') == 'no_captions')} without captions, "
+                 f"{sum(1 for v in queue if v.get('reason') == 'wrong_script')} with captions in the wrong script)" if queue else "") + ".")
+        if engine == "gemini":
+            print("   Timestamps from Gemini are approximate.")
+
     for v in queue:
         storage.set_job(v["video_id"], "asr", status="queued", error=None, progress=0)
 
@@ -250,29 +335,43 @@ def run_asr(
                 t = time.time()
                 path = download(vid)
                 timings["download_s"] = round(time.time() - t, 1)
-                samples = decode_audio(path)
-                timings["audio_s"] = round(len(samples) / 16000)
-                if transcriber is None:
-                    if dev in ("cuda", "mlx"):
-                        freed = unload_ollama(settings["providers"]["ollama"].get("base_url"))
-                        if freed:
-                            print(f"   Unloaded {', '.join(freed)} from the GPU to make room.")
-                    print(f"   Loading {name} (the first time downloads it: ~1.6 GB for large-v3-turbo, ~0.5 GB for small)…")
-                    transcriber = transcriber_factory(name, dev, compute)
-                storage.set_job(vid, "asr", status="transcribing")
-                t = time.time()
                 last = [0.0]
 
                 def progress(p, vid=vid):
                     if p - last[0] >= 0.1:
                         last[0] = p
                         storage.set_job(vid, "asr", progress=round(p, 2))
-                segments, language = transcriber(samples, progress)
-                timings["transcribe_s"] = round(time.time() - t, 1)
-                storage.save_local_transcript(vid, segments, language=language, model=name)
+
+                if engine == "local":
+                    samples = decode_audio(path)
+                    timings["audio_s"] = round(len(samples) / 16000)
+                    if transcriber is None:
+                        if dev in ("cuda", "mlx"):
+                            freed = unload_ollama(settings["providers"]["ollama"].get("base_url"))
+                            if freed:
+                                print(f"   Unloaded {', '.join(freed)} from the GPU to make room.")
+                        print(f"   Loading {name} (the first time downloads it: ~1.6 GB for large-v3-turbo, ~0.5 GB for small)…")
+                        transcriber = transcriber_factory(name, dev, compute)
+                    storage.set_job(vid, "asr", status="transcribing")
+                    t = time.time()
+                    segments, language = transcriber(samples, progress)
+                    timings["transcribe_s"] = round(time.time() - t, 1)
+                    storage.save_local_transcript(vid, segments, language=language, model=name)
+                else:
+                    storage.set_job(vid, "asr", status="transcribing")
+                    t = time.time()
+                    import cloud_asr
+                    call_transcribe = transcribe_cloud or cloud_asr.transcribe
+                    segments, language = call_transcribe(path, engine, settings, progress=progress)
+                    timings["transcribe_s"] = round(time.time() - t, 1)
+                    timings["audio_s"] = v.get("duration_seconds") or (round(segments[-1]["start"] + segments[-1].get("dur", 0)) if segments else 0)
+                    save_model = f"{engine}:{cloud_mod}"
+                    storage.save_local_transcript(vid, segments, language=language, model=save_model)
+
                 storage.set_job(vid, "asr", status="done", progress=1.0, timings=timings)
                 done += 1
-                speed = timings["audio_s"] / max(0.1, timings["transcribe_s"])
+                audio_secs = timings.get("audio_s") or (v.get("duration_seconds") or 0)
+                speed = audio_secs / max(0.1, timings["transcribe_s"])
                 note = " · captions kept; choose in the video panel" if v.get("reason") == "wrong_script" else ""
                 print(f"   [{n}/{len(queue)}] ✓ {label} · {language} · {len(segments)} lines · {speed:.0f}× real time{note}")
             except BotCheck:
@@ -287,7 +386,8 @@ def run_asr(
                 if path and os.path.exists(path):
                     os.remove(path)   # media is temporary (Phase 2.5 rule)
             if n < len(queue):
-                _cool_down(sleep)
+                if engine == "local":
+                    _cool_down(sleep)
                 sleep(DOWNLOAD_DELAY + random.uniform(0, DOWNLOAD_DELAY / 2))
     finally:
         _clear_cache()   # jobs never reached stay "queued", which the UI shows as not started

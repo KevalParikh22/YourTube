@@ -648,17 +648,11 @@ class Handler(BaseHTTPRequestHandler):
                                "model_ok": bool(model) and local_visual.model_sees_images(base, model),
                                "videos": len(cands), "seconds": secs,
                                "minutes": round(local_visual.estimate_minutes(secs) + len(cands) * 15 / 60, 1)})
-        if url.path == "/api/asr/plan":
+        if url.path in ("/api/asr/plan", "/api/asr/estimate"):
             import local_asr
-            cands = storage.videos_needing_asr()
-            dev = local_asr.device() if local_asr.available() else "cpu"
-            audio = sum(v.get("duration_seconds") or 0 for v in cands)
-            return self._json({
-                "available": local_asr.available(), "device": dev,
-                "model": local_asr.choose_model(llm.load_settings(), dev)[0],
-                "videos": len(cands), "no_captions": sum(v["reason"] == "no_captions" for v in cands),
-                "wrong_script": sum(v["reason"] == "wrong_script" for v in cands),
-                "audio_s": audio, "minutes": round(local_asr.estimate_minutes(audio, dev) + len(cands) * 10 / 60, 1)})
+            ids = (qs.get("ids") or [""])[0].split(",") if "ids" in qs else None
+            ids = [i.strip() for i in ids if i.strip()] if ids else None
+            return self._json(local_asr.estimate(ids))
         if url.path == "/api/search":
             q = (qs.get("q") or [""])[0][:200]
             kinds = [k for k in (qs.get("kinds") or [""])[0].split(",") if k in storage.SEARCH_KINDS] or None
@@ -990,14 +984,28 @@ class Handler(BaseHTTPRequestHandler):
                 local_setup.use_model(model, tasks)
                 return self._json({"ok": True, "ai": llm.public_settings(llm.load_settings())})
 
+            if path in ("/api/asr/plan", "/api/asr/estimate"):
+                import local_asr
+                ids = body.get("ids")
+                if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
+                    return self._error("ids must be a list of video IDs")
+                return self._json(local_asr.estimate(ids))
+
             if path == "/api/asr":
                 import local_asr
                 ids = body.get("ids")
                 if ids is not None and (not isinstance(ids, list) or not all(isinstance(i, str) for i in ids)):
                     return self._error("ids must be a list of video IDs")
-                if not local_asr.available():
-                    return self._error("Local transcription needs faster-whisper and ffmpeg: run bash scripts/setup.sh --local-ai")
-                return self._queued(JOB.start("asr", _label("Transcribe locally", ids),
+                settings = llm.load_settings()
+                engine = llm.media_provider(settings, "transcribe")
+                if engine == "local":
+                    if not local_asr.available():
+                        return self._error("Local transcription needs faster-whisper and ffmpeg: run bash scripts/setup.sh --local-ai")
+                else:
+                    if shutil.which("ffmpeg") is None:
+                        return self._error("Transcription needs ffmpeg: run bash scripts/setup.sh")
+                label = _label("Transcribe locally" if engine == "local" else f"Transcribe with {llm.PROVIDERS[engine]['label']}", ids)
+                return self._queued(JOB.start("asr", label,
                                               lambda: local_asr.run_asr(ids, should_stop=JOB.stop_requested), key=ids))
 
             if path == "/api/ask":

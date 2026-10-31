@@ -135,7 +135,8 @@ def transcribe(path: str, provider: str, settings: Dict[str, Any],
     key = llm._api_key(provider, cfg)
     if not key:
         raise CloudASRError("Cloud transcription provider is not configured")
-    model = ("whisper-large-v3-turbo" if provider == "groq" else "whisper-1") if provider in ("groq", "openai") else (cfg.get("model") or "gemini-3.8-flash")
+    from local_asr import cloud_model
+    model = cloud_model(settings, provider)
     base = cfg.get("base_url") or llm.PROVIDERS[provider].get("base_url", "")
     url = (base.rstrip("/") + "/audio/transcriptions") if provider != "gemini" else (
         f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent")

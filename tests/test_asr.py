@@ -194,5 +194,102 @@ class RunAsrTest(unittest.TestCase):
         self.assertTrue(ok)
         self.assertEqual(calls[0][1], "mlx")
 
+    def test_cloud_transcription_groq(self):
+        import cloud_asr
+        import llm
+        from unittest import mock
+        settings = llm.load_settings()
+        settings["tasks"]["transcribe"] = "groq"
+        settings["providers"]["groq"]["api_key"] = "test-key"
+
+        fake_segments = [{"start": 0.0, "dur": 1.5, "text": "cloud speech"}]
+        fake_transcribe = mock.MagicMock(return_value=(fake_segments, "en"))
+        mock_unload = mock.MagicMock()
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                mock.patch.object(cloud_asr, "transcribe", fake_transcribe), \
+                mock.patch("local_asr.unload_ollama", mock_unload), \
+                mock.patch("local_asr.available", return_value=False), \
+                mock.patch("local_asr.shutil.which", return_value="/usr/bin/ffmpeg"):
+            ok = local_asr.run_asr(["a1", "a2"], download=self.fake_download, sleep=lambda s: None, settings=settings)
+
+        self.assertTrue(ok)
+        # Segments saved with model groq:...
+        segs = storage.get_segments("a1")
+        self.assertEqual(segs[0]["text"], "cloud speech")
+        details = storage.get_details("a1")
+        self.assertEqual(details["asr_model"], "groq:whisper-large-v3-turbo")
+        self.assertEqual(details["transcript"], "local-asr")
+
+        # No Ollama unload and no faster-whisper needed
+        mock_unload.assert_not_called()
+
+        # The opening line names the engine and cost
+        log = out.getvalue()
+        lines = [line.strip() for line in log.splitlines() if line.strip()]
+        self.assertTrue(lines[0].startswith("Groq whisper-large-v3-turbo"))
+        self.assertIn("about $", lines[0])
+        self.assertIn("Audio is uploaded to Groq, then deleted here.", lines[0])
+        self.assertEqual(fake_transcribe.call_count, 2)
+
+    def test_cloud_transcription_openai_and_gemini(self):
+        import cloud_asr
+        import llm
+        from unittest import mock
+        settings = llm.load_settings()
+        settings["tasks"]["transcribe"] = "openai"
+        settings["providers"]["openai"]["api_key"] = "test-key"
+
+        fake_transcribe = mock.MagicMock(return_value=([{"start": 0.0, "dur": 1.0, "text": "openai audio"}], "en"))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                mock.patch.object(cloud_asr, "transcribe", fake_transcribe), \
+                mock.patch("local_asr.available", return_value=False), \
+                mock.patch("local_asr.shutil.which", return_value="/usr/bin/ffmpeg"):
+            ok = local_asr.run_asr(["a1"], download=self.fake_download, sleep=lambda s: None, settings=settings)
+        self.assertTrue(ok)
+        self.assertEqual(storage.get_details("a1")["asr_model"], "openai:whisper-1")
+        self.assertTrue(out.getvalue().splitlines()[0].startswith("OpenAI whisper-1"))
+
+        # Gemini
+        settings["tasks"]["transcribe"] = "gemini"
+        settings["providers"]["gemini"]["api_key"] = "test-key"
+        settings["providers"]["gemini"]["model"] = "gemini-3.8-flash"
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), \
+                mock.patch.object(cloud_asr, "transcribe", fake_transcribe), \
+                mock.patch("local_asr.available", return_value=False), \
+                mock.patch("local_asr.shutil.which", return_value="/usr/bin/ffmpeg"):
+            ok = local_asr.run_asr(["a2"], download=self.fake_download, sleep=lambda s: None, settings=settings)
+        self.assertTrue(ok)
+        self.assertEqual(storage.get_details("a2")["asr_model"], "gemini:gemini-3.8-flash")
+        log = out.getvalue()
+        self.assertTrue(log.splitlines()[0].startswith("Gemini gemini-3.8-flash"))
+        self.assertIn("Timestamps from Gemini are approximate.", log)
+
+    def test_cloud_cost_estimates(self):
+        import llm
+        settings = llm.load_settings()
+        # Local is 0.0
+        self.assertEqual(local_asr.estimate_cost(settings, 3600 * 3.1), 0.0)
+
+        # Groq
+        settings["tasks"]["transcribe"] = "groq"
+        settings["providers"]["groq"]["api_key"] = "test-key"
+        self.assertEqual(local_asr.estimate_cost(settings, 3600 * 3.1), 0.12)
+
+        # OpenAI
+        settings["tasks"]["transcribe"] = "openai"
+        settings["providers"]["openai"]["api_key"] = "test-key"
+        self.assertEqual(local_asr.estimate_cost(settings, 3600 * 3.1), 1.12)
+
+        # Estimate dict
+        est = local_asr.estimate(video_ids=["a1"], settings=settings)
+        self.assertEqual(est["engine"], "openai")
+        self.assertEqual(est["device"], "cloud")
+        self.assertEqual(est["model"], "whisper-1")
+        self.assertIsNotNone(est["cost"])
+
 
 import unittest.mock  # noqa: E402  (used by RunAsrTest)
