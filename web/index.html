@@ -415,7 +415,7 @@
   .ask-fab svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .ask-pop { position: fixed; right: 20px; bottom: 88px; z-index: 39; width: 400px; height: 600px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; overflow: hidden; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 10px 36px #0003; }
   .ask-pop-head { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-  .ask-pop-head strong { font-size: 14px; white-space: nowrap; }
+  .ask-pop-head strong { font: 600 17px/1.2 var(--serif); white-space: nowrap; }
   .ask-pop-scope { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 11.5px; }
   .ask-pop-head .btn { height: 30px; padding: 0 8px; font-size: 12px; }
   .ask-pop-body { min-height: 0; flex: 1; overflow: auto; padding: 0 16px 16px; }
@@ -1135,6 +1135,7 @@ function viewSources() {
   <section>
     <div class="eyebrow">Playlists</div>
     <h1 class="display">${plural(pls.length, 'playlist')}<em>${plural(videos().length, 'video')} in your library</em></h1>
+    <p class="lede">Add playlists to your library and keep them in sync with YouTube.</p>
     <div class="policy">
       <div><b>Read-only ${tip('YourTube never adds, removes or reorders videos on YouTube.')}</b></div>
       <div><b>Multiple playlists ${tip('A video saved in two playlists appears once in your library and keeps one status.')}</b></div>
@@ -1478,7 +1479,7 @@ async function runResync(playlistId) {
 /* ---------------- categories ---------------- */
 function viewCategories() {
   if (!S.lib) return `<section><div class="eyebrow">Categories</div><h1 class="display">Choose a library<em>each library has its own categories</em></h1>
-    <p class="lede">Pick a library at the top of the page to edit its categories.</p>
+    <p class="lede">Choose a library to edit its categories.</p>
     <div class="chips" style="margin-top:16px">${S.data.libraries.map(l => `<button class="chip" data-act="lib-go" data-lib="${l.id}">${esc(l.name)}</button>`).join('')}</div></section>`;
   const counts = {};
   for (const v of videos()) counts[v.category] = (counts[v.category] || 0) + 1;
@@ -1611,6 +1612,7 @@ function viewSearch() {
   <section>
     <div class="eyebrow">Search</div>
     <h1 class="display">Find it again<em>Search your library</em></h1>
+    <p class="lede">Search titles, transcripts, chapters, summaries and notes across your library.</p>
     <label class="field-label" for="sq">Search ${tip('Search titles, chapters, transcripts, AI summaries and your notes. Use quotes for an exact phrase; words of 3+ letters match inside longer words.')}</label>
     <input type="search" id="sq" class="search-big" value="${esc(sr.q)}" placeholder="e.g. neo4j setup, &quot;plan mode&quot;, lora">
     <div class="chips" style="margin-top:14px">${SEARCH_KINDS.map(([k, l]) =>
@@ -1687,6 +1689,7 @@ function viewAsk() {
   <section>
     <div class="eyebrow">Ask</div>
     <h1 class="display">Ask your library<em>Get answers from your videos</em></h1>
+    <p class="lede">Ask a question and follow cited moments back to your videos.</p>
     ${follow ? `<div class="ask-filters"><button class="btn btn-sm" data-act="ask-new">+ New question</button>
         ${askScope(th[0].filters) ? `<span class="note faint">Within: ${esc(askScope(th[0].filters))}</span>` : ''}</div>` : `${box}
     <div class="ask-filters">
@@ -2235,7 +2238,17 @@ function viewAbout() {
 }
 const SETTINGS_PAGES = [['general', 'General'], ['about', 'About you'], ['routing', 'AI by task'], ['cloud', 'Cloud AI'], ['local', 'Local AI'], ['sync', 'Sync and details'], ['scoring', 'Scoring']];
 function settingsNav(cur) {
+  const descriptions = {
+    general: 'Choose how the dashboard looks and how watch times are shown.',
+    about: 'Set the learning interests used to rate videos and shape suggestions.',
+    routing: 'Choose which AI handles each task and whether it has a helper.',
+    cloud: 'Set up cloud AI providers for tasks that use online models.',
+    local: 'Check local models and tools available on this computer.',
+    sync: 'Choose what YourTube fetches when playlists are synced.',
+    scoring: 'Adjust how video ratings weigh depth, value, freshness and fit.'
+  };
   return `<div class="eyebrow">Settings</div><h1 class="display">Settings<em>${SETTINGS_PAGES.find(([k]) => k === cur)?.[1] || 'General'}</em></h1>
+    <p class="lede">${descriptions[cur] || descriptions.general}</p>
     <div class="settings-layout"><nav class="settings-side" aria-label="Settings sections">${SETTINGS_PAGES.map(([k, label]) => `<a class="${cur === k ? 'on' : ''}" href="#/settings/${k}"${cur === k ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav><div class="settings-content">`;
 }
 function settingsContent(section) {
