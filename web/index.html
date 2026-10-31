@@ -480,6 +480,9 @@
 
   /* ---------- responsive ---------- */
   @media (max-width: 760px) {
+    .route { grid-template-columns: 112px minmax(0, 1fr); gap: 8px; }
+    .route .hint[style*="grid-column:2"] { grid-column: 1 / -1 !important; }
+    .jobpanel { width: min(360px, calc(100vw - 24px)); }
     .settings-layout { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     .settings-side { position: static; display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
     .settings-side a { flex: 0 0 auto; border: 1px solid var(--line); }
@@ -1210,14 +1213,14 @@ function viewVisuals() {
   const suggested = videos().filter(v => v.visual?.hint && v.has_visuals == null && !isDone(v));
   return `<div class="asr-box">
     <h3>Slides and whiteboards</h3>
-    <p class="note">Reads what videos <b>show</b>: slides, code, terminals, diagrams and whiteboards, with the local vision model.
+    <p class="note">Reads what videos <b>show</b>: slides, code, terminals, diagrams and whiteboards.
       Only the video picture is downloaded (no audio), anonymously; it is deleted after reading, and small thumbnails are kept for a slide strip.
       Mark videos in their panel, switch on <b>Slides</b> for a category, or accept the suggestions below.</p>
     ${!P.available ? `<div class="banner"><span>Needs Pillow and ffmpeg: <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
-      : !P.model_ok ? `<div class="banner"><span>The vision model (${esc(P.model || 'none')}) isn't ready in Ollama or can't read images. <a href="#/settings/local">Choose one in Local AI settings</a>.</span></div>` : ''}
+      : P.engine === 'local' && !P.model_ok ? `<div class="banner"><span>The vision model (${esc(P.model || 'none')}) isn't ready in Ollama or can't read images. <a href="#/settings/local">Choose one in Local AI settings</a>.</span></div>` : ''}
     <div class="actions">
-      ${P.videos ? `<button class="btn btn-dark btn-sm" data-act="vis-run" data-job-btn ${!P.available || !P.model_ok ? 'disabled' : ''}>Read slides for ${plural(P.videos, 'video')}</button>
-        <span class="faint" style="font-size:12.5px">${fmt(P.seconds)} of video · about ${Math.max(1, Math.round(P.minutes))} min with ${esc(P.model)}</span>`
+      ${P.videos ? `<button class="btn btn-dark btn-sm" data-act="vis-run" data-job-btn ${!P.available || (P.engine === 'local' && !P.model_ok) ? 'disabled' : ''}>Read slides for ${plural(P.videos, 'video')}</button>
+        <span class="faint" style="font-size:12.5px">${fmt(P.seconds)} of video · about ${Math.max(1, Math.round(P.minutes))} min${P.engine !== 'local' && P.cost != null ? ` · about $${Number(P.cost).toFixed(4)} to ${esc(S.data.ai.providers[P.engine]?.label || P.engine)}` : ` with ${esc(P.model)}`}</span>${P.sends ? `<p class="hint">${esc(P.sends)}</p>` : ''}`
         : '<span class="faint" style="font-size:12.5px">No videos marked yet.</span>'}
     </div>
     ${suggested.length ? `<div class="actions" style="margin-top:10px"><button class="btn btn-sm" data-act="vis-mark-suggested" data-ids="${esc(suggested.map(v => v.video_id).join(','))}">Mark ${plural(suggested.length, 'suggested video')}</button>
@@ -1236,15 +1239,15 @@ function viewAsr() {
   if (P.error) return '';
   const where = P.device === 'cuda' ? 'on your GPU' : 'on the CPU';
   return `<div class="asr-box">
-    <h3>Local transcription</h3>
+    <h3>Transcription</h3>
     <p class="note">For videos with <b>no captions</b>, or captions in the <b>wrong script</b> (for example English speech written in Devanagari).
-      Whisper runs on this computer; only the original-language audio is downloaded, anonymously, and it is deleted right after.
+      ${P.engine === 'local' ? 'Whisper runs on this computer;' : `Audio is uploaded to ${esc(S.data.ai.providers[P.engine]?.label || P.engine)} for transcription;`} only the original-language audio is downloaded, anonymously, and it is deleted right after.
       Where captions exist, both are kept and you choose per video.</p>
-    ${!P.available ? `<div class="banner"><span>Needs faster-whisper. Install it with <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
+    ${P.engine === 'local' && !P.available ? `<div class="banner"><span>Needs faster-whisper. Install it with <code>bash scripts/setup.sh --local-ai</code>.</span></div>`
       : P.videos ? `<div class="actions">
-          <button class="btn btn-dark btn-sm" data-act="asr-run" data-job-btn>Transcribe ${plural(P.videos, 'video')} locally</button>
+          <button class="btn btn-dark btn-sm" data-act="asr-run" data-job-btn>Transcribe ${plural(P.videos, 'video')}</button>
           <span class="faint" style="font-size:12.5px">${P.no_captions} without captions · ${P.wrong_script} wrong script · ${fmt(P.audio_s)} of audio ·
-            about ${Math.max(1, Math.round(P.minutes))} min ${where} (${esc(P.model)})</span></div>`
+            about ${Math.max(1, Math.round(P.minutes))} min ${P.engine === 'local' ? `${where} (${esc(P.model)})` : `with ${esc(S.data.ai.providers[P.engine]?.label || P.engine)} · about $${Number(P.cost || 0).toFixed(4)}`}</span>${P.sends ? `<p class="hint">${esc(P.sends)}</p>` : ''}</div>`
       : '<p class="hint">Nothing to transcribe: every fetched video has usable captions. Fetch details for more videos first.</p>'}
   </div>`;
 }
@@ -1286,18 +1289,19 @@ function renderJobs() {
   const box = $('#jobs'), job = S.data?.job;
   if (!box || !job) return;
   const waiting = job.queue?.length || 0, last = job.recent?.[0];
+  const active = (job.lanes || []).filter(l => l.running);
   const stopping = !!job.stopping || S.stopPending;
   const flash = !job.running && last && S.flash?.id === last.id && Date.now() < S.flash.until;
   if (flash) setTimeout(renderJobs, S.flash.until - Date.now() + 50);
-  const pill = job.running
-    ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}" title="${esc(job.label || 'Working')}${waiting ? ` (+${waiting} waiting)` : ''}"><span class="spin"></span><span class="jl">${stopping ? 'Stopping…' : esc((job.label || 'Working').split(/[:\s]/)[0])}</span>${waiting ? `<b>+${waiting}<span class="jw"> waiting</span></b>` : ''}</button>`
+  const pill = active.length
+    ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}" title="${active.map(l => esc(l.label)).join(', ')}${waiting ? ` (+${waiting} waiting)` : ''}"><span class="spin"></span><span class="jl">${active.length} running</span>${waiting ? `<b>+${waiting}<span class="jw"> waiting</span></b>` : ''}</button>`
     : flash ? `<button class="jobpill ${last.ok && !last.stopped ? 'ok' : 'bad'}" data-act="jobs-toggle"><span class="jl">${last.stopped ? 'Stopped' : last.ok ? 'Finished' : 'Failed'}: ${esc(last.label)}</span></button>`
     : job.recent?.length ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks">Tasks</button>` : '';
   const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
       <span class="jl" title="${esc(t.label)}">${esc(t.label)}</span>${action}</div>`;
   const panel = S.jobsOpen ? `<div class="jobpanel" role="dialog" aria-label="Tasks">
-      ${job.running ? row(job, stopping ? 'stopping' : 'run', stopping ? '<button class="btn-text" disabled>Stopping…</button>' : '<button class="btn-text" data-act="job-stop">Stop</button>') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
-      ${(job.queue || []).map(t => row(t, 'wait', `<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button>`)).join('')}
+      ${active.length ? active.map(l => `<div><div class="faint" style="font-size:11.5px">${esc(({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[l.lane] || l.lane)}</div>${row(l, l.stopping ? 'stopping' : 'run', l.stopping ? '<button class="btn-text" disabled>Stopping…</button>' : `<button class="btn-text" data-act="job-stop-one" data-task="${l.id}">Stop</button>`)}<pre class="log">${esc(l.log || '')}</pre></div>`).join('') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
+      ${(job.queue || []).map(t => row({ ...t, label: `${({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[t.lane] || t.lane}: ${t.label}` }, 'wait', `<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button>`)).join('')}
       ${(job.recent || []).length ? `<div class="faint" style="font-size:11.5px;margin:10px 0 4px">Recent</div>` + job.recent.map(t => row(t, t.stopped ? 'stop' : t.ok ? 'ok' : 'bad',
         `<span class="faint" style="font-size:11.5px">${esc(fmtLocal(t.finished_at))}</span>`)).join('') : ''}
     </div>` : '';
@@ -2057,6 +2061,28 @@ function viewAI() {
       ${Object.entries(ai.task_labels).map(([t, label]) => `<div class="route"><span class="field-label" style="margin:0">${esc(label)}</span>${pick(t, ai.tasks[t] || '', true)}</div>`).join('')}
     </div>
     <p class="hint">AI choices ${tip('A smaller or local model often works well for categories. Ratings read whole transcripts, so a larger context window can help. Questions use the ratings choice unless you choose another model.')}</p>
+    <h3 class="h" style="margin-top:22px">Media</h3>
+    <p class="hint">Choose where media is processed. Cloud choices show an estimate before they start.</p>
+    ${Object.entries(ai.media_tasks || {}).map(([t, meta]) => {
+      const selected = meta.selected || 'local';
+      const label = selected === 'local' ? 'this computer' : ai.providers[selected]?.label || selected;
+      const sends = t === 'transcribe' ? (selected === 'local' ? 'Audio stays on this computer and is deleted after transcription.' : `Audio is uploaded to ${label} and deleted here afterwards.`)
+        : t === 'slides' ? (selected === 'local' ? 'Slide frames are read on this computer.' : `Slide frames are sent to ${label}.`)
+          : (selected === 'local' ? 'Indexed text stays on this computer.' : `All indexed text is sent to ${label}.`);
+      return `<div class="route"><label class="field-label" style="margin:0" for="media-${esc(t)}">${esc(meta.label)}</label><select id="media-${esc(t)}" data-media-task="${esc(t)}" style="width:100%">
+        ${meta.providers.map(k => { const p = ai.providers[k], ready = k === 'local' || p?.ready; return `<option value="${esc(k)}" ${selected === k ? 'selected' : ''} ${ready ? '' : 'disabled'}>${esc(k === 'local' ? 'This computer' : p?.label || k)}${ready ? '' : ' (not set up — add a key in Cloud AI)'}</option>`; }).join('')}
+      </select><p class="hint" style="grid-column:2;margin:0">${esc(sends)}</p></div>`;
+    }).join('')}
+    <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-media">Save media choices</button></div>
+    <h3 class="h" style="margin-top:24px">Helper AI (works at the same time)</h3>
+    <p class="hint">Shares big batches with your main AI so they finish sooner. Costs apply to the videos the cloud AI does.</p>
+    ${Object.entries(ai.helpers || {}).map(([t, value]) => {
+      const labels = ai.task_labels || {}, media = ai.media_tasks?.[t];
+      const main = media ? (media.selected || 'local') : (ai.tasks[t] || ai.provider);
+      const candidates = Object.entries(ai.providers).filter(([k, p]) => p.ready && ((main === 'local') !== !!p.local));
+      return `<div class="route"><label class="field-label" style="margin:0" for="helper-${esc(t)}">${esc(media?.label || labels[t] || t)}</label><select id="helper-${esc(t)}" data-helper-task="${esc(t)}" style="width:100%"><option value="none" ${!value ? 'selected' : ''}>None</option>${candidates.map(([k,p]) => `<option value="${esc(k)}" ${value === k ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>`;
+    }).join('')}
+    <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-helpers">Save helpers</button></div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
   </section>`;
   return { cloud, routing };
@@ -2288,6 +2314,18 @@ function aiRoutesBody() {
   const tasks = {};
   for (const sel of $$('[data-ai-route]')) if (sel.dataset.aiRoute !== 'provider') tasks[sel.dataset.aiRoute] = sel.value || null;
   return { provider: $('[data-ai-route="provider"]').value, tasks };
+}
+function mediaChoicesBody() {
+  return { tasks: Object.fromEntries($$('[data-media-task]').map(s => [s.dataset.mediaTask, s.value])) };
+}
+function helperChoicesBody() {
+  return { helpers: Object.fromEntries($$('[data-helper-task]').map(s => [s.dataset.helperTask, s.value === 'none' ? null : s.value])) };
+}
+const selectedMediaProvider = (ai, task) => ai.media_tasks?.[task]?.selected || 'local';
+async function confirmEstimate(path, title) {
+  const estimate = await api(path);
+  if (estimate.cost == null) return confirm(`${title}. ${estimate.sends || ''} Cost estimate unavailable. Continue?`);
+  return confirm(`${title}. Estimated cost: $${Number(estimate.cost).toFixed(4)}. ${estimate.sends || ''} Continue?`);
 }
 async function saveAi(body) {
   const r = await api('/api/ai/settings', body);
@@ -2677,6 +2715,8 @@ document.addEventListener('click', async e => {
       break;
     case 'vis-run': case 'vis-one': {
       try {
+        if (selectedMediaProvider(S.data.ai, 'slides') !== 'local' &&
+            !await confirmEstimate('/api/visuals/plan', 'Read slides using the selected cloud provider')) break;
         const res = await api('/api/visuals', act === 'vis-one' ? { ids: [id] } : {});
         S.busy = { visual: act === 'vis-one' ? [id] : videos().filter(v => v.has_visuals === 1 || S.data.visual_categories[v.category]).map(v => v.video_id) };
         await queued(res, 'Slide reading'); renderDrawer();
@@ -2691,6 +2731,8 @@ document.addEventListener('click', async e => {
     }
     case 'asr-run': case 'asr-one': {
       try {
+        if (selectedMediaProvider(S.data.ai, 'transcribe') !== 'local' &&
+            !await confirmEstimate('/api/asr/plan', 'Transcribe audio using the selected cloud provider')) break;
         const res = await api('/api/asr', act === 'asr-one' ? { ids: [id] } : {});
         S.busy = { asr: act === 'asr-one' ? [id] : videos().filter(v => v.details?.asr_reason).map(v => v.video_id) };
         await queued(res, 'Local transcription'); renderDrawer();
@@ -2739,6 +2781,10 @@ document.addEventListener('click', async e => {
     case 'lib-delete':
       if (!confirm(`Delete the library “${libName(+el.dataset.lib)}”? It has no playlists, so no videos are affected.`)) break;
       try { await api('/api/libraries', { action: 'delete', id: +el.dataset.lib }); if (S.lib === +el.dataset.lib) { S.lib = 1; store.set('ytkb.lib', 1); } await load(); toast('Library deleted'); }
+      catch (err) { toast(err.message, true); }
+      break;
+    case 'job-stop-one':
+      try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); }
       catch (err) { toast(err.message, true); }
       break;
     case 'job-stop':
@@ -2874,7 +2920,10 @@ document.addEventListener('click', async e => {
       break;
     case 'embed-run': case 'embed-rebuild':
       if (act === 'embed-rebuild' && !confirm('Rebuild the meaning index from scratch? Questions use keywords only until it finishes.')) break;
-      try { await queued(await api('/api/embed', { rebuild: act === 'embed-rebuild' }), act === 'embed-rebuild' ? 'Rebuild' : 'Index update'); }
+      try {
+        if (selectedMediaProvider(S.data.ai, 'embed') !== 'local' && !await confirmEstimate('/api/embed/estimate', 'Update the meaning index with the selected cloud provider')) break;
+        await queued(await api('/api/embed', { rebuild: act === 'embed-rebuild' }), act === 'embed-rebuild' ? 'Rebuild' : 'Index update');
+      }
       catch (err) { toast(err.message, true); }
       break;
     case 'local-use':
@@ -2929,6 +2978,20 @@ document.addEventListener('click', async e => {
       catch (err) { toast(err.message, true); }
       break;
     case 'ai-save-routes': try { await saveAi(aiRoutesBody()); refresh(); toast('Saved'); } catch (err) { toast(err.message, true); } break;
+    case 'ai-save-media': {
+      try {
+        const body = mediaChoicesBody(), provider = body.tasks.embed;
+        const previous = selectedMediaProvider(S.data.ai, 'embed');
+        await saveAi(body);
+        if (provider && provider !== previous) {
+          if (provider !== 'local' && !await confirmEstimate('/api/embed/estimate', 'Switch the meaning index provider')) { await saveAi({ tasks: { embed: previous } }); refresh(); break; }
+          const r = await api('/api/embed/switch', { provider });
+          S.data.ai = r.ai; if (r.job) await queued({ after: [], ...r.job }, 'Meaning index rebuild'); else { refresh(); toast('Saved. An index update is already running'); }
+        } else { refresh(); toast('Media choices saved'); }
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'ai-save-helpers': try { await saveAi(helperChoicesBody()); refresh(); toast('Helper choices saved'); } catch (err) { toast(err.message, true); } break;
     case 'ai-clear-key': try { await saveAi({ edit: el.dataset.p, config: { api_key: '__clear__' } }); refresh(); toast('Key removed'); } catch (err) { toast(err.message, true); } break;
     case 'ai-test': {
       const k = el.dataset.p, st = () => $('#ai-status');

@@ -241,6 +241,7 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
             "label": info["label"],
             "providers": list(info["providers"]),
             "uses": describe_media(settings, t),
+            "selected": media_provider(settings, t),
         }
         for t, info in MEDIA_TASKS.items()
     }
