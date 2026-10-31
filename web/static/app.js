@@ -572,6 +572,16 @@ function playAt(id, t) {
   openDrawer(id); if (t) seek(t);
 }
 
+// Sync tasks are labelled "Sync <url>" (dashboard /api/ingest)
+const isSyncOf = (j, p) => j?.kind === 'sync' && [`Sync ${p.original_url}`, `Sync ${p.id}`].includes(j.label || '') || (j?.kind === 'sync' && (j.label || '').includes(`list=${p.id}`));
+// Synced, and its latest sync didn't fail: then the button can say what a re-read does
+function isPlaylistSynced(p) {
+  const job = S.data?.job;
+  if (!p.updated_at) return false;
+  const last = (job?.recent || []).find(j => isSyncOf(j, p));
+  return !(last && !last.ok && !last.stopped);
+}
+
 /* ---------------- playlists ---------------- */
 function viewSources() {
   const g = S.ingest, job = S.data.job, pls = libPlaylists(), many = S.data.libraries.length > 1;
@@ -618,7 +628,15 @@ function viewSources() {
     <h2 class="h">Your playlists</h2>
     ${pls.length ? `<div class="tbl-wrap"><table class="tbl">
       <thead><tr><th>Playlist</th>${many ? '<th>Library</th>' : ''}<th class="r">Videos</th><th class="r">Watch time</th><th>Last synced</th><th></th></tr></thead>
-      <tbody>${pls.map(p => `<tr>
+      <tbody>${pls.map(p => {
+        const synced = isPlaylistSynced(p);
+        const syncBtn = isSingle(p.id)
+          ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>'
+          : synced
+          ? `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}" title="Reads the playlist again: adds new videos, flags removed ones. Nothing changes on YouTube.">Check for new videos</button>`
+          : `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}">Sync</button>`;
+        const syncCell = `<td class="muted"${p.updated_at ? ` title="${esc(fmtFullDate(p.updated_at))}"` : ''}>${p.updated_at ? esc(fmtRelTime(p.updated_at)) : '—'}</td>`;
+        return `<tr>
         <td><a href="#/" data-act="v-src" data-v="${esc(p.id)}" style="font-weight:500">${esc(p.title)}</a>
           ${p.access?.startsWith('browser:') ? `<div class="faint" style="font-size:12px">with your ${esc(p.access.slice(8).replace(/\b\w/g, c => c.toUpperCase()))} login</div>` : p.access === 'cookies' ? '<div class="faint" style="font-size:12px">with cookies.txt</div>' : ''}
           ${p.removed_videos ? `<div class="faint" style="font-size:12.5px">${p.removed_videos} removed on YouTube, kept in library</div>` : ''}</td>
@@ -626,11 +644,12 @@ function viewSources() {
           ${S.data.libraries.map(l => `<option value="${l.id}" ${p.library_id === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></td>` : ''}
         <td class="r">${p.active_videos || 0}</td>
         <td class="r">${fmt(p.duration_seconds)}</td>
-        <td class="muted">${esc(fmtDate(p.updated_at))}</td>
-        <td class="r" style="white-space:nowrap">${isSingle(p.id) ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>' : `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}">Sync</button>`}
+        ${syncCell}
+        <td class="r" style="white-space:nowrap">${syncBtn}
           ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}
           <button class="btn-text" data-act="pl-remove" data-id="${esc(p.id)}" data-job-btn aria-label="Remove ${esc(p.title)} from YourTube">Remove</button></td>
-      </tr>`).join('')}</tbody></table></div>` : `<p class="note">${S.lib && S.data.playlists.length ? `No playlists in ${esc(libName(S.lib))} yet. Add one above, or move one here from another library.` : 'No playlists yet. Add one above.'}</p>`}
+      </tr>`;
+      }).join('')}</tbody></table></div>` : `<p class="note">${S.lib && S.data.playlists.length ? `No playlists in ${esc(libName(S.lib))} yet. Add one above, or move one here from another library.` : 'No playlists yet. Add one above.'}</p>`}
   </section>
   ${viewLibraries()}`;
 }
@@ -783,6 +802,27 @@ function fmtDate(s) {
   if (!s) return '';
   const d = new Date(s.replace(' ', 'T') + 'Z');
   return isNaN(d) ? s : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+}
+function fmtFullDate(s) {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T') + (s.endsWith('Z') ? '' : 'Z'));
+  return isNaN(d) ? s : d.toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function fmtRelTime(s) {
+  if (!s) return '';
+  const d = new Date(s.replace(' ', 'T') + (s.endsWith('Z') ? '' : 'Z'));
+  if (isNaN(d)) return s;
+  const now = new Date();
+  const diffSec = Math.floor((now.getTime() - d.getTime()) / 1000);
+  if (diffSec < 60) return 'just now';
+  if (diffSec < 3600) return `${Math.max(1, Math.floor(diffSec / 60))} m ago`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)} h ago`;
+  if (diffSec < 86400 * 2) return 'yesterday';
+  if (diffSec < 86400 * 7) return `${Math.floor(diffSec / 86400)} d ago`;
+  const sameYear = d.getFullYear() === now.getFullYear();
+  return d.toLocaleDateString(undefined, sameYear
+    ? { day: 'numeric', month: 'short' }
+    : { day: 'numeric', month: 'short', year: 'numeric' });
 }
 // Job times are local ISO strings from the server, unlike SQLite's UTC timestamps
 const fmtLocal = s => { const d = new Date(s || ''); return isNaN(d) ? '' : d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }); };
