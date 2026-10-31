@@ -941,6 +941,11 @@ class Handler(BaseHTTPRequestHandler):
                 for name in names:
                     tax.pop(name, None)   # its videos keep the old name until their suggestions are accepted
                 save_taxonomy(tax, library=lib)
+                # older suggestions for these videos, or into the removed categories, would be skipped or point nowhere
+                stale = [v["video_id"] for v in storage.get_library()
+                         if v["category"] in names or (v.get("suggestion") or {}).get("category") in names]
+                if stale:
+                    storage.dismiss_suggestions(stale)
                 llm.set_library_settings(settings, lib, presets=presets, category_notes=notes)
                 llm.save_settings(settings)
                 queued = 0

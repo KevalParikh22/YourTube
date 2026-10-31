@@ -334,6 +334,7 @@ class DashboardTest(unittest.TestCase):
         before = load_taxonomy(library=1)
         save_taxonomy({**before, "Health & Fitness": ["gym"], "Fitness": ["workout"]}, library=1)
         storage.save_playlist(playlist("PL_SEP"), [video("sep1", "Leg day", category="Health & Fitness")])
+        storage.save_suggestions([{"video_id": "sep1", "category": "Health & Fitness", "confidence": 0.9}], include_locked=True)
         try:
             self.assertEqual(self.call("/api/categories/separate", {"names": ["Fitness"]})[0], 400)    # not combined
             code, r = self.call("/api/categories/separate", {"names": ["Health & Fitness"], "preview": True})
@@ -344,6 +345,7 @@ class DashboardTest(unittest.TestCase):
                  mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None: started.append(key) or {"id": 1, "position": 0}):
                 code, r = self.call("/api/categories/separate", {"names": ["Health & Fitness"]})
             self.assertEqual((r["queued"], started), (1, [["category:Health & Fitness", 1]]))   # its videos get suggestions
+            self.assertIsNone(next(v for v in storage.get_library() if v["video_id"] == "sep1")["suggestion"])   # the stale one went
             tax = load_taxonomy(library=1)
             self.assertEqual((code, "Health & Fitness" in tax, tax["Health"], tax["Fitness"]), (200, False, ["health"], ["workout"]))
             self.assertIn("Health", llm.load_settings()["presets"])
