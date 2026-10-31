@@ -135,6 +135,7 @@ def unload_ollama(base_url: str) -> List[str]:
 def download_audio(video_id: str, dest: str = CACHE) -> str:
     """Original-language audio track, smallest available, anonymously (no cookies). Returns the file path."""
     import yt_dlp
+    from extractor import YT_LOCK
     from enrich import _classify_error, _js_runtimes, _QuietLogger
     os.makedirs(dest, exist_ok=True)
     opts: Dict[str, Any] = {"format": AUDIO_FORMAT, "quiet": True, "no_warnings": True, "noprogress": True,
@@ -143,7 +144,7 @@ def download_audio(video_id: str, dest: str = CACHE) -> str:
     if runtimes:
         opts["js_runtimes"] = runtimes
     try:
-        with yt_dlp.YoutubeDL(opts) as y:
+        with YT_LOCK, yt_dlp.YoutubeDL(opts) as y:
             info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
             return y.prepare_filename(info)
     except yt_dlp.utils.DownloadError as e:
