@@ -398,6 +398,53 @@ class DashboardTest(unittest.TestCase):
         for bad in ("/download/settings.json", "/download/../llm.py", "/download/%2e%2e/yt_kb.db", "/download/"):
             self.assertEqual(self.raw(bad)[0], 404, bad)
 
+    def test_static_files(self):
+        # Allow-list contains only the approved assets with expected types
+        self.assertEqual(set(dashboard.STATIC.keys()),
+                         {"inter.woff2", "source-serif-4.woff2", "icon.svg", "OFL.txt"})
+        self.assertEqual(dashboard.STATIC["inter.woff2"][1], "font/woff2")
+        self.assertEqual(dashboard.STATIC["source-serif-4.woff2"][1], "font/woff2")
+        self.assertEqual(dashboard.STATIC["icon.svg"][1], "image/svg+xml")
+        self.assertEqual(dashboard.STATIC["OFL.txt"][1], "text/plain")
+
+        # icon.svg placeholder is served with content type and cache header
+        code, headers, body = self.raw("/static/icon.svg")
+        self.assertEqual(code, 200)
+        self.assertEqual(headers["Content-Type"], "image/svg+xml")
+        self.assertEqual(headers["Cache-Control"], "public, max-age=604800")
+        self.assertTrue(body.startswith(b"<svg"))
+
+        # Every allowed name serves with its type and cache headers when present
+        with tempfile.TemporaryDirectory() as tmp:
+            test_static = {}
+            for name, (_, ctype) in dashboard.STATIC.items():
+                p = os.path.join(tmp, name)
+                with open(p, "wb") as f:
+                    f.write(f"content-{name}".encode())
+                test_static[name] = (p, ctype)
+            with mock.patch.dict(dashboard.STATIC, test_static):
+                for name, (_, ctype) in dashboard.STATIC.items():
+                    code, headers, body = self.raw(f"/static/{name}")
+                    self.assertEqual(code, 200, name)
+                    self.assertEqual(headers["Content-Type"], ctype, name)
+                    self.assertEqual(headers["Cache-Control"], "public, max-age=604800", name)
+                    self.assertEqual(body, f"content-{name}".encode(), name)
+
+        # Traversal and unknown names give 404
+        for bad in ("/static/../settings.json", "/static/x", "/static/%2e%2e/settings.json",
+                    "/static/%2e%2e%2fsettings.json", "/static/", "/static/unknown.woff2",
+                    "/static/../web/index.html"):
+            self.assertEqual(self.raw(bad)[0], 404, bad)
+
+    def test_favicon_redirect(self):
+        import http.client
+        conn = http.client.HTTPConnection(self.base.split("//")[1])
+        conn.request("GET", "/favicon.ico")
+        r = conn.getresponse()
+        self.assertEqual(r.status, 302)
+        self.assertEqual(r.getheader("Location"), "/static/icon.svg")
+        conn.close()
+
 
     def test_markdown_export(self):
         code, headers, body = self.raw("/api/export/markdown?id=a")
@@ -526,6 +573,24 @@ class AccessTokenTest(unittest.TestCase):
         self.assertEqual(dashboard.load_token(), first)
         self.assertGreaterEqual(len(first), 30)
         self.assertNotIn(first, json.dumps(llm.public_settings(llm.load_settings())))
+
+    def test_static_requires_token(self):
+        status, _, _, _ = self.get("/static/icon.svg")
+        self.assertEqual(status, 401)
+        status, _, _, _ = self.get("/static/inter.woff2")
+        self.assertEqual(status, 401)
+        status, _, _, _ = self.get("/static/../settings.json")
+        self.assertEqual(status, 401)
+        status, _, _, body = self.get("/static/icon.svg", cookie=f"{dashboard.TOKEN_COOKIE}={dashboard.TOKEN}")
+        self.assertEqual(status, 200)
+        self.assertTrue(body.startswith(b"<svg"))
+        status, _, _, _ = self.get("/static/../settings.json", cookie=f"{dashboard.TOKEN_COOKIE}={dashboard.TOKEN}")
+        self.assertEqual(status, 404)
+
+    def test_favicon_exempt_from_token(self):
+        status, _, location, _ = self.get("/favicon.ico")
+        self.assertEqual(status, 302)
+        self.assertEqual(location, "/static/icon.svg")
 
 
 class ServiceAndStartupTest(unittest.TestCase):

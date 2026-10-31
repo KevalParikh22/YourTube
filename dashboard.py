@@ -43,6 +43,14 @@ DOWNLOADS = {
     "SETUP.md": (os.path.join(ROOT_DIR, "docs", "SETUP.md"), "text/markdown; charset=utf-8"),
     "yourtube.log": (applog.LOG_FILE, "text/plain; charset=utf-8"),
 }
+STATIC_DIR = os.path.join(WEB_DIR, "static")
+# The only static assets /static/ serves (name -> path, content type)
+STATIC = {
+    "inter.woff2": (os.path.join(STATIC_DIR, "inter.woff2"), "font/woff2"),
+    "source-serif-4.woff2": (os.path.join(STATIC_DIR, "source-serif-4.woff2"), "font/woff2"),
+    "icon.svg": (os.path.join(STATIC_DIR, "icon.svg"), "image/svg+xml"),
+    "OFL.txt": (os.path.join(STATIC_DIR, "OFL.txt"), "text/plain"),
+}
 FRAMES_DIR = os.path.join(os.environ.get("YTKB_DATA_DIR") or ROOT_DIR, "frames")
 _FRAME_PATH = re.compile(r"^/frames/([\w-]{1,32})/(\d{1,6})\.jpg$")   # only frames/<video id>/<second>.jpg
 ALLOWED_BROWSERS = {"auto", "chrome", "edge", "firefox", "brave", "opera", "vivaldi", "chromium", "safari"}
@@ -458,8 +466,11 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
+        cache = (extra_headers or {}).get("Cache-Control", "no-store")
+        self.send_header("Cache-Control", cache)
         for k, v in (extra_headers or {}).items():
+            if k == "Cache-Control":
+                continue
             self.send_header(k, v)
         self.end_headers()
         self._headers_sent = True
@@ -526,6 +537,9 @@ class Handler(BaseHTTPRequestHandler):
         qs = parse_qs(url.query)
         playlist = (qs.get("playlist") or ["all"])[0]
 
+        if url.path == "/favicon.ico":
+            return self._send(302, b"", "text/plain", extra_headers={"Location": "/static/icon.svg"})
+
         if TOKEN is not None and url.path in ("/", "/index.html") and "t" in qs:
             if not _same(qs["t"][0], TOKEN):
                 return self._send(200, self._token_help(), "text/html; charset=utf-8")
@@ -540,6 +554,16 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/", "/index.html"):
             with open(os.path.join(WEB_DIR, "index.html"), "rb") as f:
                 return self._send(200, f.read(), "text/html; charset=utf-8")
+        if url.path.startswith("/static/"):
+            name = url.path[len("/static/"):]
+            if name not in STATIC:
+                return self._error("Not found", 404)
+            path, ctype = STATIC[name]
+            if not os.path.isfile(path):
+                return self._error("Not found", 404)
+            with open(path, "rb") as f:
+                data = f.read()
+            return self._send(200, data, ctype, extra_headers={"Cache-Control": "public, max-age=604800"})
         m = _FRAME_PATH.match(url.path)
         if m:
             path = os.path.join(FRAMES_DIR, m.group(1), m.group(2) + ".jpg")
@@ -1043,6 +1067,21 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(ask_id, int) or isinstance(ask_id, bool):
                     return self._error("id must be a number")
                 return self._json({"ok": True, "deleted": storage.delete_ask(ask_id)})
+
+            if path == "/api/tools/length":
+                import tools
+                raw_links = body.get("links")
+                if not isinstance(raw_links, list):
+                    return self._error("links must be a list")
+                cleaned = [l.strip() for l in raw_links if isinstance(l, str) and l.strip()]
+                if not cleaned:
+                    return self._error("No valid links provided")
+                if len(raw_links) > 10 or len(cleaned) > 10:
+                    return self._error("At most 10 links allowed")
+                browser = body.get("browser") or None
+                if browser is not None and (not isinstance(browser, str) or browser not in ALLOWED_BROWSERS):
+                    return self._error("Unknown browser")
+                return self._json({"items": tools.read_links(cleaned, browser=browser)})
 
             if path == "/api/embed":
                 import embedder

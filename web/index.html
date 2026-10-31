@@ -4,39 +4,43 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>YourTube</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23b5522b'/%3E%3Cpath d='M14 10v20l16-10z' fill='white'/%3E%3Cpath d='m7 21 3 3 5-6' fill='none' stroke='white' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="/static/icon.svg">
 <style>
+  /* Bundled (web/static, SIL OFL): the app works offline and asks no other host for fonts */
+  @font-face { font-family: "Inter"; src: url("/static/inter.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
+  @font-face { font-family: "Source Serif 4"; src: url("/static/source-serif-4.woff2") format("woff2"); font-weight: 200 900; font-display: swap; }
   :root {
-    --bg: #faf9f7;
-    --raised: #ffffff;
-    --sunken: #f2f0ec;
-    --line: #e7e4df;
-    --line-strong: #d6d2cb;
-    --ink: #1d1c1a;
-    --ink-2: #57534d;
-    --ink-3: #706b64;
-    --accent: #b5522b;
+    --bg: #f5f2ea;
+    --raised: #fffdf8;
+    --sunken: #ece8de;
+    --line: #e3ddd0;
+    --line-strong: #cfc7b6;
+    --ink: #1e2228;
+    --ink-2: #4f5560;
+    --ink-3: #5d636e;
+    --accent: #2e4a7d;
     --accent-ink: #ffffff;
     --done: #3f7a54;
     --watch: #2f7a4b; --watch-bg: #e3f1e7;
-    --skim: #9a6a0c; --skim-bg: #f8edd3;
-    --skip: #7d776f; --skip-bg: #eeebe6;
+    --skim: #8a5f0a; --skim-bg: #f8edd3;
+    --skip: #6c675f; --skip-bg: #eeebe6;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
     --sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     color-scheme: light;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #151413; --raised: #1c1b19; --sunken: #242220; --line: #2b2926; --line-strong: #3a3733;
-      --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #aaa49b;
-      --accent: #e0805a; --accent-ink: #1a1009; --done: #7fbf93;
+      --bg: #14161a; --raised: #1b1e23; --sunken: #22262c; --line: #2a2e35; --line-strong: #3a3f48;
+      --ink: #e8e6e1; --ink-2: #b4b2ac; --ink-3: #9a9892;
+      --accent: #9db4e0; --accent-ink: #10182a; --done: #7fbf93;
       --watch: #86cf9d; --watch-bg: #1d3325; --skim: #e7bd62; --skim-bg: #392d14; --skip: #a39d94; --skip-bg: #2a2825;
       color-scheme: dark;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #151413; --raised: #1c1b19; --sunken: #242220; --line: #2b2926; --line-strong: #3a3733;
-    --ink: #ece9e4; --ink-2: #b3ada4; --ink-3: #aaa49b;
-    --accent: #e0805a; --accent-ink: #1a1009; --done: #7fbf93;
+    --bg: #14161a; --raised: #1b1e23; --sunken: #22262c; --line: #2a2e35; --line-strong: #3a3f48;
+    --ink: #e8e6e1; --ink-2: #b4b2ac; --ink-3: #9a9892;
+    --accent: #9db4e0; --accent-ink: #10182a; --done: #7fbf93;
     --watch: #86cf9d; --watch-bg: #1d3325; --skim: #e7bd62; --skim-bg: #392d14; --skip: #a39d94; --skip-bg: #2a2825;
     color-scheme: dark;
   }
@@ -45,7 +49,7 @@
   html, body { margin: 0; }
   body {
     background: var(--bg); color: var(--ink);
-    font: 14px/1.5 var(--sans); font-feature-settings: "cv11", "ss01";
+    font: 14.5px/1.55 var(--sans); font-feature-settings: "cv11", "ss01";
     -webkit-font-smoothing: antialiased;
   }
   a { color: inherit; }
@@ -62,14 +66,18 @@
     backdrop-filter: blur(10px); border-bottom: 1px solid var(--line);
   }
   .bar-in { max-width: 1160px; margin: 0 auto; padding: 0 32px; height: 56px; display: flex; align-items: center; gap: 28px; }
-  .logo { font-size: 17px; font-weight: 700; letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
+  .logo { display: inline-flex; align-items: center; gap: 9px; font: 600 19px/1 var(--serif); letter-spacing: -.01em; text-decoration: none; white-space: nowrap; }
+  .logo svg { width: 26px; height: 26px; flex: 0 0 26px; }
+  .logo .mark-bg { fill: var(--accent); } .logo .mark-fg { fill: var(--bg); }
+  .logo b { font-weight: inherit; color: var(--accent); }
   .tabs { display: flex; gap: 22px; height: 100%; min-width: 0; flex: 0 0 auto; }   /* the task pill shrinks, the menu never does */
   .tabs a {
     display: flex; align-items: center; height: 100%; text-decoration: none; color: var(--ink-3); font-weight: 500;
     border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap;
   }
   .tabs a:hover { color: var(--ink); }
-  .tabs a.on { color: var(--ink); border-bottom-color: var(--ink); }
+  .tabs::after { content: ""; flex: 0 0 12px; }   /* the last tab clears the phone fade */
+  .tabs a.on { color: var(--ink); border-bottom-color: var(--accent); }
   .bar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
   #jobs { min-width: 0; display: flex; }
   .bar-icon { width: 36px; height: 36px; flex: 0 0 36px; display: inline-flex; align-items: center; justify-content: center; padding: 0; }
@@ -104,8 +112,8 @@
   }
   .btn:hover { border-color: var(--ink-3); }
   .btn:disabled { opacity: .5; cursor: default; }
-  .btn-dark { background: var(--ink); border-color: var(--ink); color: var(--bg); }
-  .btn-dark:hover { border-color: var(--ink); opacity: .9; }
+  .btn-dark { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .btn-dark:hover { border-color: var(--accent); opacity: .9; }
   .btn-text { border: 0; background: none; padding: 0 6px; height: 28px; color: var(--ink-2); cursor: pointer; font-size: 13px; text-decoration: none; display: inline-flex; align-items: center; }
   .btn-text:hover { color: var(--ink); text-decoration: underline; text-underline-offset: 3px; }
   .btn-sm { height: 28px; padding: 0 10px; font-size: 12.5px; }
@@ -116,8 +124,8 @@
   /* ---------- page ---------- */
   .page { max-width: 1160px; margin: 0 auto; padding: 40px 32px 96px; }
   .eyebrow { font-size: 12.5px; color: var(--ink-3); font-weight: 500; letter-spacing: .02em; }
-  .display { font-weight: 600; font-size: 32px; line-height: 1.1; letter-spacing: -.02em; margin: 6px 0 8px; }
-  .display em { font-style: normal; color: var(--ink-3); font-size: 22px; letter-spacing: 0; margin-left: 8px; }
+  .display { font: 600 34px/1.12 var(--serif); letter-spacing: -.015em; margin: 6px 0 8px; }
+  .display em { font: 400 19px var(--sans); color: var(--ink-3); letter-spacing: 0; margin-left: 10px; }
   .lede { margin: 0; color: var(--ink-2); font-size: 15px; }
   .progress { height: 3px; background: var(--line); border-radius: 2px; margin-top: 22px; overflow: hidden; display: flex; }
   .progress i { display: block; background: var(--done); }
@@ -133,7 +141,7 @@
   /* ---------- library ---------- */
   .lib { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px; margin-top: 40px; align-items: start; }
   .rail { position: sticky; top: 80px; max-height: calc(100vh - 96px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; display: flex; flex-direction: column; gap: 28px; }
-  .rail h4 { margin: 0 0 6px; font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); }
+  .rail h4 { margin: 0 0 6px; font-size: 12.5px; font-weight: 500; letter-spacing: .02em; color: var(--ink-3); }
   .rail a {
     display: flex; align-items: baseline; gap: 8px; padding: 4px 8px; margin: 0 -8px; border-radius: 5px;
     text-decoration: none; color: var(--ink-2);
@@ -202,6 +210,11 @@
   .empty { padding: 56px 0; text-align: center; color: var(--ink-2); }
   .empty h2 { font-weight: 600; font-size: 20px; color: var(--ink); margin: 0 0 6px; }
   .empty .btn { margin-top: 18px; }
+  .home-card { padding: 20px 22px; border: 1px solid var(--line); border-radius: 12px; background: var(--raised); }
+  .home-card + .home-card { margin-top: 16px; }
+  .knowledge-page { max-width: 68ch; margin: 28px auto 0; font: 16px/1.65 var(--serif); }
+  .knowledge-page .h { font-family: var(--serif); font-size: 19px !important; }
+  .knowledge-page ul { font: inherit; }
 
   /* ---------- tables ---------- */
   .tbl { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; margin-top: 16px; }
@@ -229,6 +242,9 @@
     background: var(--sunken); border-radius: 6px; padding: 12px 14px; max-height: 300px; overflow: auto; margin: 10px 0 0;
     font: 12px/1.55 ui-monospace, "Cascadia Code", Consolas, monospace; white-space: pre-wrap; color: var(--ink-2);
   }
+  .log-wrap { position: relative; margin-top: 10px; }
+  .log-wrap .log { margin: 0; }
+  .log-latest { position: absolute; right: 12px; bottom: 12px; z-index: 2; box-shadow: 0 2px 8px rgba(0, 0, 0, .15); }
   .status-line { font-size: 13px; color: var(--ink-2); display: inline-flex; align-items: center; gap: 8px; }
   .spin { width: 12px; height: 12px; border: 1.5px solid var(--line-strong); border-top-color: var(--ink); border-radius: 50%; animation: spin .8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -400,7 +416,7 @@
   .ask-fab svg { width: 26px; height: 26px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
   .ask-pop { position: fixed; right: 20px; bottom: 88px; z-index: 39; width: 400px; height: 600px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; overflow: hidden; background: var(--raised); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 10px 36px #0003; }
   .ask-pop-head { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 8px 10px; border-bottom: 1px solid var(--line); }
-  .ask-pop-head strong { font-size: 14px; white-space: nowrap; }
+  .ask-pop-head strong { font: 600 17px/1.2 var(--serif); white-space: nowrap; }
   .ask-pop-scope { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 11.5px; }
   .ask-pop-head .btn { height: 30px; padding: 0 8px; font-size: 12px; }
   .ask-pop-body { min-height: 0; flex: 1; overflow: auto; padding: 0 16px 16px; }
@@ -461,7 +477,7 @@
   .drawer-body { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 22px; }
   .embed { position: relative; aspect-ratio: 16 / 9; background: #000; border-radius: 6px; overflow: hidden; }
   .embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-  .drawer h3 { font-weight: 600; font-size: 19px; line-height: 1.25; margin: 0; }
+  .drawer h3 { font: 600 24px/1.2 var(--serif); letter-spacing: -.01em; margin: 0; overflow-wrap: anywhere; }
   .drawer .by { color: var(--ink-2); margin-top: 6px; font-size: 13.5px; }
   .speeds { display: flex; gap: 18px; font-size: 13px; color: var(--ink-3); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
   .speeds b { color: var(--ink); font-weight: 500; }
@@ -491,8 +507,8 @@
     .s-row { grid-template-columns: 96px minmax(0, 1fr); gap: 12px; }
     .hit { grid-template-columns: minmax(0, 1fr); gap: 0; }
     .bar-in { padding: 0 16px; gap: 8px; }
-    .logo { display: none; }
-    .tabs { flex: 1 1 auto; gap: 14px; overflow-x: auto; scrollbar-width: none; }
+    .logo span { display: none; }
+    .tabs { flex: 1 1 auto; gap: 14px; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
     .bar-right { flex: 0 0 auto; }   /* here the menu scrolls instead */
     .tabs a { font-size: 13.5px; }
   }
@@ -519,13 +535,18 @@
   }
   @media (max-width: 640px) {
     .bar-in { padding: 0 16px; gap: 8px; }
-    .logo { display: none; }
-    .tabs { flex: 1 1 auto; gap: 16px; overflow-x: auto; scrollbar-width: none; }
+    .logo span { display: none; }
+    .bar-in { flex-wrap: wrap; height: auto; padding-top: 8px; row-gap: 0; }   /* phone: the menu gets its own row */
+    .tabs { order: 3; flex: 0 0 100%; height: 40px; gap: 18px; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
     .bar-right { gap: 2px; }
+    .home-card { padding: 0; border: 0; background: none; }   /* phone: rows need the full width */
     .page { padding: 28px 16px 72px; }
-    .display { font-size: 32px; }
+    .display { font-size: 30px; }
     .display em { display: block; margin: 4px 0 0; font-size: 18px; }
-    .row { grid-template-columns: 26px 72px minmax(0, 1fr) auto; gap: 10px; }
+    .row { grid-template-columns: 26px 72px minmax(0, 1fr); gap: 4px 10px; }
+    .row-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+    .row-time { grid-column: 3; text-align: left; font-size: 12.5px; }
+    .row-time small { display: inline; margin-left: 6px; }
     .row .pick { display: none; }
   }
 </style>
@@ -534,11 +555,12 @@
 <a class="skip-link" href="#view">Skip to content</a>
 <header class="bar">
   <div class="bar-in">
-    <a class="logo" href="#/home">YourTube</a>
+    <a class="logo" href="#/home" aria-label="YourTube home"><svg viewBox="0 0 40 40" aria-hidden="true"><rect class="mark-bg" width="40" height="40" rx="10"/><path class="mark-fg" d="M12 0h16v31l-8-6-8 6z"/><path class="mark-bg" d="M17 9v10l8-5z"/></svg><span>Your<b>Tube</b></span></a>
     <span id="libpick"></span>
     <nav class="tabs" id="tabs"></nav>
     <div class="bar-right">
       <span id="jobs"></span>
+      <button class="btn icon-btn bar-icon" id="theme-btn" data-act="theme-toggle"></button>
       <a class="btn icon-btn bar-icon" id="gsearch-btn" href="#/search" aria-label="Search (/)" title="Search  /"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.5"></circle><path d="m16 16 4.2 4.2"></path></svg></a>
       <a class="btn icon-btn bar-icon" id="settings-btn" href="#/settings" aria-label="Settings" title="Settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"></path><path d="M19 12a7 7 0 0 1-.2 1.6l1.2.9-1.1 1.9-1.4-.5a7.8 7.8 0 0 1-1.4.8l-.2 1.5h-2.2l-.3-1.5a7.8 7.8 0 0 1-1.6 0L11 18l-2-1.1.5-1.4a7.8 7.8 0 0 1-1-1.3L7 14.3l-.5-2.1 1.4-.7a7.8 7.8 0 0 1 .1-1.6l-1.2-.9 1.1-1.9 1.4.5a7.8 7.8 0 0 1 1.4-.8l.2-1.5h2.2l.3 1.5a7.8 7.8 0 0 1 1.6 0l.8-1.3 2 1.1-.5 1.4a7.8 7.8 0 0 1 1 1.3l1.5-.1.5 2.1-1.4.7"></path></svg></a>
       <a class="btn icon-btn bar-icon" id="help-btn" href="#/help" aria-label="Help" title="Help"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.6 9a2.5 2.5 0 1 1 4.6 1.3c-.8 1.1-2.2 1.4-2.2 3"></path><path d="M12 17h.01"></path></svg></a>
@@ -559,8 +581,8 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories']];
-const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
+const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories'], ['tools', 'Tools']];
+const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then T', 'Tools'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
 const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
@@ -605,6 +627,7 @@ const S = {
   logs: null,
   addingCat: false,
   about: { look: '', error: '', suggestion: '', recording: false, seconds: 0 },
+  tools: { links: '', browser: false, items: [], busy: false, ranges: {}, mins: +store.get('ytkb.tools.mins') || 60, days: +store.get('ytkb.tools.days') || 5, speed: +store.get('ytkb.tools.speed') || 1 },
 };
 
 /* ---------------- helpers ---------------- */
@@ -621,6 +644,12 @@ function fmt(sec) {
   if (h) return `${h}h ${m}m`;
   if (m) return `${m}m`;
   return sec ? `${s}s` : '0m';
+}
+function studyFinish(studyDays, daysWeek) {
+  if (!studyDays) return 'Done';
+  const d = new Date();
+  d.setDate(d.getDate() + Math.ceil((studyDays / Math.min(7, Math.max(1, daysWeek))) * 7));
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
 }
 // "skipped" means decided not to watch: done for remaining time, like "completed" (mirrors metrics.py)
 const isDone = v => v.status === 'completed' || v.status === 'skipped';
@@ -717,8 +746,9 @@ const clock = sec => { sec = Math.floor(sec || 0); const h = Math.floor(sec / 36
 /* ---------------- routing & load ---------------- */
 const route = () => (location.hash.replace(/^#\/?/, '').split('?')[0] || '');
 const routeParam = name => new URLSearchParams(location.hash.split('?')[1] || '').get(name);
-async function load() {
+async function load({ keepEdits = false } = {}) {
   if (!location.hash || location.hash === '#') location.replace('#/home');
+  const dirty = keepEdits && unsavedCategoryEdits();
   try {
     S.data = await api(`/api/state?library=${S.lib}`);
     if (S.data.library !== S.lib) { S.lib = S.data.library; store.set('ytkb.lib', S.lib); }   // e.g. a deleted library
@@ -729,6 +759,7 @@ async function load() {
   if (S.view.src && !S.data.playlists.some(p => p.id === S.view.src)) S.view.src = '';
   const ids = new Set(videos().map(v => v.video_id));
   for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
+  if (dirty) { updateJob(); renderJobs(); toast('Updated in the background. Your unsaved category edits are kept; save to see the update.'); return; }
   render();
   if (S.data.job.running || S.data.job.queue?.length) pollJob();
 }
@@ -747,6 +778,7 @@ function renderBar() {
     ? `<select data-change="lib" aria-label="Library" class="libsel">${S.data.libraries.map(l => `<option value="${l.id}" ${S.lib === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         <option value="0" ${S.lib === 0 ? 'selected' : ''}>All libraries</option></select>` : '';
   $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}"${tab === k ? ' aria-current="page"' : ''}>${l}</a>`).join('');
+  { const on = $('#tabs a.on'), nav = $('#tabs'); if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - nav.offsetLeft - 8; }   // phone: the menu scrolls, keep this page's tab in view
   $('#gsearch-btn').classList.toggle('on', r === 'search');
   $('#settings-btn').classList.toggle('on', tab === 'settings');
   $('#help-btn').classList.toggle('on', r === 'help');
@@ -754,7 +786,17 @@ function renderBar() {
     if (on) $(btn).setAttribute('aria-current', 'page'); else $(btn).removeAttribute('aria-current');
   }
 }
-function applyTheme() { if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme; }
+const darkNow = () => S.theme === 'dark' || (S.theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
+function applyTheme() {
+  if (S.theme === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = S.theme;
+  const b = $('#theme-btn'), dark = darkNow();
+  if (b) {
+    b.innerHTML = dark ? '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>'
+      : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></svg>';
+    b.title = dark ? 'Switch to light mode' : 'Switch to dark mode'; b.setAttribute('aria-label', b.title);
+  }
+}
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 function renderView() {
   const r = route(), v = $('#view');
   if (r === 'plan') { location.replace('#/home'); return; }
@@ -766,6 +808,7 @@ function renderView() {
     if (!S.knowledge.list && !S.knowledge.loadingList) loadKnowledgeList();
   }
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
+  else if (r === 'tools') { v.innerHTML = viewTools(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
   else if (r === 'settings' || r.startsWith('settings/')) {
     const section = r.split('/')[1] || 'general';
@@ -804,7 +847,7 @@ function renderView() {
   }
   else { v.innerHTML = videos().length ? viewLibrary() : emptyState(); renderList(); }
 }
-const emptyState = () => `<div class="empty"><h2>Your library is empty</h2>Add a YouTube playlist to get started. YourTube only reads it and never changes it.<br><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
+const emptyState = () => `<div class="empty"><h2>Your library is empty</h2><p>Add a playlist to start building your study library.</p><a class="btn btn-dark" href="#/sources">Add a playlist</a></div>`;
 
 /* ---------------- library ---------------- */
 function statusFilter(v, status, src) {
@@ -978,10 +1021,7 @@ function selBar() {
 function viewHome() {
   const p = S.plan, perDay = Math.max(5, p.mins) * 60, days = Math.min(7, Math.max(1, p.days));
   const finish = studyDays => {
-    if (!studyDays) return 'Done';
-    const d = new Date();
-    d.setDate(d.getDate() + Math.ceil((studyDays / days) * 7));
-    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    return studyFinish(studyDays, days);
   };
   const all = stats(videos()), allDays = Math.ceil(all.rem / S.speed / perDay);
   const session = buildSession(), used = session.picked.reduce((a, v) => a + v.duration_seconds / S.speed, 0);
@@ -1006,7 +1046,7 @@ function viewHome() {
     </div>
   </section>
 
-  <section class="section">
+  <section class="section home-card">
     <h2 class="h">Today's session</h2>
     <div class="form-row" style="margin-top:12px">
       <label class="field">Minutes<input type="number" min="5" step="5" value="${S.session.mins}" data-change="s-mins" aria-label="Session minutes"></label>
@@ -1018,17 +1058,17 @@ function viewHome() {
         : `<p class="note" style="margin-top:12px">${session.pool ? 'No single video fits. Try more minutes or a faster speed.' : 'Nothing left to watch here.'}</p>`}</div>
   </section>
 
-  <section class="section"><h2 class="h">Continue watching</h2>
+  <section class="section home-card"><h2 class="h">Continue watching</h2>
     ${inProgress.length ? `<ul class="rows">${inProgress.map(row).join('')}</ul>` : '<p class="note">Nothing in progress.</p>'}
   </section>
 
-  <section class="section"><h2 class="h">Top picks</h2>
+  <section class="section home-card"><h2 class="h">Top picks</h2>
     ${!rated.length ? `<p class="note">Rate your videos to get picks. <button class="btn-text" data-act="rate-batch">Rate videos</button></p>`
       : picks.length ? `<ul class="rows">${picks.map(row).join('')}</ul><a class="btn-text" href="#/" data-act="home-picks">See all →</a>`
         : '<p class="note">No unwatched Watch picks yet.</p>'}
   </section>
 
-  <section class="section"><h2 class="h">Needs you</h2>
+  <section class="section home-card"><h2 class="h">Needs you</h2>
     ${suggestions || unrated || failedSync || knowledgeStale || videos().some(v => v.category === FALLBACK()) ? `<ul class="rows" style="margin-top:10px">
       ${suggestions ? `<li><a href="#/" data-act="v-status" data-v="suggested">${plural(suggestions, 'AI suggestion')} to review →</a></li>` : ''}
       ${unrated ? `<li><button class="btn-text" data-act="rate-batch">${plural(unrated, 'video')} not rated yet · Rate</button></li>` : ''}
@@ -1038,7 +1078,7 @@ function viewHome() {
     </ul>` : '<p class="note">Nothing needs your attention.</p>'}
   </section>
 
-  <section class="section"><details ${innerWidth > 760 ? 'open' : ''}><summary class="h" style="cursor:pointer">Time by category</summary>
+  <section class="section home-card"><details ${innerWidth > 760 ? 'open' : ''}><summary class="h" style="cursor:pointer">Time by category</summary>
     <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th><th class="r">Left</th><th class="r">Time at ${sx(S.speed)}</th><th class="r">Study days</th><th class="r">Done by</th></tr></thead>
       <tbody>${rows.map(({ c, st, sd }) => `<tr><td><a href="#/" data-act="v-cat" data-v="${esc(c)}">${esc(c)}</a></td><td class="r">${st.left}</td><td class="r">${fmt(st.rem / S.speed)}</td><td class="r">${sd || '–'}</td><td class="r">${finish(sd)}</td></tr>`).join('')}</tbody>
       <tfoot><tr><td>Everything</td><td class="r">${all.left}</td><td class="r">${fmt(all.rem / S.speed)}</td><td class="r">${allDays}</td><td class="r">${finish(allDays)}</td></tr></tfoot></table></div>
@@ -1117,6 +1157,7 @@ function viewSources() {
   <section>
     <div class="eyebrow">Playlists</div>
     <h1 class="display">${plural(pls.length, 'playlist')}<em>${plural(videos().length, 'video')} in your library</em></h1>
+    <p class="lede">Add playlists to your library and keep them in sync with YouTube.</p>
     <div class="policy">
       <div><b>Read-only ${tip('YourTube never adds, removes or reorders videos on YouTube.')}</b></div>
       <div><b>Multiple playlists ${tip('A video saved in two playlists appears once in your library and keeps one status.')}</b></div>
@@ -1183,6 +1224,62 @@ function viewLibraries() {
       <button class="btn btn-sm" data-act="lib-create">Create</button></div>
   </section>`;
 }
+
+function toolsSpeeds(seconds, id = '') {
+  return `<div class="tbl-wrap"><table class="tbl"${id ? ` id="${id}"` : ''}><thead><tr><th>Speed</th>${SPEEDS.map(x => `<th class="r">${sx(x)}</th>`).join('')}</tr></thead><tbody><tr><td>Watch time</td>${SPEEDS.map(x => `<td class="r num">${fmt(seconds / x)}</td>`).join('')}</tr></tbody></table></div>`;
+}
+function toolsCsv(videos) {
+  const cell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  const rows = [['position', 'title', 'channel', 'duration', 'url'], ...videos.map((v, i) => [v.position ?? i + 1, v.title, v.channel, v.duration_seconds, v.url || `https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`])];
+  const blob = new Blob(['\ufeff' + rows.map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'yourtube-videos.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+// A playlist's videos split into shared with the other read playlists, and only here
+function toolsSplit(item) {
+  const others = new Set(S.tools.items.filter(x => x !== item && Array.isArray(x.videos)).flatMap(x => x.videos.map(v => v.video_id)));
+  return { shared: item.videos.filter(v => others.has(v.video_id)), only: item.videos.filter(v => !others.has(v.video_id)) };
+}
+const toolsSum = vs => vs.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
+function toolVideos(item, index) {
+  const from = Math.max(1, Math.min(item.videos.length || 1, +(S.tools.ranges[index]?.from || 1)));
+  const to = Math.max(from, Math.min(item.videos.length || 1, +(S.tools.ranges[index]?.to || item.videos.length || 1)));
+  return item.videos.slice(from - 1, to);
+}
+function viewTools() {
+  const t = S.tools, items = t.items.filter(item => item.videos), allById = new Map();
+  items.forEach(item => item.videos.forEach(v => { if (!allById.has(v.video_id)) allById.set(v.video_id, v); }));
+  const total = [...allById.values()].reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
+  const errors = t.items.filter(item => item.error);
+  const videosInLibrary = new Set(S.data.videos.map(v => v.video_id));
+  const plannerDays = Math.ceil(total / Math.max(0.25, t.speed) / (Math.max(5, t.mins) * 60));
+  const resultCards = items.map(item => {
+    const index = t.items.indexOf(item), range = t.ranges[index] || {};
+    const rangeFrom = fromValue(range.from, item.videos.length, 1), rangeTo = Math.max(rangeFrom, fromValue(range.to, item.videos.length, item.videos.length));
+    const vids = toolVideos(item, index), seconds = vids.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
+    const known = vids.filter(v => videosInLibrary.has(v.video_id));
+    const knownTime = known.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
+    const compare = items.length > 1 && items.every(x => x.kind === 'playlist');
+    return `<section class="section card"><h2 class="h">${esc(item.title || item.id || 'Untitled')}</h2><p class="note">${plural(item.videos.length, 'video')}${item.unavailable ? ` · ${item.unavailable} unavailable` : ''} · ${fmt(item.videos.reduce((sum, v) => sum + (v.duration_seconds || 0), 0))} total</p>
+      <div class="form-row" style="margin-top:12px"><label class="field">From video<input type="number" min="1" max="${item.videos.length}" value="${fromValue(range.from, item.videos.length, 1)}" data-change="tools-range" data-index="${index}" data-bound="from"></label><label class="field">To video<input type="number" min="1" max="${item.videos.length}" value="${fromValue(range.to, item.videos.length, item.videos.length)}" data-change="tools-range" data-index="${index}" data-bound="to"></label></div>
+      <p class="note" id="tools-range-summary-${index}">Range: videos ${vids.length ? `${rangeFrom}–${rangeTo}` : 'none'} · ${fmt(seconds)}</p>${toolsSpeeds(seconds, `tools-speeds-${index}`)}
+      <p class="note" id="tools-library-${index}">${known.length} already in your library (${fmt(knownTime)} total)</p>
+      <div class="actions"><button class="btn" data-act="tools-export" data-index="${index}">Export CSV</button>${item.kind === 'playlist' ? `<button class="btn btn-dark" data-act="tools-add" data-index="${index}">Add to library</button>` : ''}${compare ? `<button class="btn" data-act="tools-export-only" data-index="${index}">Export only here</button>` : ''}</div></section>`;
+  }).join('');
+  const sharedIds = new Set();
+  if (items.length > 1 && items.every(x => x.kind === 'playlist')) {
+    const counts = new Map(); items.forEach(x => new Set(x.videos.map(v => v.video_id)).forEach(id => counts.set(id, (counts.get(id) || 0) + 1)));
+    counts.forEach((count, id) => { if (count > 1) sharedIds.add(id); });
+  }
+  return `<section><div class="eyebrow">Tools</div><h1 class="display">Playlist length<em>for any playlist or video</em></h1><p class="lede">Paste playlist or video links to see how long they take, without adding them to your library.</p></section>
+    <section class="section card"><label class="field">Playlist or video links<textarea id="tools-links" rows="4" placeholder="One YouTube link per line">${esc(t.links)}</textarea></label><label class="check" style="margin-top:12px"><input id="tools-browser" type="checkbox" ${t.browser ? 'checked' : ''}> Use my YouTube sign-in for private playlists</label><div class="actions" style="margin-top:14px"><button class="btn btn-dark" data-act="tools-calculate" ${t.busy ? 'disabled' : ''}>${t.busy ? `Reading ${t.links.split(/\r?\n/).filter(x => x.trim()).length} links…` : 'Calculate'}</button></div></section>
+    ${errors.map(x => `<p class="banner warn">${esc(x.link || '')}: ${esc(x.error)}${!t.browser && !x.link?.includes('watch?v=') ? ' If it is a private playlist, tick “Use my YouTube sign-in” and calculate again.' : ''}</p>`).join('')}
+    ${items.length > 1 ? `<section class="section card"><h2 class="h">Combined length</h2><p class="note">${allById.size} unique videos · ${fmt(total)}</p>${toolsSpeeds(total)}
+      ${items.every(x => x.kind === 'playlist') ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Playlist</th><th class="r">Videos</th><th class="r">Total</th><th class="r">Shared</th><th class="r">Only here</th></tr></thead><tbody>${items.map(item => { const { shared, only } = toolsSplit(item);
+        return `<tr><td>${esc(item.title || item.id || 'Untitled')}</td><td class="r">${item.videos.length}</td><td class="r">${fmt(toolsSum(item.videos))}</td><td class="r">${shared.length} · ${fmt(toolsSum(shared))}</td><td class="r">${only.length} · ${fmt(toolsSum(only))}</td></tr>`; }).join('')}</tbody></table></div>` : ''}</section>` : ''}${resultCards}
+    ${sharedIds.size ? `<p class="note">${plural(sharedIds.size, 'video')} appear in more than one playlist.</p>` : ''}
+    ${items.length ? `<section class="section card"><h2 class="h">Daily planner</h2><div class="form-row" style="margin-top:12px"><label class="field">Minutes a day<input type="number" min="5" step="5" value="${t.mins}" data-change="tools-plan" data-key="mins"></label><label class="field">Days a week<input type="number" min="1" max="7" value="${t.days}" data-change="tools-plan" data-key="days"></label><label class="field">Speed<select data-change="tools-plan" data-key="speed">${SPEEDS.map(x => `<option value="${x}" ${x === t.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select></label></div><p class="note" id="tools-plan-summary">Done in ${plural(plannerDays, 'day')} · by ${esc(studyFinish(plannerDays, t.days))}</p></section>` : ''}`;
+}
+function fromValue(value, count, fallback) { return Math.min(count || 1, Math.max(1, +(value || fallback))); }
 function viewDetailsCard() {
   const vs = videos(), counts = {};
   for (const v of vs) if (v.details) counts[v.details.status] = (counts[v.details.status] || 0) + 1;
@@ -1309,9 +1406,52 @@ function renderJobs() {
     </div>` : '';
   box.innerHTML = pill + panel;
 }
+function updateLogJump(box) {
+  const log = $('.log', box), btn = $('[data-act="log-latest"]', box);
+  if (!log || !btn) return;
+  const isUp = (log.scrollHeight - log.scrollTop - log.clientHeight) >= 24;
+  btn.style.display = isUp ? '' : 'none';
+}
+function attachLogScroll(log) {
+  if (!log || log.dataset.hasScroll) return;
+  log.dataset.hasScroll = '1';
+  log.addEventListener('scroll', () => {
+    const box = log.closest('#job');
+    if (box) updateLogJump(box);
+  }, { passive: true });
+}
+function setLogText(el, text) {
+  let offsets = null;
+  const sel = window.getSelection();
+  if (sel && sel.rangeCount) {
+    const range = sel.getRangeAt(0);
+    if (el.contains(range.startContainer) && el.contains(range.endContainer)) {
+      try {
+        const pre = range.cloneRange();
+        pre.selectNodeContents(el);
+        pre.setEnd(range.startContainer, range.startOffset);
+        const start = pre.toString().length;
+        pre.setEnd(range.endContainer, range.endOffset);
+        const end = pre.toString().length;
+        offsets = { start, end };
+      } catch (_) {}
+    }
+  }
+  el.textContent = text;
+  if (offsets && el.firstChild) {
+    try {
+      const node = el.firstChild, len = node.textContent.length;
+      const r = document.createRange();
+      r.setStart(node, Math.min(offsets.start, len));
+      r.setEnd(node, Math.min(offsets.end, len));
+      sel.removeAllRanges();
+      sel.addRange(r);
+    } catch (_) {}
+  }
+}
 function updateJob() {
-  const box = $('#job'), job = S.data.job;
-  if (!box) return;
+  const box = $('#job'), job = S.data?.job;
+  if (!box || !job) return;
   const mine = route() === 'categories' ? ['discover', 'suggest'].includes(job.kind)
     : route().startsWith('settings') ? ['pull', 'embed'].includes(job.kind)
     : route() === 'knowledge' ? job.kind === 'knowledge'
@@ -1319,7 +1459,11 @@ function updateJob() {
   const myKinds = route() === 'categories' ? ['discover', 'suggest'] : route().startsWith('settings') ? ['pull', 'embed'] : route() === 'knowledge' ? ['knowledge'] : ['sync', 'details', 'asr', 'visual'];
   const waiting = (job.queue || []).filter(t => myKinds.includes(t.kind));
   const waitLine = waiting.length ? `<p class="note" style="margin-top:12px">Waiting in the queue: ${waiting.map(t => esc(t.label)).join(', ')}. ${job.running ? `Starts after “${esc(job.label)}”.` : ''}</p>` : '';
-  if (!mine || (!job.log && !job.running) || (job.dismissed && !job.running)) { box.innerHTML = waitLine; return; }
+  if (!mine || (!job.log && !job.running) || (job.dismissed && !job.running)) {
+    box.innerHTML = waitLine;
+    delete box.dataset.jobId;
+    return;
+  }
   const text = JOB_TEXT[job.kind] || JOB_TEXT.sync;
   const stopping = !!job.stopping || S.stopPending;
   const stage = job.running ? jobStage(job) : '';
@@ -1327,9 +1471,29 @@ function updateJob() {
     : `<div class="done-banner ${job.stopped ? 'bad' : job.ok ? 'ok' : 'bad'}"><b>${job.stopped ? `Stopped: ${esc(job.label || '')}` : job.ok ? 'Finished' : 'Failed'}</b>
         <span>${esc(fmtLocal(job.finished_at))}${!job.ok && !job.stopped ? ` · ${esc(lastError(job.log))}` : ''}</span>
         <button class="btn-text" data-act="job-dismiss" data-id="${job.id}" style="margin-left:auto">Close</button></div>`;
-  box.innerHTML = `<div style="margin-top:18px">${head}</div>${waitLine}<pre class="log">${esc(job.log || '')}</pre>`;
-  const log = $('.log', box);
-  log.scrollTop = log.scrollHeight;
+  const oldLog = $('.log', box);
+  const atBottom = oldLog ? (oldLog.scrollHeight - oldLog.scrollTop - oldLog.clientHeight < 24) : true;
+  const oldScrollTop = oldLog ? oldLog.scrollTop : 0;
+  const same = box.dataset.jobId === String(job.id) && oldLog && $('.job-head', box);
+  let log = oldLog;
+  if (same) {
+    const headEl = $('.job-head', box);
+    if (headEl && headEl.innerHTML !== head) headEl.innerHTML = head;
+    const waitEl = $('.job-wait', box);
+    if (waitEl && waitEl.innerHTML !== waitLine) waitEl.innerHTML = waitLine;
+    const newLog = job.log || '';
+    if (log.textContent !== newLog) setLogText(log, newLog);
+  } else {
+    box.dataset.jobId = String(job.id);
+    box.innerHTML = `<div class="job-head" style="margin-top:18px">${head}</div><div class="job-wait">${waitLine}</div><div class="log-wrap"><pre class="log">${esc(job.log || '')}</pre><button type="button" class="btn btn-sm log-latest" data-act="log-latest" style="display:none">Jump to latest ↓</button></div>`;
+    log = $('.log', box);
+  }
+  if (log) {
+    attachLogScroll(log);
+    if (atBottom) log.scrollTop = log.scrollHeight;
+    else log.scrollTop = oldScrollTop;
+    updateLogJump(box);
+  }
 }
 async function pollJob() {
   if (S.polling) return;
@@ -1356,7 +1520,18 @@ async function taskFinished(t) {
   S.flash = { id: t.id, until: Date.now() + 15000 };
   S.stopPending = false;
   if (!t.stopped) toast(t.ok ? text[1] : text[2], !t.ok);
-  const job = S.data.job; await load(); S.data.job = job;
+  // The reload below rebuilds the page; focusout never fires on a removed box, so save a note being typed first
+  const typing = document.activeElement?.id === 'd-notes' ? $('#d-notes').selectionStart : null;
+  saveNotes();
+  const job = S.data.job; await load({ keepEdits: true }); S.data.job = job;
+  if (typing !== null) { const ta = $('#d-notes'); if (ta) { ta.focus(); ta.setSelectionRange(typing, typing); } }
+}
+// Category edits not saved yet, which a background reload would wipe
+function unsavedCategoryEdits() {
+  if (route() !== 'categories') return false;
+  const tax = S.data.taxonomy || {}, words = v => v.split(',').map(w => w.trim()).filter(Boolean).join(',');
+  return !!$('#new-cat-name')?.value.trim() || $$('[data-change="rename"]').some(i => i.value.trim() !== i.dataset.old)
+    || $$('.kw').some(ta => words(ta.value) !== (tax[ta.dataset.name] || []).join(','));
 }
 // After asking the server to start a task: say whether it started or is waiting, then follow the queue
 async function queued(res, what) {
@@ -1393,7 +1568,7 @@ async function runResync(playlistId) {
 /* ---------------- categories ---------------- */
 function viewCategories() {
   if (!S.lib) return `<section><div class="eyebrow">Categories</div><h1 class="display">Choose a library<em>each library has its own categories</em></h1>
-    <p class="lede">Pick a library at the top of the page to edit its categories.</p>
+    <p class="lede">Choose a library to edit its categories.</p>
     <div class="chips" style="margin-top:16px">${S.data.libraries.map(l => `<button class="chip" data-act="lib-go" data-lib="${l.id}">${esc(l.name)}</button>`).join('')}</div></section>`;
   const counts = {};
   for (const v of videos()) counts[v.category] = (counts[v.category] || 0) + 1;
@@ -1414,7 +1589,7 @@ function viewCategories() {
       <button class="btn btn-dark btn-sm" data-act="reclassify">Save and re-sort</button>
       <button class="btn btn-sm" data-act="add-cat">Add category</button>
       ${ai.ready_for.categorize ? Object.keys(tax).length
-        ? `<button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : noMatch ? 'The AI found no category for the rest' : 'Every unsorted video already has a suggestion or was set by hand'}">Sort ${toSort} unsorted ${toSort === 1 ? 'video' : 'videos'} with AI</button>`
+        ? `<button class="btn btn-sm" data-act="ai-suggest" data-job-btn ${!toSort ? 'disabled' : ''} title="${toSort ? '' : noMatch ? 'The AI found no category for the rest' : 'Every unsorted video already has a suggestion or was set by hand'}">${toSort ? `Sort ${plural(toSort, 'unsorted video')} with AI` : !fb ? 'Nothing to sort' : noMatch ? 'The AI found no category for the rest' : 'Unsorted videos already have suggestions'}</button>`
         : `<button class="btn btn-sm" data-act="ai-discover" data-job-btn ${!ai.interests ? 'disabled title="Write your interests in About you first"' : ''}>Create categories from my interests</button>`
         : `<a class="btn-text" href="#/settings/routing">Set up AI sorting →</a>`}
       ${pending ? `<a class="btn-text" href="#/" data-act="v-status" data-v="suggested">Review ${plural(pending, 'suggestion')} →</a>` : ''}
@@ -1526,6 +1701,7 @@ function viewSearch() {
   <section>
     <div class="eyebrow">Search</div>
     <h1 class="display">Find it again<em>Search your library</em></h1>
+    <p class="lede">Search titles, transcripts, chapters, summaries and notes across your library.</p>
     <label class="field-label" for="sq">Search ${tip('Search titles, chapters, transcripts, AI summaries and your notes. Use quotes for an exact phrase; words of 3+ letters match inside longer words.')}</label>
     <input type="search" id="sq" class="search-big" value="${esc(sr.q)}" placeholder="e.g. neo4j setup, &quot;plan mode&quot;, lora">
     <div class="chips" style="margin-top:14px">${SEARCH_KINDS.map(([k, l]) =>
@@ -1602,6 +1778,7 @@ function viewAsk() {
   <section>
     <div class="eyebrow">Ask</div>
     <h1 class="display">Ask your library<em>Get answers from your videos</em></h1>
+    <p class="lede">Ask a question and follow cited moments back to your videos.</p>
     ${follow ? `<div class="ask-filters"><button class="btn btn-sm" data-act="ask-new">+ New question</button>
         ${askScope(th[0].filters) ? `<span class="note faint">Within: ${esc(askScope(th[0].filters))}</span>` : ''}</div>` : `${box}
     <div class="ask-filters">
@@ -1780,7 +1957,7 @@ function viewKnowledgeList() {
   <section class="section">
     ${list === null ? '<p class="note"><span class="spin" style="display:inline-block"></span> Loading topics…</p>'
       : list.error ? `<p class="note warn-text">Could not load topics: ${esc(list.error)}</p>`
-      : !list.length ? '<p class="note faint">No categories found in this library.</p>'
+      : !list.length ? '<div class="empty"><p>No topics are available for study yet.</p><a class="btn btn-dark" href="#/categories">Review categories</a></div>'
       : `<div class="tbl-wrap"><table class="tbl">
           <thead>
             <tr>
@@ -1875,7 +2052,7 @@ function viewKnowledgePage(cat) {
       <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
-      <p class="lede">No knowledge page has been built for this topic yet.</p>
+      <p class="lede">Build a study page from this topic’s video summaries.</p>
       <div class="actions" style="margin-top:16px">
         <button class="btn btn-dark btn-sm" data-act="knowledge-build" data-cat="${esc(cat)}" ${!ai.ready_for.summarize ? 'disabled' : ''}>Build page</button>
       </div>
@@ -1915,13 +2092,13 @@ function viewKnowledgePage(cat) {
     <div id="job"></div>
   </section>
 
-  <article class="knowledge-page" style="margin-top:28px">
-    ${p.overview ? `<div class="lede" style="font-size:16px;line-height:1.65;margin-bottom:28px;color:var(--ink)">${esc(p.overview)}</div>` : ''}
+  <article class="knowledge-page">
+    ${p.overview ? `<div style="margin-bottom:28px;color:var(--ink)">${esc(p.overview)}</div>` : ''}
 
     ${(p.sections || []).map(sec => `
       <section style="margin-top:28px">
         <h2 class="h" style="font-size:18px;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--line)">${esc(sec.heading)}</h2>
-        <ul style="list-style:disc;padding-left:22px;margin:0 0 16px;font-size:15px;line-height:1.6">
+        <ul style="list-style:disc;padding-left:22px;margin:0 0 16px;line-height:1.65">
           ${(sec.points || []).map(pt => `
             <li style="margin-bottom:8px">
               <span>${esc(pt.text)}</span> ${(pt.cites || []).map(renderCite).join(' ')}
@@ -2150,7 +2327,17 @@ function viewAbout() {
 }
 const SETTINGS_PAGES = [['general', 'General'], ['about', 'About you'], ['routing', 'AI by task'], ['cloud', 'Cloud AI'], ['local', 'Local AI'], ['sync', 'Sync and details'], ['scoring', 'Scoring']];
 function settingsNav(cur) {
+  const descriptions = {
+    general: 'Choose how the dashboard looks and how watch times are shown.',
+    about: 'Set the learning interests used to rate videos and shape suggestions.',
+    routing: 'Choose which AI handles each task and whether it has a helper.',
+    cloud: 'Set up cloud AI providers for tasks that use online models.',
+    local: 'Check local models and tools available on this computer.',
+    sync: 'Choose what YourTube fetches when playlists are synced.',
+    scoring: 'Adjust how video ratings weigh depth, value, freshness and fit.'
+  };
   return `<div class="eyebrow">Settings</div><h1 class="display">Settings<em>${SETTINGS_PAGES.find(([k]) => k === cur)?.[1] || 'General'}</em></h1>
+    <p class="lede">${descriptions[cur] || descriptions.general}</p>
     <div class="settings-layout"><nav class="settings-side" aria-label="Settings sections">${SETTINGS_PAGES.map(([k, label]) => `<a class="${cur === k ? 'on' : ''}" href="#/settings/${k}"${cur === k ? ' aria-current="page"' : ''}>${label}</a>`).join('')}</nav><div class="settings-content">`;
 }
 function settingsContent(section) {
@@ -2676,6 +2863,26 @@ document.addEventListener('click', async e => {
   const act = el.dataset.act, id = el.dataset.id;
   if (el.tagName === 'A' && el.getAttribute('href') === '#/') e.preventDefault();
   switch (act) {
+    case 'tools-calculate': {
+      const links = S.tools.links.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+      if (!links.length) { toast('Paste at least one playlist or video link', true); $('#tools-links')?.focus(); break; }
+      S.tools.busy = true; S.tools.items = []; renderView();
+      try { S.tools.items = (await api('/api/tools/length', { links, ...(S.tools.browser ? { browser: 'auto' } : {}) })).items || []; }
+      catch (err) { toast(err.message, true); }
+      finally { S.tools.busy = false; renderView(); }
+      break;
+    }
+    case 'tools-export': {
+      const index = +el.dataset.index, item = S.tools.items[index]; if (item?.videos) toolsCsv(toolVideos(item, index)); break;
+    }
+    case 'tools-export-only': {
+      const index = +el.dataset.index, item = S.tools.items[index];
+      if (item?.videos) toolsCsv(toolsSplit(item).only);
+      break;
+    }
+    case 'tools-add': {
+      const item = S.tools.items[+el.dataset.index]; if (item?.url) runIngest(item.url); break;
+    }
     case 'voice-rec': if (S.about.recording) stopAboutRecording(); else startAboutRecording(); break;
     case 'interests-draft': {
       S.about.look = $('#ai-look')?.value || ''; S.about.error = ''; S.about.drafting = true; refresh();
@@ -2816,6 +3023,16 @@ document.addEventListener('click', async e => {
       break;
     case 'job-drop': try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); toast('Removed from the queue'); } catch (err) { toast(err.message, true); } break;
     case 'jobs-toggle': S.jobsOpen = !S.jobsOpen; renderJobs(); break;
+    case 'theme-toggle': S.theme = darkNow() ? 'light' : 'dark'; store.set('ytkb.theme', S.theme); applyTheme(); if (route().startsWith('settings')) refresh(); break;
+    case 'log-latest': {
+      const box = el.closest('#job') || $('#job');
+      const log = $('.log', box);
+      if (log) {
+        log.scrollTop = log.scrollHeight;
+        updateLogJump(box);
+      }
+      break;
+    }
     case 'job-retry': {
       try { await queued(await api('/api/job/retry', { id: +id }), 'Sync'); await load(); }
       catch (err) { toast(err.message, true); }
@@ -3209,6 +3426,33 @@ document.addEventListener('input', e => {
   if (el.id === 'aq') { S.ask.q = el.value; return; }
   if (el.id === 'ahq') { S.ask.hq = el.value; clearTimeout(aT); aT = setTimeout(loadAskHistory, 200); return; }
   if (el.id === 'q') { S.view.q = el.value; clearTimeout(qT); qT = setTimeout(() => { S.limit = 150; renderList(); }, 120); }
+  else if (el.id === 'tools-links') S.tools.links = el.value;
+  else if (el.matches('#tools-browser')) S.tools.browser = el.checked;
+  else if (el.dataset.change === 'tools-range') {
+    const i = +el.dataset.index, range = S.tools.ranges[i] || (S.tools.ranges[i] = {});
+    range[el.dataset.bound] = Math.max(1, +el.value || 1);
+    const item = S.tools.items[i];
+    if (item) {
+      const from = fromValue(range.from, item.videos.length, 1), to = Math.max(from, fromValue(range.to, item.videos.length, item.videos.length));
+      const selected = item.videos.slice(from - 1, to), seconds = selected.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
+      const summary = $(`#tools-range-summary-${i}`); if (summary) summary.textContent = `Range: videos ${from}–${to} · ${fmt(seconds)}`;
+      const table = $(`#tools-speeds-${i}`); if (table) [...table.querySelectorAll('tbody td')].forEach((td, j) => { if (j) td.textContent = fmt(seconds / SPEEDS[j - 1]); });
+      const known = selected.filter(v => S.data.videos.some(saved => saved.video_id === v.video_id));
+      const knownTime = known.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
+      const lib = $(`#tools-library-${i}`); if (lib) lib.textContent = `${known.length} already in your library (${fmt(knownTime)} total)`;
+    }
+  }
+  else if (el.dataset.change === 'tools-plan') {
+    const key = el.dataset.key, value = +el.value;
+    S.tools[key] = key === 'days' ? Math.min(7, Math.max(1, value || 5)) : key === 'mins' ? Math.max(5, value || 60) : Math.max(0.25, value || 1);
+    store.set(`ytkb.tools.${key}`, S.tools[key]);
+    if (route() === 'tools') {
+      const unique = new Map(); S.tools.items.filter(item => item.videos).forEach(item => item.videos.forEach(v => { if (!unique.has(v.video_id)) unique.set(v.video_id, v); }));
+      const total = [...unique.values()].reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
+      const days = Math.ceil(total / Math.max(0.25, S.tools.speed) / (Math.max(5, S.tools.mins) * 60));
+      const summary = $('#tools-plan-summary'); if (summary) summary.textContent = `Done in ${plural(days, 'day')} · by ${studyFinish(days, S.tools.days)}`;
+    }
+  }
   else if (el.dataset.input === 'i-url') S.ingest.url = el.value;
   else if (el.dataset.input === 'i-cookies') { S.ingest.cookies = el.value; store.set('ytkb.cookies', el.value); }
   else if (el.dataset.input === 'ai-key') S.ai.key = el.value;
@@ -3228,7 +3472,7 @@ document.addEventListener('keydown', e => {
   if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'g') { S.goAt = Date.now(); return; }
   if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && S.goAt && Date.now() - S.goAt < 1500 && e.key === '?') { S.goAt = 0; e.preventDefault(); location.hash = '#/help'; return; }
   if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && S.goAt && Date.now() - S.goAt < 1500) {
-    const routes = { h: '#/home', l: '#/', k: '#/knowledge', y: '#/sources', c: '#/categories', s: '#/settings' };
+    const routes = { h: '#/home', l: '#/', k: '#/knowledge', y: '#/sources', c: '#/categories', t: '#/tools', s: '#/settings' };
     const dest = routes[e.key.toLowerCase()]; S.goAt = 0;
     if (dest) { e.preventDefault(); location.hash = dest; return; }
   }

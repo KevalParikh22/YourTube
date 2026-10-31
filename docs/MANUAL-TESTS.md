@@ -92,6 +92,17 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S11.6 | Split | (Replaced by S15.3.) | | |
 | S11.7 | Dropdowns | Look at every page in light and dark, desktop and phone | Same size dropdowns and fields, none inside headings, nothing misaligned | |
 
+### S16 checks (new look, Tools, things that reset, 2026-10-31)
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S16.1 | New look | Every page, light and dark (moon/sun button at the top), desktop and phone | Bookmark logo and tab icon, serif page titles, ink-blue buttons; text easy to read; nothing cut off; on a phone the menu is its own row | |
+| S16.2 | Tools, public and private | Tools → a public playlist, one of your private ones (with **Use my YouTube sign-in**), one video link, one made-up link → Calculate | Times at each speed; the private one only with sign-in; a clear error for the made-up link; nothing added to the library | |
+| S16.3 | Range, compare, export | Set From/To; paste two playlists that share videos; Export CSV and Export only here; Add to library | Times change as you type; shared and only-here counts are right; the CSV opens in a spreadsheet; Add to library syncs it | |
+| S16.4 | Note while a task runs | Start a sync or details fetch; open a video and type a note until the task finishes | The note stays in the box (and is saved), the cursor stays where you were | |
+| S16.5 | Category edits while a task runs | Start a task; on Categories change keywords without saving until it finishes | Your edits stay, with a message that the page updated in the background | |
+| S16.6 | Task log | During a long task, scroll the log up | It stays where you are; **Jump to latest** brings you back and it follows again | |
+
 ### S15 checks (simpler Categories page, 2026-10-31)
 
 | # | Test | Steps | Expect | Result |
