@@ -505,9 +505,9 @@ function viewHome() {
   </section>
 
   <section class="section home-card"><details ${innerWidth > 760 ? 'open' : ''}><summary class="h" style="cursor:pointer">Time by category</summary>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Category</th><th class="r">Left</th><th class="r">Time at ${sx(S.speed)}</th><th class="r">Study days</th><th class="r">Done by</th></tr></thead>
-      <tbody>${rows.map(({ c, st, sd }) => `<tr><td><a href="#/" data-act="v-cat" data-v="${esc(c)}">${esc(c)}</a></td><td class="r">${st.left}</td><td class="r">${fmt(st.rem / S.speed)}</td><td class="r">${sd || '–'}</td><td class="r">${finish(sd)}</td></tr>`).join('')}</tbody>
-      <tfoot><tr><td>Everything</td><td class="r">${all.left}</td><td class="r">${fmt(all.rem / S.speed)}</td><td class="r">${allDays}</td><td class="r">${finish(allDays)}</td></tr></tfoot></table></div>
+    <div class="tbl-wrap"><table class="tbl tbl-cards"><thead><tr><th>Category</th><th class="r">Left</th><th class="r">Time at ${sx(S.speed)}</th><th class="r">Study days</th><th class="r">Done by</th></tr></thead>
+      <tbody>${rows.map(({ c, st, sd }) => `<tr><td data-label="Category"><a href="#/" data-act="v-cat" data-v="${esc(c)}">${esc(c)}</a></td><td class="r" data-label="Left">${st.left}</td><td class="r" data-label="Time at ${sx(S.speed)}">${fmt(st.rem / S.speed)}</td><td class="r" data-label="Study days">${sd || '–'}</td><td class="r" data-label="Done by">${finish(sd)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td data-label="Category">Everything</td><td class="r" data-label="Left">${all.left}</td><td class="r" data-label="Time at ${sx(S.speed)}">${fmt(all.rem / S.speed)}</td><td class="r" data-label="Study days">${allDays}</td><td class="r" data-label="Done by">${finish(allDays)}</td></tr></tfoot></table></div>
   </details></section>`;
 }
 function buildSession() {
@@ -629,7 +629,7 @@ function viewSources() {
 
   <section class="section">
     <h2 class="h">Your playlists</h2>
-    ${pls.length ? `<div class="tbl-wrap"><table class="tbl">
+    ${pls.length ? `<div class="tbl-wrap"><table class="tbl tbl-cards">
       <thead><tr><th>Playlist</th>${many ? '<th>Library</th>' : ''}<th class="r">Videos</th><th class="r">Watch time</th><th>Last synced</th><th></th></tr></thead>
       <tbody>${pls.map(p => {
         const synced = isPlaylistSynced(p);
@@ -638,17 +638,17 @@ function viewSources() {
           : synced
           ? `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}" title="Reads the playlist again: adds new videos, flags removed ones. Nothing changes on YouTube.">Check for new videos</button>`
           : `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}">Sync</button>`;
-        const syncCell = `<td class="muted"${p.updated_at ? ` title="${esc(fmtFullDate(p.updated_at))}"` : ''}>${p.updated_at ? esc(fmtRelTime(p.updated_at)) : '—'}</td>`;
+        const syncCell = `<td class="muted" data-label="Last synced"${p.updated_at ? ` title="${esc(fmtFullDate(p.updated_at))}"` : ''}>${p.updated_at ? esc(fmtRelTime(p.updated_at)) : '—'}</td>`;
         return `<tr>
-        <td><a href="#/" data-act="v-src" data-v="${esc(p.id)}" style="font-weight:500">${esc(p.title)}</a>
+        <td data-label="Playlist"><a href="#/" data-act="v-src" data-v="${esc(p.id)}" style="font-weight:500">${esc(p.title)}</a>
           ${p.access?.startsWith('browser:') ? `<div class="faint" style="font-size:12px">with your ${esc(p.access.slice(8).replace(/\b\w/g, c => c.toUpperCase()))} login</div>` : p.access === 'cookies' ? '<div class="faint" style="font-size:12px">with cookies.txt</div>' : ''}
           ${p.removed_videos ? `<div class="faint" style="font-size:12.5px">${p.removed_videos} removed on YouTube, kept in library</div>` : ''}</td>
-        ${many ? `<td><select data-change="pl-lib" data-id="${esc(p.id)}" aria-label="Library for ${esc(p.title)}" style="max-width:160px">
+        ${many ? `<td data-label="Library"><select data-change="pl-lib" data-id="${esc(p.id)}" aria-label="Library for ${esc(p.title)}" style="max-width:160px">
           ${S.data.libraries.map(l => `<option value="${l.id}" ${p.library_id === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}</select></td>` : ''}
-        <td class="r">${p.active_videos || 0}</td>
-        <td class="r">${fmt(p.duration_seconds)}</td>
+        <td class="r" data-label="Videos">${p.active_videos || 0}</td>
+        <td class="r" data-label="Watch time">${fmt(p.duration_seconds)}</td>
         ${syncCell}
-        <td class="r" style="white-space:nowrap">${syncBtn}
+        <td class="r" data-label="Actions" style="white-space:nowrap">${syncBtn}
           ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}
           <button class="btn-text" data-act="pl-remove" data-id="${esc(p.id)}" data-job-btn aria-label="Remove ${esc(p.title)} from YourTube">Remove</button></td>
       </tr>`;
@@ -719,8 +719,8 @@ function viewTools() {
     <section class="section card"><label class="field">Playlist or video links<textarea id="tools-links" rows="4" placeholder="One YouTube link per line">${esc(t.links)}</textarea></label><label class="check" style="margin-top:12px"><input id="tools-browser" type="checkbox" ${t.browser ? 'checked' : ''}> Use my YouTube sign-in for private playlists</label><div class="actions" style="margin-top:14px"><button class="btn btn-dark" data-act="tools-calculate" ${t.busy ? 'disabled' : ''}>${t.busy ? `Reading ${t.links.split(/\r?\n/).filter(x => x.trim()).length} links…` : 'Calculate'}</button></div></section>
     ${errors.map(x => `<p class="banner warn">${esc(x.link || '')}: ${esc(x.error)}${!t.browser && !x.link?.includes('watch?v=') ? ' If it is a private playlist, tick “Use my YouTube sign-in” and calculate again.' : ''}</p>`).join('')}
     ${items.length > 1 ? `<section class="section card"><h2 class="h">Combined length</h2><p class="note">${allById.size} unique videos · ${fmt(total)}</p>${toolsSpeeds(total)}
-      ${items.every(x => x.kind === 'playlist') ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Playlist</th><th class="r">Videos</th><th class="r">Total</th><th class="r">Shared</th><th class="r">Only here</th></tr></thead><tbody>${items.map(item => { const { shared, only } = toolsSplit(item);
-        return `<tr><td>${esc(item.title || item.id || 'Untitled')}</td><td class="r">${item.videos.length}</td><td class="r">${fmt(toolsSum(item.videos))}</td><td class="r">${shared.length} · ${fmt(toolsSum(shared))}</td><td class="r">${only.length} · ${fmt(toolsSum(only))}</td></tr>`; }).join('')}</tbody></table></div>` : ''}</section>` : ''}${resultCards}
+      ${items.every(x => x.kind === 'playlist') ? `<div class="tbl-wrap"><table class="tbl tbl-cards"><thead><tr><th>Playlist</th><th class="r">Videos</th><th class="r">Total</th><th class="r">Shared</th><th class="r">Only here</th></tr></thead><tbody>${items.map(item => { const { shared, only } = toolsSplit(item);
+        return `<tr><td data-label="Playlist">${esc(item.title || item.id || 'Untitled')}</td><td class="r" data-label="Videos">${item.videos.length}</td><td class="r" data-label="Total">${fmt(toolsSum(item.videos))}</td><td class="r" data-label="Shared">${shared.length} · ${fmt(toolsSum(shared))}</td><td class="r" data-label="Only here">${only.length} · ${fmt(toolsSum(only))}</td></tr>`; }).join('')}</tbody></table></div>` : ''}</section>` : ''}${resultCards}
     ${sharedIds.size ? `<p class="note">${plural(sharedIds.size, 'video')} appear in more than one playlist.</p>` : ''}
     ${items.length ? `<section class="section card"><h2 class="h">Daily planner</h2><div class="form-row" style="margin-top:12px"><label class="field">Minutes a day<input type="number" min="5" step="5" value="${t.mins}" data-change="tools-plan" data-key="mins"></label><label class="field">Days a week<input type="number" min="1" max="7" value="${t.days}" data-change="tools-plan" data-key="days"></label><label class="field">Speed<select data-change="tools-plan" data-key="speed">${SPEEDS.map(x => `<option value="${x}" ${x === t.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select></label></div><p class="note" id="tools-plan-summary">Done in ${plural(plannerDays, 'day')} · by ${esc(studyFinish(plannerDays, t.days))}</p></section>` : ''}`;
 }
@@ -1429,7 +1429,7 @@ function viewKnowledgeList() {
     ${list === null ? '<p class="note"><span class="spin" style="display:inline-block"></span> Loading topics…</p>'
       : list.error ? `<p class="note warn-text">Could not load topics: ${esc(list.error)}</p>`
       : !list.length ? '<div class="empty"><p>No topics are available for study yet.</p><a class="btn btn-dark" href="#/categories">Review categories</a></div>'
-      : `<div class="tbl-wrap"><table class="tbl">
+      : `<div class="tbl-wrap"><table class="tbl tbl-cards">
           <thead>
             <tr>
               <th>Topic</th>
@@ -1451,14 +1451,14 @@ function viewKnowledgeList() {
                 : `<span class="faint" style="font-size:12.5px">No page</span>`;
               const builtDate = c.built_at ? `<div class="faint" style="font-size:11.5px;margin-top:2px">${isStale ? 'Built ' : ''}${esc(fmtDate(c.built_at))}</div>` : '';
               return `<tr>
-                <td>
+                <td data-label="Topic">
                   ${hasPage
                     ? `<a href="#/knowledge?category=${encodeURIComponent(c.category)}" style="font-weight:600">${esc(c.category)}</a>`
                     : `<span style="font-weight:600">${esc(c.category)}</span>`}
                 </td>
-                <td style="font-size:13.5px">${esc(sumText)}</td>
-                <td>${statusBadge}${builtDate}</td>
-                <td class="r">
+                <td data-label="Summaries" style="font-size:13.5px">${esc(sumText)}</td>
+                <td data-label="Status">${statusBadge}${builtDate}</td>
+                <td class="r" data-label="Actions">
                   <div style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">
                     <button class="btn btn-sm" data-act="knowledge-summarize-five" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize || c.summarised >= c.videos ? 'disabled' : ''}>Summarise 5</button>
                     ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}">Open</a>` : ''}
@@ -1847,14 +1847,14 @@ function viewStorage() {
   const data = S.storage;
   if (!data) return '<section class="section card"><p class="note">Loading storage details…</p></section>';
   if (data.error) return `<section class="section card"><p class="warn-text">${esc(data.error)}</p><button class="btn btn-sm" data-act="storage-refresh">Try again</button></section>`;
-  const areas = (data.areas || []).map(a => `<tr><td>${esc(a.label)}</td><td class="r">${storageBytes(a.bytes)}</td><td class="r">${Number(a.files) || 0}</td><td class="r">${a.clearable ? `<button class="btn btn-sm" data-act="storage-clear" data-key="${esc(a.key)}" data-label="${esc(a.label)}">Clear</button>` : '—'}</td></tr>`).join('');
-  const backups = (data.backups || []).map(b => `<tr><td>${esc(storageDate(b.created))}</td><td class="r">${storageBytes(b.bytes)}</td><td class="r">${Number(b.videos) || 0}</td><td class="r" style="white-space:nowrap"><button class="btn btn-sm" data-act="storage-restore" data-name="${esc(b.name)}" data-date="${esc(storageDate(b.created))}">Restore</button> <button class="btn btn-sm" data-act="storage-delete" data-area="backups" data-name="${esc(b.name)}">Delete</button></td></tr>`).join('');
-  const exports = (data.exports || []).map(x => `<tr><td>${esc(x.name)}</td><td>${esc(storageDate(x.created))}</td><td class="r">${storageBytes(x.bytes)}</td><td class="r" style="white-space:nowrap"><a class="btn btn-sm" href="/files/exports/${encodeURIComponent(x.name)}" download>Download</a> <button class="btn btn-sm" data-act="storage-delete" data-area="exports" data-name="${esc(x.name)}">Delete</button></td></tr>`).join('');
+  const areas = (data.areas || []).map(a => `<tr><td data-label="Area">${esc(a.label)}</td><td class="r" data-label="Size">${storageBytes(a.bytes)}</td><td class="r" data-label="Files">${Number(a.files) || 0}</td><td class="r" data-label="Action">${a.clearable ? `<button class="btn btn-sm" data-act="storage-clear" data-key="${esc(a.key)}" data-label="${esc(a.label)}">Clear</button>` : '—'}</td></tr>`).join('');
+  const backups = (data.backups || []).map(b => `<tr><td data-label="Date">${esc(storageDate(b.created))}</td><td class="r" data-label="Size">${storageBytes(b.bytes)}</td><td class="r" data-label="Videos">${Number(b.videos) || 0}</td><td class="r" data-label="Actions" style="white-space:nowrap"><button class="btn btn-sm" data-act="storage-restore" data-name="${esc(b.name)}" data-date="${esc(storageDate(b.created))}">Restore</button> <button class="btn btn-sm" data-act="storage-delete" data-area="backups" data-name="${esc(b.name)}">Delete</button></td></tr>`).join('');
+  const exports = (data.exports || []).map(x => `<tr><td data-label="Name">${esc(x.name)}</td><td data-label="Date">${esc(storageDate(x.created))}</td><td class="r" data-label="Size">${storageBytes(x.bytes)}</td><td class="r" data-label="Actions" style="white-space:nowrap"><a class="btn btn-sm" href="/files/exports/${encodeURIComponent(x.name)}" download>Download</a> <button class="btn btn-sm" data-act="storage-delete" data-area="exports" data-name="${esc(x.name)}">Delete</button></td></tr>`).join('');
   return `<section class="section card storage-card"><h2 class="h">On this computer</h2><p class="note">Data folder: <code>${esc(data.data_dir || '')}</code></p>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Area</th><th class="r">Size</th><th class="r">Files</th><th class="r">Action</th></tr></thead><tbody>${areas || '<tr><td colspan="4">No storage areas found.</td></tr>'}</tbody></table></div></section>
+    <div class="tbl-wrap"><table class="tbl tbl-cards"><thead><tr><th>Area</th><th class="r">Size</th><th class="r">Files</th><th class="r">Action</th></tr></thead><tbody>${areas || '<tr><td colspan="4">No storage areas found.</td></tr>'}</tbody></table></div></section>
     <section class="section card storage-card"><h2 class="h">Backups</h2><p class="note">A backup includes your library and taxonomy, but not API keys.</p><div class="actions"><button class="btn btn-dark btn-sm" data-act="storage-backup">Back up now</button></div>
-    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Date</th><th class="r">Size</th><th class="r">Videos</th><th class="r">Actions</th></tr></thead><tbody>${backups || '<tr><td colspan="4">No backups yet.</td></tr>'}</tbody></table></div></section>
-    <section class="section card storage-card"><h2 class="h">Exports</h2><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Name</th><th>Date</th><th class="r">Size</th><th class="r">Actions</th></tr></thead><tbody>${exports || '<tr><td colspan="4">No exports yet.</td></tr>'}</tbody></table></div></section>`;
+    <div class="tbl-wrap"><table class="tbl tbl-cards"><thead><tr><th>Date</th><th class="r">Size</th><th class="r">Videos</th><th class="r">Actions</th></tr></thead><tbody>${backups || '<tr><td colspan="4">No backups yet.</td></tr>'}</tbody></table></div></section>
+    <section class="section card storage-card"><h2 class="h">Exports</h2><div class="tbl-wrap"><table class="tbl tbl-cards"><thead><tr><th>Name</th><th>Date</th><th class="r">Size</th><th class="r">Actions</th></tr></thead><tbody>${exports || '<tr><td colspan="4">No exports yet.</td></tr>'}</tbody></table></div></section>`;
 }
 function viewSyncSettings() {
   const ai = S.data.ai;
