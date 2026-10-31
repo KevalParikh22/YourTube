@@ -6,7 +6,7 @@ import sqlite3
 from contextlib import closing
 from datetime import date, datetime
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("YTKB_DATA_DIR") or ROOT
 NAME_RE = re.compile(r"^[\w.-]{1,120}$")
 FRAMES_DIR = os.path.join(DATA_DIR, "frames")   # same folder as dashboard.FRAMES_DIR; importing dashboard here would load it twice

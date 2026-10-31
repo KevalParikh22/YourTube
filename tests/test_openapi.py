@@ -9,12 +9,14 @@ from http.server import ThreadingHTTPServer
 import threading
 import urllib.request
 import urllib.error
+import subprocess
+import sys
 
 import dashboard
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SPEC_PATH = os.path.join(ROOT_DIR, "docs", "openapi.json")
-DASHBOARD_PATH = os.path.join(ROOT_DIR, "dashboard.py")
+DASHBOARD_PATH = os.path.join(ROOT_DIR, "yourtube", "dashboard.py")
 
 ALLOWED_TAGS = {
     "Library", "Videos", "Categories", "AI", "Ask", "Search",
@@ -76,6 +78,19 @@ def extract_routes_from_dashboard(source):
 
 
 class OpenApiTest(unittest.TestCase):
+    def test_default_paths_resolve_from_repo_root(self):
+        env = os.environ.copy()
+        for key in ("YTKB_DB", "YTKB_DATA_DIR", "YTKB_SETTINGS", "YTKB_TAXONOMY", "YTKB_LOG_DIR"):
+            env.pop(key, None)
+        code = (
+            f"import sys; sys.path.insert(0, {os.path.join(ROOT_DIR, 'yourtube')!r}); "
+            "import os, storage, dashboard; "
+            f"root = {ROOT_DIR!r}; "
+            "assert storage.DB_PATH == os.path.join(root, 'yt_kb.db'), storage.DB_PATH; "
+            "assert dashboard.WEB_DIR == os.path.join(root, 'web'), dashboard.WEB_DIR"
+        )
+        subprocess.run([sys.executable, "-c", code], cwd=ROOT_DIR, env=env, check=True)
+
     @classmethod
     def setUpClass(cls):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), dashboard.Handler)

@@ -13,6 +13,9 @@ import sys
 import time
 import urllib.request
 
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "yourtube"))
+
 import numpy as np
 
 from common import save_result

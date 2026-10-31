@@ -9,7 +9,7 @@ from typing import List, Dict, Any, Optional
 
 FALLBACK_CATEGORY = "General / Other"
 # User-edited taxonomy (written by the dashboard); a library without one has no categories yet
-_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(__file__)
+_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TAXONOMY_PATH = os.environ.get("YTKB_TAXONOMY") or os.path.join(_DATA_DIR, "taxonomy.json")
 
 

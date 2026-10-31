@@ -16,7 +16,7 @@ import functools
 import threading
 from typing import List, Dict, Any, Optional, Callable, Iterable
 
-_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(__file__)
+_DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get("YTKB_DB") or os.path.join(_DATA_DIR, "yt_kb.db")
 VALID_STATUSES = ("unwatched", "in_progress", "completed", "skipped")
 # Statuses that no longer count as remaining work ("skipped" = decided not to watch)

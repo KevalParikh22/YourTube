@@ -20,7 +20,7 @@ import time
 import urllib.request
 from typing import Any, Callable, Dict, List, Optional
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _DATA_DIR = os.environ.get("YTKB_DATA_DIR") or ROOT
 CACHE = os.path.join(_DATA_DIR, "media_cache", "asr")   # git-ignored; emptied at the start of each run
 

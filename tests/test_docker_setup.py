@@ -17,12 +17,13 @@ print(json.dumps([storage.DB_PATH, llm.SETTINGS_PATH, classifier.TAXONOMY_PATH,
  applog.LOG_DIR, local_asr.CACHE, local_visual.CACHE, local_visual.FRAMES,
  voice.VOICE_DIR, dashboard.FRAMES_DIR]))
 """
-        result = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=env,
+        result = subprocess.run([sys.executable, "-c", code], cwd=os.path.join(ROOT, "yourtube"), env=env,
                                 check=True, capture_output=True, text=True)
         return json.loads(result.stdout)
 
     def clean_env(self):
-        env = {"PATH": os.environ.get("PATH", ""), "PYTHONPATH": ROOT}
+        env = {"PATH": os.environ.get("PATH", ""),
+               "PYTHONPATH": os.path.join(ROOT, "yourtube") + os.pathsep + ROOT}
         env.update({k: v for k, v in os.environ.items() if k.startswith("SYSTEMROOT")})
         return env
 
@@ -54,7 +55,7 @@ print(json.dumps([storage.DB_PATH, llm.SETTINGS_PATH, classifier.TAXONOMY_PATH,
                 with open(settings, "w") as f:
                     json.dump({"providers": {"ollama": {"base_url": address}}}, f)
                 result = subprocess.run([sys.executable, "-c", "import llm; print(llm.load_settings()['providers']['ollama']['base_url'])"],
-                    cwd=ROOT, env=env, check=True, capture_output=True, text=True)
+                    cwd=os.path.join(ROOT, "yourtube"), env=env, check=True, capture_output=True, text=True)
                 self.assertEqual(result.stdout.strip(), expected)
 
     def test_host_option_binds_and_warns(self):
