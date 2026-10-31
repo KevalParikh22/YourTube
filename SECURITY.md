@@ -12,7 +12,7 @@ YourTube runs locally on your machine. Your library, transcripts, and credential
 ## API keys
 
 - **Storage in `settings.json`:** API keys live in `settings.json`, created readable only by you (owner-only permissions).
-- **Alternative (environment variables):** Environment variables (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`) are the alternative. Use them on NTFS/FAT drives, where file permissions aren't enforced.
+- **Alternative (environment variables):** Environment variables (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY`) are the alternative. Use them on NTFS/FAT drives, where file permissions aren't enforced.
 - **Never sent to the browser:** API keys are never sent to the browser (the dashboard API only reports whether a key is saved or set in the environment).
 
 ## The dashboard
@@ -28,6 +28,7 @@ YourTube runs locally on your machine. Your library, transcripts, and credential
 ## AI data privacy
 
 - **Cloud AI:** Only titles, descriptions, transcripts, and questions go to the AI provider you choose.
+- **Cloud media (opt-in, off by default):** choosing a cloud service in Settings → AI by task → Media sends: for **transcription**, the video's audio (uploaded, then deleted here); for **slide reading**, the selected slide frames; for the **meaning search index**, all indexed text (titles, descriptions, transcripts, summaries, notes). A **helper AI** sends the same for the videos it takes. Each run shows what is sent and its cost first. **Local only** blocks all of these.
 - **Local AI:** With Local only mode, nothing leaves the computer.
 
 ## Reporting a problem

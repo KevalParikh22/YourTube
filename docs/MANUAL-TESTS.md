@@ -92,6 +92,20 @@ Section 1 is done (2026-10-24: all working). Do the rest as sessions, one at a t
 | S11.6 | Split | Categories → Split with AI on your biggest category → untick any you don't want → Create and sort → Library → AI suggestions | Specific new categories; suggestions move the right videos (even hand-placed ones) only when you accept | |
 | S11.7 | Dropdowns | Look at every page in light and dark, desktop and phone | Same size dropdowns and fields, none inside headings, nothing misaligned | |
 
+### S14 checks (local and cloud side by side, cloud media, 2026-10-31)
+
+Needs at least one cloud key (Groq is cheapest for transcription). Note the costs your providers show afterwards.
+
+| # | Test | Steps | Expect | Result |
+|---|---|---|---|---|
+| S14.1 | Lanes | Start a local transcription, then a rating with a cloud AI, then a sync | All three run at once (task panel: YouTube, This computer, Cloud), each with its own log; Stop on one leaves the others running | |
+| S14.2 | Cloud transcription | Settings → AI by task → Media → Transcription: Groq → transcribe 2 videos without captions | The cost is shown first; the transcript reads well and times line up when you click a line; the video panel names `groq:whisper-large-v3-turbo` | |
+| S14.3 | Gemini / OpenAI transcription | Repeat S14.2 with Gemini, then OpenAI | Both work; Gemini's times are close but may drift a little | |
+| S14.4 | Cloud slides | Media → Slide reading: Claude or Gemini → Read slides for 1 video | Cost shown first; slides and on-screen text appear like the local ones | |
+| S14.5 | Helper AI | Ratings on the local model + Helper: a cloud AI → Rate 20 videos | Finishes faster than local alone; the log ends "N by …, M by …" | |
+| S14.6 | Cloud index | Media → Meaning search index: Gemini → Save → confirm | The index rebuilds; Ask and By meaning search still find the right moments; switching back to This computer is instant | |
+| S14.7 | Local only | Settings → Local AI → Local only on, then try S14.2 | Everything runs on this computer; no cloud call is made | |
+
 ### S13 checks (remove a playlist from YourTube, 2026-10-31)
 
 Try it on a small playlist you can sync again, or on a copy of the library.

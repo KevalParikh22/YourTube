@@ -246,12 +246,26 @@ On **Settings → Cloud AI**, click **Set up** next to a provider, paste the key
 |---|---|---|---|
 | Claude (Anthropic) | console.anthropic.com | `ANTHROPIC_API_KEY` | `claude-haiku-5-5` (cheapest), `claude-sonnet-5-5`, `claude-opus-5-5` |
 | Gemini (Google) | aistudio.google.com | `GEMINI_API_KEY` | `gemini-2.5-flash`, `gemini-2.5-flash-lite`, `gemini-2.5-pro` |
-| Open-weight (OpenAI-compatible: OpenRouter, Groq, Together…) | the host's site | `OPENAI_API_KEY` | depends on the host; set the Server URL too |
+| Groq | console.groq.com | `GROQ_API_KEY` | `llama-3.3-70b-versatile`; also cloud transcription (`whisper-large-v3-turbo`, about $0.04 per audio hour) |
+| OpenAI | platform.openai.com | `OPENAI_API_KEY` | `gpt-5.4-mini`; also cloud transcription (`whisper-1`, about $0.36 per audio hour, shuts down 26 Feb 2027) and the meaning index (`text-embedding-3-small`) |
+| Open-weight (OpenAI-compatible: OpenRouter, Together…) | the host's site | `OPENAI_COMPAT_API_KEY` | depends on the host; set the Server URL too |
 | LM Studio (local) | — | — | load a model and start its local server |
 
 ### Which AI does what
 
 In **Settings → AI by task** (*Which AI does what*), pick a **Default** AI, then optionally a different one for **Categories**, **Ratings**, **Summaries**, **Questions and answers** and **About you** (drafting your interests). Example: a free local model for categories and Claude for ratings. A rating run shows the estimated tokens and cost before it starts. **Summaries**, **Questions and answers** and **About you** use the same AI as ratings unless you pick one.
+
+**Media** (same page): where the heavy steps run. Each is **This computer** unless you choose a cloud service with a key:
+
+| Step | Cloud choices | What is sent | Rough cost |
+|---|---|---|---|
+| Transcription | Groq, OpenAI, Gemini | the video's audio (deleted here afterwards) | Groq $0.04, Gemini ≈ $0.09, OpenAI $0.36 per audio hour. Gemini's timestamps are approximate |
+| Slide reading | Claude, Gemini, OpenAI, OpenAI-compatible | the slide frames (about 40 for a 30-minute talk) | well under $0.01 per video |
+| Meaning search index | Gemini, OpenAI | all indexed text (titles, transcripts, notes…) | about $0.10 (Gemini) or $0.02 (OpenAI) for 9,000 pieces |
+
+Switching the index to another service builds a new index; the old one is kept, so switching back is instant. Every cloud run shows its estimated cost first and asks before it starts. **Local only** (Settings → Local AI) blocks all of them.
+
+**Helper AI (works at the same time):** for Ratings, Summaries, Transcription and Slide reading you can add a helper: a cloud service when the main AI is local, or this computer when the main AI is cloud. A big batch is shared: each takes the next video when it is free, so the batch finishes sooner, and the task log says which AI did each video. The cost shown before a run is the most the cloud part can cost.
 
 ### Settings
 
@@ -297,7 +311,7 @@ Shortcuts are ignored while you type in a field.
 | Remove a playlist from YourTube | Playlists → **Remove** on its row. The dialog counts what happens first. Videos only in that playlist are removed with their subtitles, transcripts, ratings, summaries and slides; ones with your notes keep their notes, title and status (and the notes are downloaded as a .zip first); videos also in other playlists stay. Nothing changes on YouTube. Sync it again later to add it back (its fetched data starts over) | — |
 | Add one video | Playlists → paste the video link → Sync. It goes to the source *Added one by one*, which only grows; its details are fetched right away | — |
 | Separate libraries (e.g. Tech, Health, Personal) | Playlists → **Libraries** → Create; move playlists with the Library column; switch at the top of the page. Each library has its own categories, interests, time left, ratings and answers | — |
-| See or manage running tasks | The status button in the header: what runs, what waits (Remove), recent results. Starting a task while another runs puts it in the queue | — |
+| See or manage running tasks | The status button in the header: what runs, what waits (Remove), recent results. Tasks run in three lanes at the same time: **YouTube** (syncs, details), **This computer** (local AI, transcription, slides, index) and **Cloud** (cloud AI). Each lane runs one task at a time and queues the rest; each running task has its own log and Stop | — |
 | Fetch descriptions, chapters and captions | Playlists → Video details → Fetch | `.venv/bin/python main.py --details 200` |
 | Rate videos (Watch / Skim / Skip) | Library → **Rate N unrated** (or Home → Needs you), then sort by AI score | — |
 | Read slides, whiteboards and on-screen code | Mark videos (panel, category **Slides** switch, or suggestions), then Playlists → Read slides | — |
@@ -372,7 +386,7 @@ Normally edited through the AI, Categories and Playlists pages. Edit it by hand 
 | `YTKB_DATA_DIR` | Keep the database, settings, categories, logs, slide thumbnails and temporary media in this folder (Docker: `/data`). The variables above still win |
 | `YTKB_OLLAMA_URL` | Ollama address to use while the saved one is the default `http://localhost:11434` (Docker: `http://host.docker.internal:11434`) |
 | `YTKB_UID`, `YTKB_GID` | Docker only: the user the container runs as (default 1000), so it can write to `./data` |
-| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY` | API keys, used when no key is saved in Settings → Cloud AI |
+| `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPAT_API_KEY` | API keys, used when no key is saved in Settings → Cloud AI (`OPENAI_API_KEY` is now for OpenAI itself; OpenRouter and other OpenAI-compatible hosts use `OPENAI_COMPAT_API_KEY`) |
 | `YTKB_MODEL` | Model the setup script downloads instead of the recommendation |
 
 ### Command-line reference
