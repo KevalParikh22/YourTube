@@ -486,3 +486,50 @@ def _cool_down(sleep: Callable[[float], None], max_wait: float = 90) -> None:
         temp = gpu_temperature()
         if temp is None or temp <= RESUME_C:
             break
+
+
+def release_memory() -> None:
+    """Hands freed heap back to the system (glibc keeps it otherwise); a no-op where unavailable."""
+    import gc
+    gc.collect()
+    try:
+        import ctypes
+        ctypes.CDLL("libc.so.6").malloc_trim(0)
+    except (OSError, AttributeError):
+        pass
+
+
+def run_asr_isolated(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bool] = lambda: False) -> bool:
+    """
+    run_asr in a child process. Whisper and the NVIDIA libraries stay loaded in a process until it exits
+    (about 1.5 GB measured), so the dashboard runs each transcription task in its own short-lived process.
+    Its output goes to this task's log. Stop ends the child at once: each finished video is saved in its own
+    transaction, so nothing is half-written, and the interrupted video is simply transcribed next time.
+    """
+    import contextvars
+    import json as _json
+    import subprocess
+    import sys
+    import threading
+    child = subprocess.Popen([sys.executable, "-u", os.path.abspath(__file__), _json.dumps(video_ids)],
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+
+    def _watch():
+        while child.poll() is None:
+            if should_stop():
+                child.terminate()
+                return
+            time.sleep(0.5)
+    threading.Thread(target=contextvars.copy_context().run, args=(_watch,), daemon=True).start()
+    for line in child.stdout:
+        print(line.rstrip("\n"))
+    if child.wait() != 0 and should_stop():
+        print("Stopped. Videos finished so far are saved.")
+    return child.returncode == 0
+
+
+if __name__ == "__main__":   # the child of run_asr_isolated: argv[1] is the JSON list of video ids, or null
+    import json as _json
+    import sys
+    sys.exit(0 if run_asr(_json.loads(sys.argv[1])) else 1)
+

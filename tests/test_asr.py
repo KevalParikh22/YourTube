@@ -381,3 +381,17 @@ class RunAsrTest(unittest.TestCase):
 
 
 import unittest.mock  # noqa: E402  (used by RunAsrTest)
+
+
+class IsolatedRunTest(unittest.TestCase):
+    def test_child_process_output_reaches_this_log(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertTrue(local_asr.run_asr_isolated([]))
+        self.assertIn("Local transcription: 0 videos.", out.getvalue())
+
+    def test_dashboard_never_loads_whisper_itself(self):
+        import subprocess, sys
+        code = "import sys; sys.path.insert(0, 'yourtube'); import dashboard, voice, local_asr; print('faster_whisper' in sys.modules)"
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+        self.assertEqual(result.stdout.strip(), "False")

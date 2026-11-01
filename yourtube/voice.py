@@ -12,7 +12,6 @@ MODEL = ("small", "int8")
 
 _model_lock = threading.Lock()
 _transcribe_lock = threading.Lock()
-_whisper = None
 
 
 def available() -> bool:
@@ -22,11 +21,9 @@ def available() -> bool:
 
 
 def _model():
-    global _whisper
+    # Loaded per clip and released after: a few seconds each time instead of ~160 MB held for good
     with _model_lock:
-        if _whisper is None:
-            _whisper = local_asr.Transcriber(MODEL[0], "cpu", MODEL[1])
-        return _whisper
+        return local_asr.Transcriber(MODEL[0], "cpu", MODEL[1])
 
 
 def _extension(mime: str) -> str:
@@ -70,3 +67,4 @@ def transcribe_clip(data: bytes, mime: str, transcriber=None) -> dict:
             os.remove(path)
         except FileNotFoundError:
             pass
+        local_asr.release_memory()
