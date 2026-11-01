@@ -22,6 +22,7 @@ const JOB_TEXT = {
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
   embed: ['Updating the meaning index…', 'Meaning index updated', 'Index update stopped or failed. See the log.'],
   remove: ['Removing the playlist from YourTube…', 'Playlist removed from YourTube', 'Removing the playlist failed. See the log.'],
+  archive: ['Archiving playlist and freeing storage…', 'Playlist archived', 'Archiving the playlist failed. See the log.'],
   backup: ['Backing up the library…', 'Library backup created', 'Library backup failed. See the log.'],
 };
 const DETAIL_LABEL = { done: 'Transcript', no_captions: 'No captions', music: 'Music, no transcript', unavailable: 'Unavailable', failed: 'Failed, will retry' };
@@ -637,8 +638,13 @@ function viewSources() {
           ? `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}" title="Reads the playlist again: adds new videos, flags removed ones. Nothing changes on YouTube.">Check for new videos</button>`
           : `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}">Sync</button>`;
         const syncCell = `<td class="muted" data-label="Last synced"${p.updated_at ? ` title="${esc(fmtFullDate(p.updated_at))}"` : ''}>${p.updated_at ? esc(fmtRelTime(p.updated_at)) : '—'}</td>`;
+        const archived = !!p.archived_at && p.unfinished_videos === 0;
+        const finished = (p.active_videos || 0) > 0 && p.unfinished_videos === 0;
+        const cleanupStatus = archived ? `<div class="faint" style="font-size:12.5px">Archived ${esc(fmtFullDate(p.archived_at))}</div>`
+          : finished ? '<div class="faint" style="font-size:12.5px">All watched</div>' : '';
         return `<tr>
         <td data-label="Playlist"><a href="#/" data-act="v-src" data-v="${esc(p.id)}" style="font-weight:500">${esc(p.title)}</a>
+          ${cleanupStatus}
           ${p.access?.startsWith('browser:') ? `<div class="faint" style="font-size:12px">with your ${esc(p.access.slice(8).replace(/\b\w/g, c => c.toUpperCase()))} login</div>` : p.access === 'cookies' ? '<div class="faint" style="font-size:12px">with cookies.txt</div>' : ''}
           ${p.removed_videos ? `<div class="faint" style="font-size:12.5px">${p.removed_videos} removed on YouTube, kept in library</div>` : ''}</td>
         ${many ? `<td data-label="Library"><select data-change="pl-lib" data-id="${esc(p.id)}" aria-label="Library for ${esc(p.title)}" style="max-width:160px">
@@ -648,7 +654,8 @@ function viewSources() {
         ${syncCell}
         <td class="r" data-label="Actions" style="white-space:nowrap">${syncBtn}
           ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}
-          <button class="btn-text" data-act="pl-remove" data-id="${esc(p.id)}" data-job-btn aria-label="Remove ${esc(p.title)} from YourTube">Remove</button></td>
+          ${finished && !archived ? `<button class="btn-text" data-act="pl-archive" data-id="${esc(p.id)}" data-job-btn title="Keeps titles, status, notes, ratings and summaries; deletes transcripts, slide pictures and search data to free storage. Nothing changes on YouTube.">Archive</button>` : ''}
+          <button class="btn-text" data-act="pl-remove" data-id="${esc(p.id)}" data-job-btn aria-label="${archived ? 'Remove completely' : 'Remove'} ${esc(p.title)} from YourTube">${archived ? 'Remove completely' : 'Remove'}</button></td>
       </tr>`;
       }).join('')}</tbody></table></div>` : `<p class="note">${S.lib && S.data.playlists.length ? `No playlists in ${esc(libName(S.lib))} yet. Add one above, or move one here from another library.` : 'No playlists yet. Add one above.'}</p>`}
   </section>
@@ -2531,6 +2538,21 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'resync': runResync(el.dataset.id); break;
+    case 'pl-archive': {
+      const pid = el.dataset.id, name = playlistName(pid);
+      try {
+        const plan = await api(`/api/playlists/archive?id=${encodeURIComponent(pid)}`);
+        if (!plan.ready) { toast('This playlist is not ready to archive', true); await load(); break; }
+        const lines = [`${plural(plan.videos, 'video')} keep their title, status, notes, rating and summary.`,
+          `${plural(plan.videos, 'video')} lose their transcripts, slide pictures and search index (about ${storageBytes(plan.frees_bytes)}).`,
+          plan.shared > 0 && `${plural(plan.shared, 'video')} also in other playlists keep their data.`,
+          'They leave Search and Ask. Nothing changes on YouTube.'].filter(Boolean);
+        if (!confirm(`Archive “${name}”?\n\n${lines.join('\n')}`)) break;
+        await queued(await api('/api/playlists/archive', { id: pid }), `Archiving ${name}`);
+        await load();
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'pl-remove': {
       const pid = el.dataset.id, name = playlistName(pid);
       try {

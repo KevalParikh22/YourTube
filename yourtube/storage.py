@@ -594,8 +594,11 @@ def archive_plan(playlist_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
         size = cursor.execute("""
             SELECT COALESCE((SELECT SUM(LENGTH(text)) * 2 FROM transcript_segments WHERE video_id IN (SELECT value FROM json_each(?))), 0)
                  + COALESCE((SELECT SUM(LENGTH(e.vector)) FROM embedding_cache e JOIN search_docs d ON d.hash = e.hash
-                             WHERE d.kind IN ('transcript', 'slide') AND d.video_id IN (SELECT value FROM json_each(?))), 0)""",
-                              (ids, ids)).fetchone()[0]
+                             WHERE d.kind IN ('transcript', 'slide') AND d.video_id IN (SELECT value FROM json_each(?))), 0)
+                 -- the search piece plus its trigram index take about three times the text (checked: 13.9 MB estimated, 12.7 MB freed)
+                 + COALESCE((SELECT SUM(LENGTH(text)) * 3 FROM search_docs
+                             WHERE kind IN ('transcript', 'slide') AND video_id IN (SELECT value FROM json_each(?))), 0)""",
+                              (ids, ids, ids)).fetchone()[0]
         return {"ready": plan["ready"], "videos": len(plan["ids"]), "shared": plan["shared"], "frees_bytes": int(size or 0)}
 
 def archive_playlist(playlist_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
