@@ -203,7 +203,9 @@ function renderBar() {
     ? `<select data-change="lib" aria-label="Library" class="libsel">${S.data.libraries.map(l => `<option value="${l.id}" ${S.lib === l.id ? 'selected' : ''}>${esc(l.name)}</option>`).join('')}
         <option value="0" ${S.lib === 0 ? 'selected' : ''}>All libraries</option></select>` : '';
   $('#tabs').innerHTML = TABS.map(([k, l]) => `<a href="#/${k}" class="${tab === k ? 'on' : ''}"${tab === k ? ' aria-current="page"' : ''}>${l}</a>`).join('');
-  { const on = $('#tabs a.on'), nav = $('#tabs'); if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - nav.offsetLeft - 8; }   // phone: the menu scrolls, keep this page's tab in view
+  { const on = $('#tabs a.on'), nav = $('#tabs'); if (on && nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - nav.offsetLeft - 8;
+    const fade = () => nav.classList.toggle('has-left-overflow', nav.scrollLeft > 0);
+    nav.onscroll = fade; fade(); }   // phone: keep the active tab in view and show hidden items to the left
   $('#gsearch-btn').classList.toggle('on', r === 'search');
   $('#settings-btn').classList.toggle('on', tab === 'settings');
   $('#help-btn').classList.toggle('on', r === 'help');
@@ -1643,7 +1645,7 @@ function viewAI() {
     const f = ai.task_follows?.[name], p = f ? ai.tasks[f] || ai.provider : ai.provider;
     return `Same as ${f ? esc(ai.task_labels[f].split(' ')[0].toLowerCase()) : 'default'}${p !== 'none' && ai.providers[p] ? ` (${esc(ai.providers[p].label)})` : ''}`;
   };
-  const pick = (name, value, allowSame) => `<select data-ai-route="${name}" style="width:100%">
+  const pick = (name, value, allowSame) => `<select data-ai-route="${name}" aria-label="${esc(name === 'provider' ? 'Default' : ai.task_labels[name])} AI" style="width:100%">
       ${allowSame ? `<option value="" ${!value ? 'selected' : ''}>${sameAs(name)}</option>`
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
@@ -1684,9 +1686,9 @@ function viewGeneral() {
   <section class="section card">
     <h2 class="h">Display</h2>
     <div class="route" style="margin-top:8px"><label class="field-label" style="margin:0">Playback speed</label>
-      <select data-change="speed" style="width:100%">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}${x === 1 ? ' (normal)' : ''}</option>`).join('')}</select></div>
+      <select data-change="speed" aria-label="Playback speed" style="width:100%">${SPEEDS.map(x => `<option value="${x}" ${x === S.speed ? 'selected' : ''}>${sx(x)}${x === 1 ? ' (normal)' : ''}</option>`).join('')}</select></div>
     <div class="route"><label class="field-label" style="margin:0">Theme</label>
-      <select data-change="theme" style="width:100%">${[['auto', 'Match this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<option value="${k}" ${S.theme === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
+      <select data-change="theme" aria-label="Theme" style="width:100%">${[['auto', 'Match this computer'], ['light', 'Light'], ['dark', 'Dark']].map(([k, l]) => `<option value="${k}" ${S.theme === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     <label class="check" style="margin-top:12px"><input type="checkbox" data-change="show-descriptions" ${ai.show_descriptions ? 'checked' : ''}>
       <span>Show descriptions in the video panel</span></label>
     <p class="hint">Descriptions are collapsed by default in each video panel.</p>
@@ -1860,13 +1862,13 @@ function viewLocal() {
       <div class="actions"><label class="field-label" for="local-model">Model name</label><input type="text" id="local-model" placeholder="e.g. gemma4:e2b" style="width:260px">
         <button class="btn btn-sm" data-act="local-pull" data-job-btn>Download</button></div>` : ''}
     <div class="route" style="margin-top:14px"><label class="field-label" style="margin:0">Speech model</label>
-      <select data-change="asr-model" style="width:100%">${[['auto', 'Auto: large-v3-turbo on a GPU, small on the CPU'], ['large-v3-turbo', 'large-v3-turbo (best; ~1.6 GB)'],
+      <select data-change="asr-model" aria-label="Speech model" style="width:100%">${[['auto', 'Auto: large-v3-turbo on a GPU, small on the CPU'], ['large-v3-turbo', 'large-v3-turbo (best; ~1.6 GB)'],
         ['small', 'small (faster on CPU; ~0.5 GB)'], ['medium', 'medium (~1.5 GB)']].map(([k, l]) => `<option value="${k}" ${ai.asr_model === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
     ${L.ollama.running ? `<div class="route"><label class="field-label" style="margin:0">Slide model</label>
-      <select data-change="vision-model" style="width:100%"><option value="" ${!ai.vision_model ? 'selected' : ''}>Same as the text model${ai.providers.ollama.model ? ` (${esc(ai.providers.ollama.model)})` : ''}</option>
+      <select data-change="vision-model" aria-label="Slide model" style="width:100%"><option value="" ${!ai.vision_model ? 'selected' : ''}>Same as the text model${ai.providers.ollama.model ? ` (${esc(ai.providers.ollama.model)})` : ''}</option>
         ${(L.ollama.models || []).map(m => `<option value="${esc(m.name)}" ${ai.vision_model === m.name ? 'selected' : ''} ${m.vision ? '' : 'disabled'}>${esc(m.name)}${m.vision ? '' : ' (no image support)'}</option>`).join('')}</select></div>
     <div class="route"><label class="field-label" style="margin:0">Frame quality</label>
-      <select data-change="visual-height" style="width:100%">${[[480, '480p (default, smaller downloads)'], [720, '720p (small text, ~2× download)']].map(([k, l]) => `<option value="${k}" ${ai.visual_height === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
+      <select data-change="visual-height" aria-label="Frame quality" style="width:100%">${[[480, '480p (default, smaller downloads)'], [720, '720p (small text, ~2× download)']].map(([k, l]) => `<option value="${k}" ${ai.visual_height === k ? 'selected' : ''}>${l}</option>`).join('')}</select></div>` : ''}
     ${viewEmbed(L, running)}
     <label class="check" style="margin-top:16px"><input type="checkbox" data-change="local-only" ${ai.local_only ? 'checked' : ''}>
       <span><b style="font-weight:500">Local only</b></span> ${tip('Never send anything to a cloud AI (Claude, Gemini or hosted open-weight models).')}</label>
