@@ -1152,7 +1152,7 @@ class Handler(BaseHTTPRequestHandler):
                         return self._error("Transcription needs ffmpeg: run bash scripts/setup.sh")
                 label = _label("Transcribe locally" if engine == "local" else f"Transcribe with {llm.PROVIDERS[engine]['label']}", ids)
                 return self._queued(JOB.start("asr", label,
-                                              lambda: local_asr.run_asr(ids, should_stop=JOB.stop_requested), key=ids))
+                                              lambda: local_asr.run_asr_isolated(ids, should_stop=JOB.stop_requested), key=ids))
 
             if path == "/api/ask":
                 import asker
