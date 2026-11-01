@@ -265,8 +265,6 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(self.find("graph pasta")["results"], [])         # all terms required
         self.assertEqual(self.find('neo4j" OR "x')["results"][0]["video_id"], "a")  # quotes can't break the query
         self.assertEqual([x["video_id"] for x in self.find("neo4j", kinds=["transcript"])["results"]], [])
-        # 2 titles + description + chapter + 2 transcript blocks (0 s and 10 s share the first 30 s block)
-        self.assertEqual(storage.rebuild_search_index(db_path=self.db), 6)
 
     def test_existing_db_gets_index(self):
         import sqlite3

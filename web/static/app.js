@@ -1179,11 +1179,6 @@ async function runSearch() {
     if (seq === sr.seq) { sr.res = res; renderSearchResults(); }   // ignore answers to older keystrokes
   } catch (e) { if (seq === sr.seq) { sr.res = { results: [], short: false }; toast(e.message, true); renderSearchResults(); } }
 }
-function goSearch(q) {
-  S.search.q = q; S.search.res = null;
-  const target = `#/search?q=${encodeURIComponent(q)}`;
-  if (location.hash !== target) location.hash = target; else { refresh(); }
-}
 
 /* ---------------- ask ---------------- */
 const MODE_LABEL = { hybrid: 'meaning + keywords', keyword: 'keywords only (meaning index off)' };
@@ -1694,7 +1689,7 @@ function viewGeneral() {
     <label class="check" style="margin-top:12px"><input type="checkbox" data-change="show-descriptions" ${ai.show_descriptions ? 'checked' : ''}>
       <span>Show descriptions in the video panel</span></label>
     <p class="hint">Descriptions are collapsed by default in each video panel.</p>
-    <p class="hint">Display options ${tip('Watch times use this speed by default; the Plan page can change it too. Display settings are saved in this browser.')}</p>
+    <p class="hint">Display options ${tip('Watch times use this speed by default; the Home page can change it too. Display settings are saved in this browser.')}</p>
   </section>
   <section class="section card">
     <h2 class="h">API reference</h2>

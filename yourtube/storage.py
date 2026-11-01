@@ -1143,16 +1143,6 @@ def _reindex(cursor: sqlite3.Cursor, video_ids: Iterable[str], kinds: Iterable[s
             cursor.executemany("INSERT INTO search_docs (video_id, kind, t, text, hash) VALUES (?, ?, ?, ?, ?)",
                                [(vid, kind, t, text, _doc_hash(kind, text)) for t, text in _docs_for(cursor, vid, kind)])
 
-def rebuild_search_index(db_path: str = DB_PATH) -> int:
-    """Rebuilds the whole index; returns the number of indexed pieces."""
-    init_db(db_path)
-    with get_connection(db_path) as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM search_docs")
-        _reindex(cursor, [r[0] for r in cursor.execute("SELECT video_id FROM videos").fetchall()])
-        conn.commit()
-        return cursor.execute("SELECT COUNT(*) FROM search_docs").fetchone()[0]
-
 def _crop(marked: str, width: int = 200) -> str:
     """Cuts a window of about `width` characters around the first highlighted match, on word boundaries."""
     text = " ".join((marked or "").split())
@@ -1704,9 +1694,6 @@ def get_summary(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
     for k, default in _SUMMARY_JSON.items():
         d[k] = json.loads(d[k] or default)
     return d
-
-def summarized_ids(db_path: str = DB_PATH) -> set:
-    return set(summary_times(db_path))
 
 def summary_times(db_path: str = DB_PATH) -> Dict[str, str]:
     """{video_id: when its summary was made} for every summarised video."""

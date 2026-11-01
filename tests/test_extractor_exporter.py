@@ -2,7 +2,6 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
-from exporter import generate_youtube_watch_queue_urls
 from extractor import normalize_playlist_url
 
 
@@ -115,13 +114,6 @@ class PlaylistReadTest(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             self.read({'firefox': 'YouTube said: The playlist does not exist.'}, browser_cookies='firefox')
         self.assertIn('(YouTube said: The playlist does not exist.)', str(cm.exception))
-
-
-class ExporterTest(unittest.TestCase):
-    def test_queue_urls_are_chunked_at_50(self):
-        urls = generate_youtube_watch_queue_urls([f"id{i}" for i in range(120)])
-        self.assertEqual(len(urls), 3)
-        self.assertEqual(urls[2].split("video_ids=")[1].count(","), 19)
 
 
 class MarkdownTest(unittest.TestCase):

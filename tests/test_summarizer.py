@@ -61,7 +61,6 @@ class StorageAndRunTest(unittest.TestCase):
         storage.save_summary("s1", summarizer.validate(GOOD, 600, []), model="m")
         s = storage.get_summary("s1")
         self.assertEqual((s["tldr"], s["minutes"][1]["topic"], s["model"]), ("LoRA trains small adapters.", "Adapters", "m"))
-        self.assertIn("s1", storage.summarized_ids())
         hit = storage.search("70B model fits")["results"][0]
         self.assertEqual((hit["video_id"], hit["hits"][0]["kind"], hit["hits"][0]["t"]), ("s1", "summary", 250))
         self.assertIsNone(storage.get_summary("s3"))
