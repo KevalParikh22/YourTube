@@ -377,6 +377,12 @@ class DashboardTest(unittest.TestCase):
         self.assertTrue(r["ai"]["local_only"])
         self.call("/api/ai/settings", {"local_only": False, "edit": "ollama", "config": {"num_ctx": 8192}})
 
+    def test_archive_endpoints(self):
+        self.assertEqual(self.call("/api/playlists/archive?id=nope")[0], 404)
+        code, plan = self.call("/api/playlists/archive?id=PL1")
+        self.assertEqual((code, plan["ready"]), (200, False))   # its videos are unwatched
+        self.assertEqual(self.call("/api/playlists/archive", {"id": "PL1"})[0], 400)
+
     def test_files_endpoints(self):
         code, r = self.call("/api/files")
         self.assertEqual(code, 200)

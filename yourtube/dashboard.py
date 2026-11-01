@@ -325,6 +325,27 @@ def _remove_playlist(playlist_id, title):
         print(f"   {n('kept_notes', 'video')} with your notes kept their notes.")
     if done["shared"]:
         print(f"   {n('shared', 'video')} also in other playlists stayed.")
+    _vacuum()
+    return True
+
+def _vacuum():
+    """SQLite keeps freed pages until VACUUM; another task writing at the same time only delays it."""
+    try:
+        saved = storage.vacuum()
+        print(f"   The library file is {max(saved, 0) / 1e6:.1f} MB smaller.")
+    except sqlite3.Error as e:
+        print(f"Warning: could not compact the library file now ({e}); the space is reused by new data.")
+
+def _archive_playlist(playlist_id, title):
+    """Frees a finished playlist's transcripts, slide text and search data (storage.archive_playlist)."""
+    print(f'Archiving "{title}". Titles, status, notes, ratings and summaries stay. Nothing changes on YouTube.')
+    done = storage.archive_playlist(playlist_id)
+    for vid in done["archived"]:
+        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
+            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
+    print(f"   {len(done['archived'])} videos archived."
+          + (f" {done['shared']} also in an unfinished playlist kept everything." if done["shared"] else ""))
+    _vacuum()
     return True
 
 def _add_video(video_id, library=1):
@@ -656,9 +677,10 @@ class Handler(BaseHTTPRequestHandler):
             files.save_export(name, data)
             return self._send(200, data, "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
-        if url.path == "/api/playlists/remove":
+        if url.path in ("/api/playlists/remove", "/api/playlists/archive"):
+            plan = storage.remove_playlist_plan if url.path.endswith("remove") else storage.archive_plan
             try:
-                return self._json(storage.remove_playlist_plan((qs.get("id") or [""])[0]))
+                return self._json(plan((qs.get("id") or [""])[0]))
             except ValueError as e:
                 return self._error(str(e), 404)
         if url.path == "/api/retrieve":
@@ -869,6 +891,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("Unknown playlist", 404)
                 return self._queued(JOB.start("remove", f"Remove playlist: {found['title']}",
                                               lambda: _remove_playlist(pid, found["title"]), key=pid))
+
+            if path == "/api/playlists/archive":
+                pid = _clean(body.get("id")) or ""
+                found = storage.get_playlist(pid)
+                if found is None:
+                    return self._error("Unknown playlist", 404)
+                if not storage.archive_plan(pid)["ready"]:
+                    return self._error("Not every video in this playlist is watched or skipped yet")
+                return self._queued(JOB.start("archive", f"Archive playlist: {found['title']}",
+                                              lambda: _archive_playlist(pid, found["title"]), key=pid))
 
             if path == "/api/playlists/library":
                 target = body.get("library")

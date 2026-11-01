@@ -611,6 +611,74 @@
         }
       }
     },
+    "/api/playlists/archive": {
+      "get": {
+        "tags": ["Library"],
+        "summary": "Plan archiving a finished playlist (changes nothing)",
+        "operationId": "planArchivePlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Playlist ID",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether it is ready, how many videos lose transcripts and search data, and the estimated bytes freed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ready": {"type": "boolean"},
+                    "videos": {"type": "integer"},
+                    "shared": {"type": "integer"},
+                    "frees_bytes": {"type": "integer"}
+                  },
+                  "required": ["ready", "videos", "shared", "frees_bytes"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      },
+      "post": {
+        "tags": ["Library"],
+        "summary": "Queue archiving a finished playlist: frees transcripts, slide text and search data; keeps titles, status, notes, ratings and summaries",
+        "operationId": "archivePlaylist",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Playlist ID to remove"}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Playlist removal job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
     "/api/playlists/library": {
       "post": {
         "tags": ["Library"],

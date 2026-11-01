@@ -207,6 +207,7 @@ def init_db(db_path: str = DB_PATH) -> None:
             ("category_source", "TEXT NOT NULL DEFAULT 'keywords'"),
             ("has_visuals", "INTEGER"),          # slides/whiteboard: NULL = not set, 0/1 = set by the user
             ("ai_no_match", "TEXT"),            # taxonomy_key() when the AI found no category for this unsorted video
+            ("archived", "INTEGER NOT NULL DEFAULT 0"),   # transcripts and search data freed (archive_playlist)
         ):
             if col not in existing:
                 cursor.execute(f"ALTER TABLE videos ADD COLUMN {col} {ddl}")
@@ -231,6 +232,8 @@ def init_db(db_path: str = DB_PATH) -> None:
         cursor.execute("INSERT OR IGNORE INTO libraries (id, name) VALUES (1, ?)", (DEFAULT_LIBRARY_NAME,))
         if "library_id" not in _columns(cursor, "playlists"):
             cursor.execute("ALTER TABLE playlists ADD COLUMN library_id INTEGER NOT NULL DEFAULT 1")
+        if "archived_at" not in _columns(cursor, "playlists"):
+            cursor.execute("ALTER TABLE playlists ADD COLUMN archived_at TIMESTAMP")
         # Summaries (Phase 3): made when the user clicks Summarise, independent of the personal rating
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS video_summaries (
@@ -498,7 +501,9 @@ def get_playlists(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
         cursor = conn.cursor()
         cursor.execute("""
             SELECT p.id, p.title, p.original_url, p.created_at, p.updated_at, p.library_id, p.access, p.cookies_file,
+                   p.archived_at,
                    SUM(CASE WHEN pi.removed = 0 THEN 1 ELSE 0 END) AS active_videos,
+                   SUM(CASE WHEN pi.removed = 0 AND v.status NOT IN ('completed', 'skipped') THEN 1 ELSE 0 END) AS unfinished_videos,
                    SUM(CASE WHEN pi.removed = 1 THEN 1 ELSE 0 END) AS removed_videos,
                    SUM(CASE WHEN pi.removed = 0 THEN v.duration_seconds ELSE 0 END) AS duration_seconds
             FROM playlists p
@@ -562,6 +567,66 @@ def remove_playlist(playlist_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
         conn.commit()
     return {**{k: len(v) for k, v in groups.items()}, "cleared": cleared}
 
+# Archiving keeps what the user made or reads (row, status, notes, details, rating, summary) and frees the rest
+ARCHIVE_TABLES = ("transcript_segments", "visual_segments", "media_jobs")
+
+def _archive_ids(cursor: sqlite3.Cursor, playlist_id: str) -> Dict[str, Any]:
+    """{'ready': every active video is done, 'ids': done videos whose other playlists are all archived too, 'shared'}."""
+    if not cursor.execute("SELECT 1 FROM playlists WHERE id = ?", (playlist_id,)).fetchone():
+        raise ValueError("Unknown playlist")
+    rows = cursor.execute("""
+        SELECT i.video_id, i.removed, v.status IN ('completed', 'skipped') AS done,
+               EXISTS(SELECT 1 FROM playlist_items o JOIN playlists p ON p.id = o.playlist_id
+                      WHERE o.video_id = i.video_id AND o.playlist_id != i.playlist_id AND p.archived_at IS NULL) AS shared
+        FROM playlist_items i JOIN videos v ON v.video_id = i.video_id WHERE i.playlist_id = ?""", (playlist_id,)).fetchall()
+    active = [r for r in rows if not r["removed"]]
+    return {"ready": bool(active) and all(r["done"] for r in active),
+            "ids": [r["video_id"] for r in rows if r["done"] and not r["shared"]],
+            "shared": sum(1 for r in rows if r["done"] and r["shared"])}
+
+def archive_plan(playlist_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
+    """What archive_playlist would do: {'ready', 'videos', 'shared', 'frees_bytes' (estimate)}; changes nothing."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        plan = _archive_ids(cursor, playlist_id)
+        ids = json.dumps(plan["ids"])
+        size = cursor.execute("""
+            SELECT COALESCE((SELECT SUM(LENGTH(text)) * 2 FROM transcript_segments WHERE video_id IN (SELECT value FROM json_each(?))), 0)
+                 + COALESCE((SELECT SUM(LENGTH(e.vector)) FROM embedding_cache e JOIN search_docs d ON d.hash = e.hash
+                             WHERE d.kind IN ('transcript', 'slide') AND d.video_id IN (SELECT value FROM json_each(?))), 0)""",
+                              (ids, ids)).fetchone()[0]
+        return {"ready": plan["ready"], "videos": len(plan["ids"]), "shared": plan["shared"], "frees_bytes": int(size or 0)}
+
+def archive_playlist(playlist_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
+    """
+    Frees a finished playlist's heavy data in one transaction: transcripts, slide text, media jobs and their search
+    pieces and vectors. Titles, status, notes, details, ratings and summaries stay. Videos still in an unfinished
+    playlist keep everything. Raises ValueError unless every active video is done. Returns {'archived': ids}.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        plan = _archive_ids(cursor, playlist_id)
+        if not plan["ready"]:
+            raise ValueError("Not every video in this playlist is watched or skipped yet")
+        ids = json.dumps(plan["ids"])
+        for table in ARCHIVE_TABLES:
+            cursor.execute(f"DELETE FROM {table} WHERE video_id IN (SELECT value FROM json_each(?))", (ids,))
+        cursor.execute("UPDATE videos SET archived = 1 WHERE video_id IN (SELECT value FROM json_each(?))", (ids,))
+        cursor.execute("UPDATE playlists SET archived_at = CURRENT_TIMESTAMP WHERE id = ?", (playlist_id,))
+        _reindex(cursor, plan["ids"])
+        cursor.execute("DELETE FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs WHERE hash IS NOT NULL)")
+        conn.commit()
+    return {"archived": plan["ids"], "shared": plan["shared"]}
+
+def vacuum(db_path: str = DB_PATH) -> int:
+    """Gives freed pages back to the disk (SQLite keeps them otherwise); returns the bytes saved."""
+    before = os.path.getsize(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("VACUUM")
+    return before - os.path.getsize(db_path)
+
 def update_videos(
     video_ids: Iterable[str],
     status: Optional[str] = None,
@@ -599,6 +664,11 @@ def update_videos(
             (*params, json.dumps(ids))
         )
         updated = cursor.rowcount
+        if status is not None and status not in DONE_STATUSES:
+            # Back on the list: an archived video gets its details (and so its transcript) fetched again
+            cursor.execute("DELETE FROM video_details WHERE video_id IN (SELECT value FROM json_each(?)) AND video_id IN "
+                           "(SELECT video_id FROM videos WHERE archived = 1)", (json.dumps(ids),))
+            cursor.execute("UPDATE videos SET archived = 0 WHERE video_id IN (SELECT value FROM json_each(?))", (json.dumps(ids),))
         if notes is not None:
             _reindex(cursor, ids, kinds=("notes",))
         if category is not None:
@@ -1252,7 +1322,7 @@ def videos_needing_asr(video_ids: Optional[Iterable[str]] = None, max_tries: int
                    j.status AS job_status, j.tries AS job_tries
             FROM videos v JOIN video_details d ON d.video_id = v.video_id
             LEFT JOIN media_jobs j ON j.video_id = v.video_id AND j.kind = 'asr'
-            WHERE d.status IN ('done', 'no_captions')
+            WHERE d.status IN ('done', 'no_captions') AND v.archived = 0
             ORDER BY CASE WHEN v.status IN ('completed', 'skipped') THEN 1 ELSE 0 END, v.added_at, v.rowid
         """).fetchall()
         wanted = set(video_ids) if video_ids is not None else None
@@ -1364,6 +1434,7 @@ def videos_needing_visuals(video_ids: Optional[Iterable[str]] = None, visual_cat
                    j.status AS job_status, j.tries AS job_tries
             FROM videos v LEFT JOIN video_details d ON d.video_id = v.video_id
             LEFT JOIN media_jobs j ON j.video_id = v.video_id AND j.kind = 'visual'
+            WHERE v.archived = 0
             ORDER BY CASE WHEN v.status IN ('completed', 'skipped') THEN 1 ELSE 0 END, v.added_at, v.rowid
         """).fetchall()
     wanted = set(video_ids) if video_ids is not None else None
