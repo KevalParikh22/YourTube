@@ -1325,7 +1325,8 @@ def videos_needing_asr(video_ids: Optional[Iterable[str]] = None, max_tries: int
             if wanted is not None:
                 if v["video_id"] not in wanted:
                     continue
-            elif v["has_local"] or (v["job_status"] == "failed" and (v["job_tries"] or 0) >= max_tries):
+            elif v["has_local"] or v["job_status"] == "done" or (v["job_status"] == "failed" and (v["job_tries"] or 0) >= max_tries):
+                # "done" without a local transcript: Whisper heard no speech (music or silence); only a click retries it
                 continue
             if v["details_status"] == "no_captions":
                 v["reason"] = "no_captions"

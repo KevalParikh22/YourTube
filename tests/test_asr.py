@@ -41,6 +41,11 @@ class SourcesTest(unittest.TestCase):
             storage.set_job("none", "asr", status="failed", error="x", db_path=self.db)
         self.assertEqual(self.reasons(), {"wrong": "wrong_script"})  # gave up after 3 tries
 
+    def test_no_speech_is_not_queued_again_but_can_be_retried(self):
+        storage.set_job("none", "asr", status="done", db_path=self.db)    # finished, nothing heard (music)
+        self.assertNotIn("none", self.reasons())
+        self.assertIn("none", self.reasons(["none"]))                      # Try again in the panel
+
     def test_local_transcript_without_captions_becomes_active(self):
         storage.save_local_transcript("none", [{"start": 1.5, "dur": 2, "text": "whisper heard this"}], "en", "small", db_path=self.db)
         d = storage.get_details("none", db_path=self.db)

@@ -13,6 +13,7 @@ never returned to the browser.
 """
 import os
 import re
+import time
 import json
 import base64
 import urllib.request
@@ -416,17 +417,33 @@ def _post_json(url: str, body: Dict[str, Any], headers: Dict[str, str], timeout:
 def _get_json(url: str, headers: Dict[str, str], timeout: int = 15) -> Dict[str, Any]:
     return _open(urllib.request.Request(url, headers=headers), timeout)
 
+RETRIES = 3   # per call, for "too many requests" (429) and "overloaded" (503)
+
+def _wait_for(e: urllib.error.HTTPError, body: str, attempt: int) -> Optional[float]:
+    """Seconds to wait before trying again, or None when waiting won't help (a used-up daily quota)."""
+    if e.code not in (429, 503) or attempt >= RETRIES or re.search(r"per ?day|PerDay|daily", body, re.I):
+        return None
+    hint = e.headers.get("Retry-After") if e.headers else None
+    found = re.search(r'"retryDelay":\s*"(\d+(?:\.\d+)?)s"', body)   # Gemini says how long in the error
+    seconds = float(hint) if hint and hint.replace(".", "", 1).isdigit() else float(found.group(1)) if found else 10 * 2 ** attempt
+    return min(seconds + 1, 90)
+
 def _open(req: urllib.request.Request, timeout: int) -> Dict[str, Any]:
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        detail = e.read().decode("utf-8", "replace")[:300]
-        raise LLMError(f"HTTP {e.code} from {req.full_url.split('?')[0]}: {detail}") from None
-    except urllib.error.URLError as e:
-        raise LLMError(f"Could not reach {req.full_url.split('?')[0]}: {e.reason}") from None
-    except TimeoutError:
-        raise LLMError(f"Timed out waiting for {req.full_url.split('?')[0]}") from None
+    for attempt in range(RETRIES + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")
+            wait = _wait_for(e, body, attempt)
+            if wait is None:
+                raise LLMError(f"HTTP {e.code} from {req.full_url.split('?')[0]}: {body[:300]}") from None
+            print(f"   The AI service is busy or rate-limited (HTTP {e.code}); trying again in {wait:.0f} s.")
+            time.sleep(wait)
+        except urllib.error.URLError as e:
+            raise LLMError(f"Could not reach {req.full_url.split('?')[0]}: {e.reason}") from None
+        except TimeoutError:
+            raise LLMError(f"Timed out waiting for {req.full_url.split('?')[0]}") from None
 
 
 # --- providers ---------------------------------------------------------------

@@ -434,6 +434,7 @@ function selBar() {
     <select data-change="bulk-cat" aria-label="Move to category"><option value="">Move to…</option>
       ${categoryNames().map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}<option value="__new">New category…</option></select>
     ${sel.some(v => v.suggestion) ? `<button class="btn-text" data-act="sug-accept-sel">Accept AI suggestions</button>` : ''}
+    ${S.data.ai.ready_for.rate ? `<button class="btn-text" data-act="rate-sel" data-job-btn>Rate selected</button>` : ''}
     ${S.data.ai.ready_for.summarize ? `<button class="btn-text" data-act="summarize-sel" data-job-btn>Summarise selected</button>` : ''}
     ${queueUrls(sel).map((u, i, a) => `<a class="btn-text" href="${esc(u)}" target="_blank" rel="noopener">Play${a.length > 1 ? ` ${i + 1}/${a.length}` : ''}</a>`).join('')}
     <span class="grow"></span>
@@ -2205,7 +2206,7 @@ function drawerDetails(v) {
       ? `<div class="kv-line"><span class="spin" style="display:inline-block;vertical-align:-1px"></span> Transcribing locally${job && !['done', 'failed'].includes(job.status) ? `: ${esc(job.status)}${job.progress ? ` ${Math.round(job.progress * 100)}%` : ''}` : ''}…</div>`
     : det.asr_reason
       ? `<div class="kv-line">${det.asr_reason === 'wrong_script' ? 'These captions look like the wrong script for the spoken language.' : 'No captions.'}
-          ${job?.status === 'failed' ? `Last try failed: ${esc((job.error || '').slice(0, 120))}. ` : ''}${asrBtn('Transcribe locally')}</div>` : '';
+          ${job?.status === 'failed' ? `Last try failed: ${esc((job.error || '').slice(0, 120))}. ` : ''}${job?.status === 'done' ? `Transcribed locally: no speech found (music or silence). ${asrBtn('Try again')}` : asrBtn('Transcribe locally')}</div>` : '';
   return `<span class="field-label">Details</span><div class="kv-line">${head}${det.sources.includes('local-asr') && det.sources.length === 1 ? ' · local transcript' : ''} · ${fetchBtn('Refresh')}</div>
     ${asrLine}
     ${full.chapters.length ? `<div style="margin-top:10px">${full.chapters.map(c => `<button class="chap" data-act="seek" data-t="${Math.floor(c.start)}"><time>${clock(c.start)}</time><span>${esc(c.title)}</span></button>`).join('')}</div>` : ''}
@@ -2450,6 +2451,7 @@ document.addEventListener('click', async e => {
     case 'rate-batch': startRate(null); break;
     case 'rate-filtered': startRate(el.dataset.ids.split(',').filter(Boolean)); break;
     case 'rate-one': startRate([id]); break;
+    case 'rate-sel': startRate([...S.sel]); break;
     case 'summarize-one': startSummary([id]); break;
     case 'summarize-sel': startSummary([...S.sel]); break;
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
@@ -2959,7 +2961,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.id === 'aq' && !e.isComposing) { e.preventDefault(); runAsk(); }
   if (e.key === 'Enter' && e.target.id === 'new-cat-name' && !e.isComposing) { e.preventDefault(); saveNewCategory(); }
 });
-addEventListener('hashchange', () => { if (!location.hash || location.hash === '#') { location.replace('#/home'); return; } if (S.about.recording) stopAboutRecording(); if (S.data) { S.sel.clear(); S.addingCat = false; renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); } });
+addEventListener('hashchange', () => { if (!location.hash || location.hash === '#') { location.replace('#/home'); return; } if (S.about.recording) stopAboutRecording(); if (S.data) { S.sel.clear(); S.addingCat = false; S.storage = null; S.knowledge.list = null; renderBar(); renderView(); renderAskPop(); scrollTo(0, 0); load({ keepEdits: true }); } });   // show at once, then the latest state
 
 applyTheme();
 load();
