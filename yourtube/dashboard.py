@@ -1508,6 +1508,21 @@ def _probe_job(port, timeout=2.0):
         return False
 
 
+def clean_media_cache():
+    """Deletes files left in media_cache/ by tasks a restart cut off (nothing runs at startup). Folders and links stay."""
+    root = os.path.join(os.environ.get("YTKB_DATA_DIR") or ROOT_DIR, "media_cache")
+    freed = 0
+    for folder in (root, *(os.path.join(root, d) for d in ("asr", "visual", "voice"))):
+        if os.path.islink(root) or os.path.islink(folder) or not os.path.isdir(folder):
+            continue
+        for entry in os.scandir(folder):
+            if entry.is_file(follow_symlinks=False):
+                freed += entry.stat(follow_symlinks=False).st_size
+                os.remove(entry.path)
+    if freed:
+        applog.get("dashboard").info("Removed %.1f MB of leftover media", freed / 1e6)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="YourTube local dashboard")
     parser.add_argument("--port", type=int, default=8765)
@@ -1546,6 +1561,7 @@ def main(argv=None):
             sys.exit(0 if _probe_job(args.port) else 1)
         raise
 
+    clean_media_cache()
     storage.init_db()
     import platform
     applog.get("dashboard").info("Dashboard started: port=%s, python=%s, yt-dlp=%s, platform=%s, db=%s",

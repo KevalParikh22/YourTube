@@ -630,6 +630,19 @@ class ServiceAndStartupTest(unittest.TestCase):
         self.orig_token = dashboard.TOKEN
         self.addCleanup(setattr, dashboard, "TOKEN", self.orig_token)
 
+    def test_startup_removes_leftover_media_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            asr = os.path.join(tmp, "media_cache", "asr")
+            os.makedirs(asr)
+            for name in ("media_cache/chunk_000.mp3", "media_cache/asr/cut.m4a", "keep.db"):
+                with open(os.path.join(tmp, name), "wb") as f:
+                    f.write(b"x")
+            with mock.patch.dict(os.environ, {"YTKB_DATA_DIR": tmp}):
+                dashboard.clean_media_cache()
+            self.assertEqual(os.listdir(os.path.join(tmp, "media_cache")), ["asr"])
+            self.assertEqual(os.listdir(asr), [])
+            self.assertTrue(os.path.exists(os.path.join(tmp, "keep.db")))
+
     def test_main_non_tty_start_line_without_token(self):
         buf = io.StringIO()
         fake_server = mock.MagicMock()
