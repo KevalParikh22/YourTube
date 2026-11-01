@@ -325,6 +325,27 @@ def _remove_playlist(playlist_id, title):
         print(f"   {n('kept_notes', 'video')} with your notes kept their notes.")
     if done["shared"]:
         print(f"   {n('shared', 'video')} also in other playlists stayed.")
+    _vacuum()
+    return True
+
+def _vacuum():
+    """SQLite keeps freed pages until VACUUM; another task writing at the same time only delays it."""
+    try:
+        saved = storage.vacuum()
+        print(f"   The library file is {max(saved, 0) / 1e6:.1f} MB smaller.")
+    except sqlite3.Error as e:
+        print(f"Warning: could not compact the library file now ({e}); the space is reused by new data.")
+
+def _archive_playlist(playlist_id, title):
+    """Frees a finished playlist's transcripts, slide text and search data (storage.archive_playlist)."""
+    print(f'Archiving "{title}". Titles, status, notes, ratings and summaries stay. Nothing changes on YouTube.')
+    done = storage.archive_playlist(playlist_id)
+    for vid in done["archived"]:
+        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
+            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
+    print(f"   {len(done['archived'])} videos archived."
+          + (f" {done['shared']} also in an unfinished playlist kept everything." if done["shared"] else ""))
+    _vacuum()
     return True
 
 def _add_video(video_id, library=1):
@@ -656,9 +677,10 @@ class Handler(BaseHTTPRequestHandler):
             files.save_export(name, data)
             return self._send(200, data, "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
-        if url.path == "/api/playlists/remove":
+        if url.path in ("/api/playlists/remove", "/api/playlists/archive"):
+            plan = storage.remove_playlist_plan if url.path.endswith("remove") else storage.archive_plan
             try:
-                return self._json(storage.remove_playlist_plan((qs.get("id") or [""])[0]))
+                return self._json(plan((qs.get("id") or [""])[0]))
             except ValueError as e:
                 return self._error(str(e), 404)
         if url.path == "/api/retrieve":
@@ -869,6 +891,16 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("Unknown playlist", 404)
                 return self._queued(JOB.start("remove", f"Remove playlist: {found['title']}",
                                               lambda: _remove_playlist(pid, found["title"]), key=pid))
+
+            if path == "/api/playlists/archive":
+                pid = _clean(body.get("id")) or ""
+                found = storage.get_playlist(pid)
+                if found is None:
+                    return self._error("Unknown playlist", 404)
+                if not storage.archive_plan(pid)["ready"]:
+                    return self._error("Not every video in this playlist is watched or skipped yet")
+                return self._queued(JOB.start("archive", f"Archive playlist: {found['title']}",
+                                              lambda: _archive_playlist(pid, found["title"]), key=pid))
 
             if path == "/api/playlists/library":
                 target = body.get("library")
@@ -1145,21 +1177,6 @@ class Handler(BaseHTTPRequestHandler):
                 if not isinstance(ask_id, int) or isinstance(ask_id, bool):
                     return self._error("id must be a number")
                 return self._json({"ok": True, "deleted": storage.delete_ask(ask_id)})
-
-            if path == "/api/tools/length":
-                import tools
-                raw_links = body.get("links")
-                if not isinstance(raw_links, list):
-                    return self._error("links must be a list")
-                cleaned = [l.strip() for l in raw_links if isinstance(l, str) and l.strip()]
-                if not cleaned:
-                    return self._error("No valid links provided")
-                if len(raw_links) > 10 or len(cleaned) > 10:
-                    return self._error("At most 10 links allowed")
-                browser = body.get("browser") or None
-                if browser is not None and (not isinstance(browser, str) or browser not in ALLOWED_BROWSERS):
-                    return self._error("Unknown browser")
-                return self._json({"items": tools.read_links(cleaned, browser=browser)})
 
             if path == "/api/embed":
                 import embedder
@@ -1508,6 +1525,21 @@ def _probe_job(port, timeout=2.0):
         return False
 
 
+def clean_media_cache():
+    """Deletes files left in media_cache/ by tasks a restart cut off (nothing runs at startup). Folders and links stay."""
+    root = os.path.join(os.environ.get("YTKB_DATA_DIR") or ROOT_DIR, "media_cache")
+    freed = 0
+    for folder in (root, *(os.path.join(root, d) for d in ("asr", "visual", "voice"))):
+        if os.path.islink(root) or os.path.islink(folder) or not os.path.isdir(folder):
+            continue
+        for entry in os.scandir(folder):
+            if entry.is_file(follow_symlinks=False):
+                freed += entry.stat(follow_symlinks=False).st_size
+                os.remove(entry.path)
+    if freed:
+        applog.get("dashboard").info("Removed %.1f MB of leftover media", freed / 1e6)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="YourTube local dashboard")
     parser.add_argument("--port", type=int, default=8765)
@@ -1546,6 +1578,7 @@ def main(argv=None):
             sys.exit(0 if _probe_job(args.port) else 1)
         raise
 
+    clean_media_cache()
     storage.init_db()
     import platform
     applog.get("dashboard").info("Dashboard started: port=%s, python=%s, yt-dlp=%s, platform=%s, db=%s",

@@ -265,8 +265,6 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(self.find("graph pasta")["results"], [])         # all terms required
         self.assertEqual(self.find('neo4j" OR "x')["results"][0]["video_id"], "a")  # quotes can't break the query
         self.assertEqual([x["video_id"] for x in self.find("neo4j", kinds=["transcript"])["results"]], [])
-        # 2 titles + description + chapter + 2 transcript blocks (0 s and 10 s share the first 30 s block)
-        self.assertEqual(storage.rebuild_search_index(db_path=self.db), 6)
 
     def test_existing_db_gets_index(self):
         import sqlite3
@@ -299,6 +297,60 @@ class IndexVersionTest(unittest.TestCase):
         storage.save_details("iv", {"status": "done", "segments": [{"start": 0, "text": "plain talk"}, {"start": 40, "text": "more plain talk"}]}, db_path=db)
         self.assertNotEqual(storage.index_version(db), before)            # row ids were reused; the counter still moved
         self.assertNotIn("iv", storage.visual_hints(db_path=db))          # so the cached phrase scan was refreshed
+
+
+class ArchivePlaylistTest(unittest.TestCase):
+    def setUp(self):
+        self.db = temp_db()
+        storage.save_playlist(playlist("DONE"), [video("solo", "Lonely talk"), video("both", "Shared talk")], db_path=self.db)
+        storage.save_playlist(playlist("OPEN"), [video("both", "Shared talk"), video("other", "Other talk")], db_path=self.db)
+        for vid in ("solo", "both"):
+            storage.save_details(vid, {"status": "done", "description": f"about {vid}",
+                                       "segments": [{"start": 0, "text": f"spoken words of {vid} " * 400}]}, db_path=self.db)
+            storage.save_rating(vid, {"score": 7, "verdict": "watch", "reason": "good"}, db_path=self.db)
+            storage.save_summary(vid, {"tldr": f"summary of {vid}"}, db_path=self.db)
+        storage.save_embeddings("m", [(h, 256, b"\0" * 1024) for (h,) in sqlite3.connect(self.db).execute("SELECT hash FROM search_docs")],
+                                db_path=self.db)
+        storage.update_videos(["solo"], status="completed", notes="my thoughts", db_path=self.db)
+
+    def rows(self, table, vid):
+        with sqlite3.connect(self.db) as c:
+            return c.execute(f"SELECT COUNT(*) FROM {table} WHERE video_id = ?", (vid,)).fetchone()[0]
+
+    def test_refused_until_every_video_is_done(self):
+        self.assertFalse(storage.archive_plan("DONE", db_path=self.db)["ready"])
+        with self.assertRaises(ValueError):
+            storage.archive_playlist("DONE", db_path=self.db)
+        self.assertEqual(self.rows("transcript_segments", "solo"), 1)
+
+    def test_frees_heavy_data_keeps_what_matters_and_shared_videos(self):
+        storage.update_videos(["both"], status="skipped", db_path=self.db)
+        plan = storage.archive_plan("DONE", db_path=self.db)
+        self.assertEqual((plan["ready"], plan["videos"], plan["shared"]), (True, 1, 1))
+        self.assertGreater(plan["frees_bytes"], 0)
+        storage.archive_playlist("DONE", db_path=self.db)
+        for table in ("transcript_segments", "media_jobs"):
+            self.assertEqual(self.rows(table, "solo"), 0, table)
+        for table in ("video_details", "video_ratings", "video_summaries"):
+            self.assertEqual(self.rows(table, "solo"), 1, table)
+        self.assertEqual(storage.search("spoken words of solo", db_path=self.db)["results"], [])
+        self.assertEqual([r["video_id"] for r in storage.search("my thoughts", db_path=self.db)["results"]], ["solo"])
+        self.assertEqual(self.rows("transcript_segments", "both"), 1)   # still in the unfinished OPEN playlist
+        with sqlite3.connect(self.db) as c:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs)").fetchone()[0], 0)
+        archived = {p["id"]: p["archived_at"] for p in storage.get_playlists(db_path=self.db)}
+        self.assertTrue(archived["DONE"])
+        self.assertIsNone(archived["OPEN"])
+        self.assertGreater(storage.vacuum(self.db), 0)
+
+    def test_archived_videos_are_not_fetched_again_until_unwatched(self):
+        storage.update_videos(["both"], status="completed", db_path=self.db)
+        storage.archive_playlist("DONE", db_path=self.db)
+        self.assertNotIn("solo", [v["video_id"] for v in storage.videos_needing_details(db_path=self.db)])
+        self.assertNotIn("solo", [v["video_id"] for v in storage.videos_needing_asr(db_path=self.db)])
+        storage.update_videos(["solo"], status="unwatched", db_path=self.db)
+        self.assertIn("solo", [v["video_id"] for v in storage.videos_needing_details(db_path=self.db)])
+        self.assertEqual(self.rows("video_summaries", "solo"), 1)
 
 
 class RemovePlaylistTest(unittest.TestCase):

@@ -294,7 +294,6 @@ The top bar holds the main pages and, on the right, a light/dark switch (moon or
 - **Library**: every video, with filters, search and actions. Sort by **AI score** and filter by **Watch / Skim / Skip / Not rated**; **Rate N unrated** and **Skip the N AI skips** (with Undo) appear above the list.
 - **Knowledge**: topic pages built from summaries. The first time, it shows how: per category **Summarise 5**, then **Build** once 3 videos are summarised.
 - **Playlists** and **Categories**.
-- **Tools**: how long any playlist or video takes, without adding it to your library (see Everyday use).
 
 Old links to Plan and Triage open Home and the Library (sorted by AI score). **Ask** is the round chat button at the bottom right: it opens a small panel, and **Open full page** continues the same conversation on the Ask page. **Help** shows this guide, the downloads and the keyboard shortcuts.
 
@@ -303,7 +302,7 @@ Old links to Plan and Triage open Home and the Library (sorted by AI score). **A
 | `/` | Search |
 | `A` | Ask your library |
 | `?` | Show keyboard shortcuts |
-| `G` then `H` `L` `K` `Y` `C` `T` `S` | Home, Library, Knowledge, Playlists, Categories, Tools, Settings |
+| `G` then `H` `L` `K` `Y` `C` `S` | Home, Library, Knowledge, Playlists, Categories, Settings |
 | `G` then `?` | Help |
 | `Esc` | Close the dialog, Ask panel or video panel |
 | `J` / `K` | Next / previous video in the video panel |
@@ -317,7 +316,8 @@ Shortcuts are ignored while you type in a field.
 | Task | Dashboard | Command line |
 |---|---|---|
 | Sync a playlist | Playlists → Sync (a playlist already synced says **Check for new videos**: it reads the playlist again, adds new videos and flags removed ones; nothing changes on YouTube) | `.venv/bin/python main.py <ID> --browser auto` |
-| Remove a playlist from YourTube | Playlists → **Remove** on its row. The dialog counts what happens first. Videos only in that playlist are removed with their subtitles, transcripts, ratings, summaries and slides; ones with your notes keep their notes, title and status (and the notes are downloaded as a .zip first); videos also in other playlists stay. Nothing changes on YouTube. Sync it again later to add it back (its fetched data starts over) | — |
+| Free the space of a finished playlist | Playlists → a playlist whose videos are all watched or skipped shows **All watched** and **Archive**. The confirm says how much space it frees. Titles, status, notes, ratings and summaries stay; transcripts, slide pictures and search data are deleted, so those videos leave Search and Ask. A video also in an unfinished playlist keeps everything. Set an archived video back to unwatched and its details are fetched again. Nothing changes on YouTube | — |
+| Remove a playlist from YourTube | Playlists → **Remove** on its row (**Remove completely** once it is archived; it also frees the space on disk). The dialog counts what happens first. Videos only in that playlist are removed with their subtitles, transcripts, ratings, summaries and slides; ones with your notes keep their notes, title and status (and the notes are downloaded as a .zip first); videos also in other playlists stay. Nothing changes on YouTube. Sync it again later to add it back (its fetched data starts over) | — |
 | Add one video | Playlists → paste the video link → Sync. It goes to the source *Added one by one*, which only grows; its details are fetched right away | — |
 | Separate libraries (e.g. Tech, Health, Personal) | Playlists → **Libraries** → Create; move playlists with the Library column; switch at the top of the page. Each library has its own categories, interests, time left, ratings and answers | — |
 | See or manage running tasks | The status button in the header: what runs, what waits (Remove), recent results. Tasks run in three lanes at the same time: **YouTube** (syncs, details), **This computer** (local AI, transcription, slides, index) and **Cloud** (cloud AI). Each lane runs one task at a time and queues the rest; each running task has its own log and Stop | — |
@@ -336,7 +336,6 @@ Shortcuts are ignored while you type in a field.
 | Category suggestions after sync | Settings → Sync and details → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
 | Export notes for Obsidian / note apps (Markdown) | Library → Export → Notes (.zip), the selection bar's **Export notes**, or **Export note** in a video's panel | — |
-| How long is a playlist? | **Tools** → paste up to 10 playlist or video links, one per line → **Calculate**. For each: total time at 1× to 2×, a **From video / To video** range (for example 31–100), how many you already have, **Export CSV**, and **Add to library**. With two or more playlists: the combined time counting each video once, and which videos are shared or only in one (**Export only here**). The **Daily planner** gives a finish date from minutes a day, days a week and speed. Private playlists need **Use my YouTube sign-in**. Nothing is saved | — |
 | Back up or restore the library | Settings → **Storage** → Back up now, or Restore on a backup | — |
 | Export your library | Library → Export → CSV or JSON (a copy is kept in Settings → Storage → Exports) | `curl -o library.csv "http://127.0.0.1:8765/api/export?format=csv"` (dashboard running) |
 
@@ -355,7 +354,7 @@ With `YTKB_DATA_DIR` set (Docker sets it to `/data`), all of these except `.venv
 | `taxonomy.json` | Your categories and their keywords | Yes (you start with no categories again) |
 | `reports/` | Old static reports from earlier versions (no longer written) | Yes |
 | `frames/` | Slide thumbnails for the slide strip | Yes (the strip disappears; read slides again to restore it) |
-| `media_cache/` | Temporary audio and video while processing; emptied after each job | Yes |
+| `media_cache/` | Temporary audio and video while processing; emptied after each job, and anything a cut-off task left is deleted when YourTube starts | Yes |
 | `backups/` | Library backups from Settings → Storage (`yourtube-<date>-<time>.db`, with a folder of category files beside each); the newest 10 are kept | Yes (but they are your way back) |
 | `exports/` | A copy of every export you downloaded | Yes |
 | `logs/` | `yourtube.log` (and up to 5 older copies of 2 MB each): failures with their cause, fix and details. Keys, cookies and the access token are blanked out | Yes |

@@ -6,7 +6,7 @@ reason, the ranges worth skimming, a TL;DR and key points with timestamps, writt
 user's preferred language. The rating weighs content depth and quality, fit with the user's
 interests, time against value, and freshness.
 
-Ratings never change a video. The user accepts a verdict (e.g. "Accept all skips") in Triage.
+Ratings never change a video. The user accepts a verdict (e.g. "Accept all skips") in the Library.
 `complete(system, prompt) -> text` comes from llm.make_completer(settings, "rate").
 """
 import datetime as dt
@@ -400,7 +400,7 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
             counts[rating['verdict']] += 1
             print(f"   [{n}/{len(videos)}] {rating['score']:>4} {rating['verdict'].upper():<5} {v['title'][:60]}")
         print(f"{counts['watch']} watch, {counts['skim']} skim, {counts['skip']} skip"
-              + (f", {failed} failed" if failed else "") + ". Review them in Triage.")
+              + (f", {failed} failed" if failed else "") + ". Review them in the Library.")
         return True
 
     # Helper AI: two workers share the batch
@@ -459,5 +459,5 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     by_worker = ", ".join(f"{cnt} by {name}" for name, cnt in worker_counts.items())
     print(f"{total_rated} rated: {by_worker}.")
     print(f"{counts['watch']} watch, {counts['skim']} skim, {counts['skip']} skip"
-          + (f", {failed} failed" if failed else "") + ". Review them in Triage.")
+          + (f", {failed} failed" if failed else "") + ". Review them in the Library.")
     return failed == 0 or total_rated > 0

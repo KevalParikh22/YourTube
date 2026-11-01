@@ -22,7 +22,6 @@
     {"name": "Jobs", "description": "Background task queue and job management"},
     {"name": "Local AI", "description": "Local models, speech-to-text (Whisper), and visual/slide analysis"},
     {"name": "Files", "description": "Storage usage, database backups, restore, and clearable caches"},
-    {"name": "Tools", "description": "Inspection and duration calculators for external videos and playlists"},
     {"name": "Export", "description": "Data exports, Markdown notes, and system logs"}
   ],
   "security": [
@@ -585,6 +584,74 @@
         "tags": ["Library"],
         "summary": "Queue removing a playlist from the library",
         "operationId": "removePlaylist",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Playlist ID to remove"}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Playlist removal job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/playlists/archive": {
+      "get": {
+        "tags": ["Library"],
+        "summary": "Plan archiving a finished playlist (changes nothing)",
+        "operationId": "planArchivePlaylist",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": true,
+            "description": "Playlist ID",
+            "schema": {"type": "string"}
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Whether it is ready, how many videos lose transcripts and search data, and the estimated bytes freed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ready": {"type": "boolean"},
+                    "videos": {"type": "integer"},
+                    "shared": {"type": "integer"},
+                    "frees_bytes": {"type": "integer"}
+                  },
+                  "required": ["ready", "videos", "shared", "frees_bytes"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      },
+      "post": {
+        "tags": ["Library"],
+        "summary": "Queue archiving a finished playlist: frees transcripts, slide text and search data; keeps titles, status, notes, ratings and summaries",
+        "operationId": "archivePlaylist",
         "security": [{"cookieAuth": [], "headerAuth": []}],
         "requestBody": {
           "required": true,
@@ -2334,52 +2401,6 @@
           "401": {"$ref": "#/components/responses/Error401"},
           "403": {"$ref": "#/components/responses/Error403"},
           "409": {"$ref": "#/components/responses/Error409"}
-        }
-      }
-    },
-    "/api/tools/length": {
-      "post": {
-        "tags": ["Tools"],
-        "summary": "Read video/playlist links and calculate total duration without saving",
-        "operationId": "calculateLength",
-        "security": [{"cookieAuth": [], "headerAuth": []}],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "links": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Up to 10 YouTube video or playlist links"
-                  },
-                  "browser": {"type": "string", "description": "Browser for cookies if reading private playlists"}
-                },
-                "required": ["links"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Parsed links with video durations and titles",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {"type": "array"}
-                  },
-                  "required": ["items"]
-                }
-              }
-            }
-          },
-          "400": {"$ref": "#/components/responses/Error400"},
-          "401": {"$ref": "#/components/responses/Error401"},
-          "403": {"$ref": "#/components/responses/Error403"}
         }
       }
     },

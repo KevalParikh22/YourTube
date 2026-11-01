@@ -377,6 +377,12 @@ class DashboardTest(unittest.TestCase):
         self.assertTrue(r["ai"]["local_only"])
         self.call("/api/ai/settings", {"local_only": False, "edit": "ollama", "config": {"num_ctx": 8192}})
 
+    def test_archive_endpoints(self):
+        self.assertEqual(self.call("/api/playlists/archive?id=nope")[0], 404)
+        code, plan = self.call("/api/playlists/archive?id=PL1")
+        self.assertEqual((code, plan["ready"]), (200, False))   # its videos are unwatched
+        self.assertEqual(self.call("/api/playlists/archive", {"id": "PL1"})[0], 400)
+
     def test_files_endpoints(self):
         code, r = self.call("/api/files")
         self.assertEqual(code, 200)
@@ -629,6 +635,19 @@ class ServiceAndStartupTest(unittest.TestCase):
     def setUp(self):
         self.orig_token = dashboard.TOKEN
         self.addCleanup(setattr, dashboard, "TOKEN", self.orig_token)
+
+    def test_startup_removes_leftover_media_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            asr = os.path.join(tmp, "media_cache", "asr")
+            os.makedirs(asr)
+            for name in ("media_cache/chunk_000.mp3", "media_cache/asr/cut.m4a", "keep.db"):
+                with open(os.path.join(tmp, name), "wb") as f:
+                    f.write(b"x")
+            with mock.patch.dict(os.environ, {"YTKB_DATA_DIR": tmp}):
+                dashboard.clean_media_cache()
+            self.assertEqual(os.listdir(os.path.join(tmp, "media_cache")), ["asr"])
+            self.assertEqual(os.listdir(asr), [])
+            self.assertTrue(os.path.exists(os.path.join(tmp, "keep.db")))
 
     def test_main_non_tty_start_line_without_token(self):
         buf = io.StringIO()
