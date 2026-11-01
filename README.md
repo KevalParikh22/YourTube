@@ -13,7 +13,7 @@ Many people have a Watch Later playlist running into hundreds of videos with no 
   - Read-only: never modifies, reorders, or removes anything on YouTube.
 - **Understand**
   - Fetch descriptions, chapters, and captions anonymously.
-  - Transcribe videos locally with Whisper when captions are missing or inaccurate.
+  - Transcribe videos locally with Whisper when captions are missing or inaccurate. Each transcription runs in its own short-lived process, so the dashboard stays small (about 60 MB) and the model memory is freed when the task ends.
   - Read slides, whiteboards, and on-screen code using vision models.
   - Search across titles, transcripts, chapters, summaries, and notes by words or by meaning.
 - **Decide**
@@ -34,6 +34,8 @@ Many people have a Watch Later playlist running into hundreds of videos with no 
 - Optional cloud AI providers: Claude (Anthropic), Gemini (Google), OpenAI, Groq, or OpenAI-compatible endpoints.
 - API keys stay in `settings.json` or environment variables; keys are never logged or sent to the browser.
 - AI only suggests: ratings, category assignments, and knowledge pages are proposals you review and accept.
+- Cloud AI rate limits are handled: a "too many requests" or "busy" answer is waited for and retried; a used-up daily quota is reported at once.
+- Works on phone, tablet and desktop widths, in light and dark mode.
 
 ## Install
 
