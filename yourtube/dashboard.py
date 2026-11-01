@@ -1146,21 +1146,6 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("id must be a number")
                 return self._json({"ok": True, "deleted": storage.delete_ask(ask_id)})
 
-            if path == "/api/tools/length":
-                import tools
-                raw_links = body.get("links")
-                if not isinstance(raw_links, list):
-                    return self._error("links must be a list")
-                cleaned = [l.strip() for l in raw_links if isinstance(l, str) and l.strip()]
-                if not cleaned:
-                    return self._error("No valid links provided")
-                if len(raw_links) > 10 or len(cleaned) > 10:
-                    return self._error("At most 10 links allowed")
-                browser = body.get("browser") or None
-                if browser is not None and (not isinstance(browser, str) or browser not in ALLOWED_BROWSERS):
-                    return self._error("Unknown browser")
-                return self._json({"items": tools.read_links(cleaned, browser=browser)})
-
             if path == "/api/embed":
                 import embedder
                 rebuild = body.get("rebuild") is True

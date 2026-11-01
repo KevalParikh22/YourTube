@@ -22,7 +22,6 @@
     {"name": "Jobs", "description": "Background task queue and job management"},
     {"name": "Local AI", "description": "Local models, speech-to-text (Whisper), and visual/slide analysis"},
     {"name": "Files", "description": "Storage usage, database backups, restore, and clearable caches"},
-    {"name": "Tools", "description": "Inspection and duration calculators for external videos and playlists"},
     {"name": "Export", "description": "Data exports, Markdown notes, and system logs"}
   ],
   "security": [
@@ -2334,52 +2333,6 @@
           "401": {"$ref": "#/components/responses/Error401"},
           "403": {"$ref": "#/components/responses/Error403"},
           "409": {"$ref": "#/components/responses/Error409"}
-        }
-      }
-    },
-    "/api/tools/length": {
-      "post": {
-        "tags": ["Tools"],
-        "summary": "Read video/playlist links and calculate total duration without saving",
-        "operationId": "calculateLength",
-        "security": [{"cookieAuth": [], "headerAuth": []}],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "links": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "Up to 10 YouTube video or playlist links"
-                  },
-                  "browser": {"type": "string", "description": "Browser for cookies if reading private playlists"}
-                },
-                "required": ["links"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Parsed links with video durations and titles",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "items": {"type": "array"}
-                  },
-                  "required": ["items"]
-                }
-              }
-            }
-          },
-          "400": {"$ref": "#/components/responses/Error400"},
-          "401": {"$ref": "#/components/responses/Error401"},
-          "403": {"$ref": "#/components/responses/Error403"}
         }
       }
     },

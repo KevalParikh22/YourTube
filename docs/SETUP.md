@@ -294,7 +294,6 @@ The top bar holds the main pages and, on the right, a light/dark switch (moon or
 - **Library**: every video, with filters, search and actions. Sort by **AI score** and filter by **Watch / Skim / Skip / Not rated**; **Rate N unrated** and **Skip the N AI skips** (with Undo) appear above the list.
 - **Knowledge**: topic pages built from summaries. The first time, it shows how: per category **Summarise 5**, then **Build** once 3 videos are summarised.
 - **Playlists** and **Categories**.
-- **Tools**: how long any playlist or video takes, without adding it to your library (see Everyday use).
 
 Old links to Plan and Triage open Home and the Library (sorted by AI score). **Ask** is the round chat button at the bottom right: it opens a small panel, and **Open full page** continues the same conversation on the Ask page. **Help** shows this guide, the downloads and the keyboard shortcuts.
 
@@ -303,7 +302,7 @@ Old links to Plan and Triage open Home and the Library (sorted by AI score). **A
 | `/` | Search |
 | `A` | Ask your library |
 | `?` | Show keyboard shortcuts |
-| `G` then `H` `L` `K` `Y` `C` `T` `S` | Home, Library, Knowledge, Playlists, Categories, Tools, Settings |
+| `G` then `H` `L` `K` `Y` `C` `S` | Home, Library, Knowledge, Playlists, Categories, Settings |
 | `G` then `?` | Help |
 | `Esc` | Close the dialog, Ask panel or video panel |
 | `J` / `K` | Next / previous video in the video panel |
@@ -336,7 +335,6 @@ Shortcuts are ignored while you type in a field.
 | Category suggestions after sync | Settings → Sync and details → checkbox | `main.py <ID> --browser auto --ai` |
 | Check local AI | AI → Local AI on this computer | `.venv/bin/python local_setup.py` |
 | Export notes for Obsidian / note apps (Markdown) | Library → Export → Notes (.zip), the selection bar's **Export notes**, or **Export note** in a video's panel | — |
-| How long is a playlist? | **Tools** → paste up to 10 playlist or video links, one per line → **Calculate**. For each: total time at 1× to 2×, a **From video / To video** range (for example 31–100), how many you already have, **Export CSV**, and **Add to library**. With two or more playlists: the combined time counting each video once, and which videos are shared or only in one (**Export only here**). The **Daily planner** gives a finish date from minutes a day, days a week and speed. Private playlists need **Use my YouTube sign-in**. Nothing is saved | — |
 | Back up or restore the library | Settings → **Storage** → Back up now, or Restore on a backup | — |
 | Export your library | Library → Export → CSV or JSON (a copy is kept in Settings → Storage → Exports) | `curl -o library.csv "http://127.0.0.1:8765/api/export?format=csv"` (dashboard running) |
 

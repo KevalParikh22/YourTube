@@ -4,8 +4,8 @@ const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', compl
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
 const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
 const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
-const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories'], ['tools', 'Tools']];
-const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then T', 'Tools'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
+const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories']];
+const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
 const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
 const BROWSERS = [['auto', 'Detect my browser login'], ['firefox', 'Use my Firefox login'], ['chrome', 'Use my Chrome login'], ['chromium', 'Use my Chromium login'],
   ['brave', 'Use my Brave login'], ['edge', 'Use my Edge login']];
@@ -52,7 +52,6 @@ const S = {
   logs: null,
   addingCat: false,
   about: { look: '', error: '', suggestion: '', recording: false, seconds: 0 },
-  tools: { links: '', browser: false, items: [], busy: false, ranges: {}, mins: +store.get('ytkb.tools.mins') || 60, days: +store.get('ytkb.tools.days') || 5, speed: +store.get('ytkb.tools.speed') || 1 },
 };
 
 /* ---------------- helpers ---------------- */
@@ -224,7 +223,7 @@ function applyTheme() {
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 function renderView() {
   const r = route(), v = $('#view');
-  if (r === 'plan') { location.replace('#/home'); return; }
+  if (r === 'plan' || r === 'tools') { location.replace('#/home'); return; }
   if (r === 'triage') { S.view.sort = 'score'; S.view.status = 'todo'; S.view.verdict = ''; location.replace('#/'); return; }
   if (r === 'ai') { location.replace('#/settings/cloud'); return; }
   if (r === 'setup') { location.replace('#/help'); return; }
@@ -233,7 +232,6 @@ function renderView() {
     if (!S.knowledge.list && !S.knowledge.loadingList) loadKnowledgeList();
   }
   else if (r === 'sources') { v.innerHTML = viewSources(); updateJob(); }
-  else if (r === 'tools') { v.innerHTML = viewTools(); }
   else if (r === 'categories') { v.innerHTML = viewCategories(); updateJob(); }
   else if (r === 'settings' || r.startsWith('settings/')) {
     const section = r.split('/')[1] || 'general';
@@ -670,60 +668,6 @@ function viewLibraries() {
   </section>`;
 }
 
-function toolsSpeeds(seconds, id = '') {
-  return `<div class="tbl-wrap"><table class="tbl"${id ? ` id="${id}"` : ''}><thead><tr><th>Speed</th>${SPEEDS.map(x => `<th class="r">${sx(x)}</th>`).join('')}</tr></thead><tbody><tr><td>Watch time</td>${SPEEDS.map(x => `<td class="r num">${fmt(seconds / x)}</td>`).join('')}</tr></tbody></table></div>`;
-}
-function toolsCsv(videos) {
-  const cell = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
-  const rows = [['position', 'title', 'channel', 'duration', 'url'], ...videos.map((v, i) => [v.position ?? i + 1, v.title, v.channel, v.duration_seconds, v.url || `https://www.youtube.com/watch?v=${encodeURIComponent(v.video_id)}`])];
-  const blob = new Blob(['\ufeff' + rows.map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'yourtube-videos.csv'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-}
-// A playlist's videos split into shared with the other read playlists, and only here
-function toolsSplit(item) {
-  const others = new Set(S.tools.items.filter(x => x !== item && Array.isArray(x.videos)).flatMap(x => x.videos.map(v => v.video_id)));
-  return { shared: item.videos.filter(v => others.has(v.video_id)), only: item.videos.filter(v => !others.has(v.video_id)) };
-}
-const toolsSum = vs => vs.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
-function toolVideos(item, index) {
-  const from = Math.max(1, Math.min(item.videos.length || 1, +(S.tools.ranges[index]?.from || 1)));
-  const to = Math.max(from, Math.min(item.videos.length || 1, +(S.tools.ranges[index]?.to || item.videos.length || 1)));
-  return item.videos.slice(from - 1, to);
-}
-function viewTools() {
-  const t = S.tools, items = t.items.filter(item => item.videos), allById = new Map();
-  items.forEach(item => item.videos.forEach(v => { if (!allById.has(v.video_id)) allById.set(v.video_id, v); }));
-  const total = [...allById.values()].reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
-  const errors = t.items.filter(item => item.error);
-  const videosInLibrary = new Set(S.data.videos.map(v => v.video_id));
-  const plannerDays = Math.ceil(total / Math.max(0.25, t.speed) / (Math.max(5, t.mins) * 60));
-  const resultCards = items.map(item => {
-    const index = t.items.indexOf(item), range = t.ranges[index] || {};
-    const rangeFrom = fromValue(range.from, item.videos.length, 1), rangeTo = Math.max(rangeFrom, fromValue(range.to, item.videos.length, item.videos.length));
-    const vids = toolVideos(item, index), seconds = vids.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
-    const known = vids.filter(v => videosInLibrary.has(v.video_id));
-    const knownTime = known.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
-    const compare = items.length > 1 && items.every(x => x.kind === 'playlist');
-    return `<section class="section card"><h2 class="h">${esc(item.title || item.id || 'Untitled')}</h2><p class="note">${plural(item.videos.length, 'video')}${item.unavailable ? ` · ${item.unavailable} unavailable` : ''} · ${fmt(item.videos.reduce((sum, v) => sum + (v.duration_seconds || 0), 0))} total</p>
-      <div class="form-row" style="margin-top:12px"><label class="field">From video<input type="number" min="1" max="${item.videos.length}" value="${fromValue(range.from, item.videos.length, 1)}" data-change="tools-range" data-index="${index}" data-bound="from"></label><label class="field">To video<input type="number" min="1" max="${item.videos.length}" value="${fromValue(range.to, item.videos.length, item.videos.length)}" data-change="tools-range" data-index="${index}" data-bound="to"></label></div>
-      <p class="note" id="tools-range-summary-${index}">Range: videos ${vids.length ? `${rangeFrom}–${rangeTo}` : 'none'} · ${fmt(seconds)}</p>${toolsSpeeds(seconds, `tools-speeds-${index}`)}
-      <p class="note" id="tools-library-${index}">${known.length} already in your library (${fmt(knownTime)} total)</p>
-      <div class="actions"><button class="btn" data-act="tools-export" data-index="${index}">Export CSV</button>${item.kind === 'playlist' ? `<button class="btn btn-dark" data-act="tools-add" data-index="${index}">Add to library</button>` : ''}${compare ? `<button class="btn" data-act="tools-export-only" data-index="${index}">Export only here</button>` : ''}</div></section>`;
-  }).join('');
-  const sharedIds = new Set();
-  if (items.length > 1 && items.every(x => x.kind === 'playlist')) {
-    const counts = new Map(); items.forEach(x => new Set(x.videos.map(v => v.video_id)).forEach(id => counts.set(id, (counts.get(id) || 0) + 1)));
-    counts.forEach((count, id) => { if (count > 1) sharedIds.add(id); });
-  }
-  return `<section><div class="eyebrow">Tools</div><h1 class="display">Playlist length<em>for any playlist or video</em></h1><p class="lede">Paste playlist or video links to see how long they take, without adding them to your library.</p></section>
-    <section class="section card"><label class="field">Playlist or video links<textarea id="tools-links" rows="4" placeholder="One YouTube link per line">${esc(t.links)}</textarea></label><label class="check" style="margin-top:12px"><input id="tools-browser" type="checkbox" ${t.browser ? 'checked' : ''}> Use my YouTube sign-in for private playlists</label><div class="actions" style="margin-top:14px"><button class="btn btn-dark" data-act="tools-calculate" ${t.busy ? 'disabled' : ''}>${t.busy ? `Reading ${t.links.split(/\r?\n/).filter(x => x.trim()).length} links…` : 'Calculate'}</button></div></section>
-    ${errors.map(x => `<p class="banner warn">${esc(x.link || '')}: ${esc(x.error)}${!t.browser && !x.link?.includes('watch?v=') ? ' If it is a private playlist, tick “Use my YouTube sign-in” and calculate again.' : ''}</p>`).join('')}
-    ${items.length > 1 ? `<section class="section card"><h2 class="h">Combined length</h2><p class="note">${allById.size} unique videos · ${fmt(total)}</p>${toolsSpeeds(total)}
-      ${items.every(x => x.kind === 'playlist') ? `<div class="tbl-wrap"><table class="tbl tbl-cards"><thead><tr><th>Playlist</th><th class="r">Videos</th><th class="r">Total</th><th class="r">Shared</th><th class="r">Only here</th></tr></thead><tbody>${items.map(item => { const { shared, only } = toolsSplit(item);
-        return `<tr><td data-label="Playlist">${esc(item.title || item.id || 'Untitled')}</td><td class="r" data-label="Videos">${item.videos.length}</td><td class="r" data-label="Total">${fmt(toolsSum(item.videos))}</td><td class="r" data-label="Shared">${shared.length} · ${fmt(toolsSum(shared))}</td><td class="r" data-label="Only here">${only.length} · ${fmt(toolsSum(only))}</td></tr>`; }).join('')}</tbody></table></div>` : ''}</section>` : ''}${resultCards}
-    ${sharedIds.size ? `<p class="note">${plural(sharedIds.size, 'video')} appear in more than one playlist.</p>` : ''}
-    ${items.length ? `<section class="section card"><h2 class="h">Daily planner</h2><div class="form-row" style="margin-top:12px"><label class="field">Minutes a day<input type="number" min="5" step="5" value="${t.mins}" data-change="tools-plan" data-key="mins"></label><label class="field">Days a week<input type="number" min="1" max="7" value="${t.days}" data-change="tools-plan" data-key="days"></label><label class="field">Speed<select data-change="tools-plan" data-key="speed">${SPEEDS.map(x => `<option value="${x}" ${x === t.speed ? 'selected' : ''}>${sx(x)}</option>`).join('')}</select></label></div><p class="note" id="tools-plan-summary">Done in ${plural(plannerDays, 'day')} · by ${esc(studyFinish(plannerDays, t.days))}</p></section>` : ''}`;
-}
 function fromValue(value, count, fallback) { return Math.min(count || 1, Math.max(1, +(value || fallback))); }
 function viewDetailsCard() {
   const vs = videos(), counts = {};
@@ -2406,26 +2350,6 @@ document.addEventListener('click', async e => {
       catch (err) { toast(err.message, true); }
       break;
     }
-    case 'tools-calculate': {
-      const links = S.tools.links.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
-      if (!links.length) { toast('Paste at least one playlist or video link', true); $('#tools-links')?.focus(); break; }
-      S.tools.busy = true; S.tools.items = []; renderView();
-      try { S.tools.items = (await api('/api/tools/length', { links, ...(S.tools.browser ? { browser: 'auto' } : {}) })).items || []; }
-      catch (err) { toast(err.message, true); }
-      finally { S.tools.busy = false; renderView(); }
-      break;
-    }
-    case 'tools-export': {
-      const index = +el.dataset.index, item = S.tools.items[index]; if (item?.videos) toolsCsv(toolVideos(item, index)); break;
-    }
-    case 'tools-export-only': {
-      const index = +el.dataset.index, item = S.tools.items[index];
-      if (item?.videos) toolsCsv(toolsSplit(item).only);
-      break;
-    }
-    case 'tools-add': {
-      const item = S.tools.items[+el.dataset.index]; if (item?.url) runIngest(item.url); break;
-    }
     case 'voice-rec': if (S.about.recording) stopAboutRecording(); else startAboutRecording(); break;
     case 'interests-draft': {
       S.about.look = $('#ai-look')?.value || ''; S.about.error = ''; S.about.drafting = true; refresh();
@@ -2969,33 +2893,6 @@ document.addEventListener('input', e => {
   if (el.id === 'aq') { S.ask.q = el.value; return; }
   if (el.id === 'ahq') { S.ask.hq = el.value; clearTimeout(aT); aT = setTimeout(loadAskHistory, 200); return; }
   if (el.id === 'q') { S.view.q = el.value; clearTimeout(qT); qT = setTimeout(() => { S.limit = 150; renderList(); }, 120); }
-  else if (el.id === 'tools-links') S.tools.links = el.value;
-  else if (el.matches('#tools-browser')) S.tools.browser = el.checked;
-  else if (el.dataset.change === 'tools-range') {
-    const i = +el.dataset.index, range = S.tools.ranges[i] || (S.tools.ranges[i] = {});
-    range[el.dataset.bound] = Math.max(1, +el.value || 1);
-    const item = S.tools.items[i];
-    if (item) {
-      const from = fromValue(range.from, item.videos.length, 1), to = Math.max(from, fromValue(range.to, item.videos.length, item.videos.length));
-      const selected = item.videos.slice(from - 1, to), seconds = selected.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
-      const summary = $(`#tools-range-summary-${i}`); if (summary) summary.textContent = `Range: videos ${from}–${to} · ${fmt(seconds)}`;
-      const table = $(`#tools-speeds-${i}`); if (table) [...table.querySelectorAll('tbody td')].forEach((td, j) => { if (j) td.textContent = fmt(seconds / SPEEDS[j - 1]); });
-      const known = selected.filter(v => S.data.videos.some(saved => saved.video_id === v.video_id));
-      const knownTime = known.reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
-      const lib = $(`#tools-library-${i}`); if (lib) lib.textContent = `${known.length} already in your library (${fmt(knownTime)} total)`;
-    }
-  }
-  else if (el.dataset.change === 'tools-plan') {
-    const key = el.dataset.key, value = +el.value;
-    S.tools[key] = key === 'days' ? Math.min(7, Math.max(1, value || 5)) : key === 'mins' ? Math.max(5, value || 60) : Math.max(0.25, value || 1);
-    store.set(`ytkb.tools.${key}`, S.tools[key]);
-    if (route() === 'tools') {
-      const unique = new Map(); S.tools.items.filter(item => item.videos).forEach(item => item.videos.forEach(v => { if (!unique.has(v.video_id)) unique.set(v.video_id, v); }));
-      const total = [...unique.values()].reduce((sum, v) => sum + (v.duration_seconds || 0), 0);
-      const days = Math.ceil(total / Math.max(0.25, S.tools.speed) / (Math.max(5, S.tools.mins) * 60));
-      const summary = $('#tools-plan-summary'); if (summary) summary.textContent = `Done in ${plural(days, 'day')} · by ${studyFinish(days, S.tools.days)}`;
-    }
-  }
   else if (el.dataset.input === 'i-url') S.ingest.url = el.value;
   else if (el.dataset.input === 'i-cookies') { S.ingest.cookies = el.value; store.set('ytkb.cookies', el.value); }
   else if (el.dataset.input === 'ai-key') S.ai.key = el.value;
@@ -3015,7 +2912,7 @@ document.addEventListener('keydown', e => {
   if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'g') { S.goAt = Date.now(); return; }
   if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && S.goAt && Date.now() - S.goAt < 1500 && e.key === '?') { S.goAt = 0; e.preventDefault(); location.hash = '#/help'; return; }
   if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && S.goAt && Date.now() - S.goAt < 1500) {
-    const routes = { h: '#/home', l: '#/', k: '#/knowledge', y: '#/sources', c: '#/categories', t: '#/tools', s: '#/settings' };
+    const routes = { h: '#/home', l: '#/', k: '#/knowledge', y: '#/sources', c: '#/categories', s: '#/settings' };
     const dest = routes[e.key.toLowerCase()]; S.goAt = 0;
     if (dest) { e.preventDefault(); location.hash = dest; return; }
   }
