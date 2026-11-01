@@ -24,3 +24,10 @@ HANDOFF.md
 .team/
 .conductor/
 docs/plan/
+# Development notes: kept locally, not published (specs, plans, research, manual tests, experiments)
+docs/PRD-*.md
+docs/PLAN-*.md
+docs/Phase-0-Research-and-Improvements.md
+docs/MANUAL-TESTS.md
+docs/future/
+spikes/

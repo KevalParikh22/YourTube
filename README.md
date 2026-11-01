@@ -90,8 +90,7 @@ local_setup.py     Local AI and GPU detection entry point shim
 web/               Dashboard single-page interface (HTML, CSS, JS, API docs)
 scripts/           Setup and background service scripts (Linux, macOS, Windows)
 tests/             Unit test suite (unittest)
-docs/              Setup guide, documentation index, architecture, OpenAPI, PRDs
-spikes/            Experimental research scripts (ASR, downloads, embeddings)
+docs/              Setup guide, documentation index, architecture, OpenAPI
 ```
 
 ## Development

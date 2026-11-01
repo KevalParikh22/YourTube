@@ -1,6 +1,6 @@
 # Architecture
 
-Map of the codebase. Specs are `docs/PRD-*.md`; the user guide is `docs/SETUP.md`.
+Map of the codebase. The user guide is `docs/SETUP.md`.
 
 ## Folders
 
@@ -9,10 +9,9 @@ Map of the codebase. Specs are `docs/PRD-*.md`; the user guide is `docs/SETUP.md
 - **`web/`:** Dashboard frontend: `web/index.html` (markup), `web/static/app.js` and `app.css` (the app, served no-cache), fonts and icon, `web/static/api.html` plus the pinned `swagger/` bundle for `/docs/api`. Everything under `/static/` goes through the `dashboard.STATIC` allow-list.
 - **`yourtube/files.py`:** Settings → Storage: `usage()`, `backup()` / `restore()` (SQLite backup API; never settings.json), `clear(key)`, `save_export()` (every export is also kept in `exports/`).
 - **`docs/openapi.json`:** OpenAPI 3.1 description of every `/api/` route; `tests/test_openapi.py` fails when a route is added without it.
-- **`docs/`:** Documentation index (`docs/README.md`), setup guide (`docs/SETUP.md`), manual-test guides, PRDs, and architecture map.
+- **`docs/`:** Documentation index (`docs/README.md`), setup guide (`docs/SETUP.md`), architecture map and the API description (`docs/openapi.json`).
 - **`scripts/`:** Linux/macOS and Windows setup and service scripts (`scripts/setup.sh`, `scripts/service.sh`, `scripts/setup.ps1`, `scripts/service.ps1`).
 - **`tests/`:** `unittest` coverage by module; test setup redirects DB, taxonomy, and settings to temporary files (`tests/__init__.py`).
-- **`spikes/`:** Experimental scripts for ASR, downloads, frames, embeddings, and evaluation (`spikes/README.md`).
 
 ## Data flow
 
