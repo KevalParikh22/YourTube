@@ -21,10 +21,8 @@ Many people have a Watch Later playlist running into hundreds of videos with no 
   - Detailed video summaries with TL;DR, timestamped minutes, takeaways, and check questions.
   - Knowledge synthesis pages built across summarised videos in each category.
   - Ask questions across your library with answers citing exact video timestamps.
-- **Tools**
-  - Playlist length calculator: compute watch time at 1x to 2x for up to 10 playlists or video ranges without saving them.
-  - Compare playlists: find overlapping vs unique videos and combined watch time.
 - **Your data**
+  - Archive a finished playlist: once every video is watched or skipped, one click frees its transcripts, slide pictures and search data (often most of its space) while keeping titles, status, your notes, ratings and summaries. An archived playlist can then be removed completely. Nothing changes on YouTube.
   - Back up the library and restore any backup (Settings → Storage); clear caches and manage earlier exports.
   - Export library to CSV or JSON, and export Markdown notes formatted for Obsidian.
   - Interactive API reference (`/docs/api`) backed by OpenAPI 3.1.
