@@ -336,6 +336,38 @@
         }
       }
     },
+    "/api/job/run-now": {
+      "post": {
+        "tags": ["Jobs"],
+        "summary": "Let a task waiting for its start time (night queue) run as soon as its lane is free",
+        "operationId": "runJobNow",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "integer", "description": "ID of a queued task that has not_before"}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The task no longer waits",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
     "/api/job/cancel": {
       "post": {
         "tags": ["Jobs"],
@@ -2730,6 +2762,16 @@
                   "auto_after_sync": {"type": "boolean"},
                   "show_descriptions": {"type": "boolean"},
                   "auto_index": {"type": "boolean", "description": "Update the meaning index after every sync, details, transcription, slide reading, rating and summary task (default false: update on request)"},
+                  "night": {
+                    "type": "object",
+                    "description": "Night queue: Rate and Summarise of videos longer than minutes wait for start (local time)",
+                    "properties": {
+                      "on": {"type": "boolean"},
+                      "minutes": {"type": "integer", "minimum": 10, "maximum": 1440},
+                      "start": {"type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"}
+                    },
+                    "required": ["on", "minutes", "start"]
+                  },
                   "local_only": {"type": "boolean"},
                   "asr_model": {"type": "string"},
                   "vision_model": {"type": "string"},

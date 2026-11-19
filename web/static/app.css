@@ -456,7 +456,7 @@
   .jobrow { display: grid; grid-template-columns: 70px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 13px; padding: 5px 0; }
   .jobrow .jl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .st { font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
-  .st-run, .st-stopping { color: var(--accent); } .st-wait { color: var(--ink-3); } .st-ok { color: var(--watch); } .st-bad, .st-stop { color: var(--skip); }
+  .st-run, .st-stopping { color: var(--accent); } .st-wait, .st-later { color: var(--ink-3); } .st-ok { color: var(--watch); } .st-bad, .st-stop { color: var(--skip); }
   .search-big { width: 100%; height: 46px !important; font-size: 17px !important; padding: 0 14px !important; margin-top: 18px; }
   .s-row { display: grid; grid-template-columns: 136px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--line); align-items: start; }
   .hits { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }

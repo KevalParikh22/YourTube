@@ -450,6 +450,7 @@ When something fails, the task's card shows the cause and a fix. **Try again** r
 | Ollama "not running" | Run `ollama serve` (or `systemctl start ollama`). |
 | Local model very slow | The model doesn't fit in GPU memory. Pick a smaller one, or lower the context size. |
 | AI returns errors | Settings → Cloud AI or Local AI → **Save and test** shows the exact error. |
+| Rate or summarise long videos at night | Settings → AI by task → **Night queue**: tick it, choose the length (default over 90 min) and the start time (default 01:00). Rate and Summarise then run the shorter videos right away and queue the long ones for that time; the task list shows them with **Run now** and **Remove**. The dashboard must be running then (`bash scripts/service.sh install`); waiting tasks are lost if it stops | — |
 | How much did the cloud AI use? | Settings → Cloud AI → **Usage** lists calls, tokens and approximate cost per task and model, today and over the last 30 days; each task's log also ends with an "AI use" line. Costs use approximate list prices (a model without one shows "price unknown"); the provider's console has the exact bill. |
 | `pip install` says "externally-managed-environment" | Don't install into the system Python. Run `bash scripts/setup.sh`, or `python3 -m pip --python .venv/bin/python install -r requirements.txt` |
 | Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai`, or `.venv/bin/python -m pip install -r requirements-local.txt` |

@@ -27,7 +27,7 @@ Unclear items, need the reporter's input before planning:
 |---------|------|------|
 | Token use tracking and cutting it down (**tracking done**) | [token-tracking.md](token-tracking.md) | M |
 | One output language for every video | [language-consistency.md](language-consistency.md) | S |
-| Schedule big summaries for the night | [off-peak-queue.md](off-peak-queue.md) | M |
+| Schedule big summaries for the night (**queue done**) | [off-peak-queue.md](off-peak-queue.md) | M |
 | Follow channels, summarise new videos automatically | [channel-follow.md](channel-follow.md) | L |
 | Whole channel into the knowledge base | [channel-knowledge.md](channel-knowledge.md) | M |
 | A 4–5 hour video becomes a weekly course | [video-course.md](video-course.md) | L |

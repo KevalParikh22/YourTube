@@ -164,6 +164,7 @@ def default_settings() -> Dict[str, Any]:
         "use_descriptions": True, # search video descriptions and send them to the AI (they are fetched either way)
         "show_descriptions": False,
         "auto_index": False,      # update the meaning index after every sync/details/AI task; off: Update index on click
+        "night": {"on": False, "minutes": 90, "start": "01:00"},   # Rate/Summarise of longer videos wait for this time
         "rating_formula": {},     # overrides of rater.DEFAULT_FORMULA (weights, interest penalty and bonus)
     }
 
@@ -227,6 +228,10 @@ def _api_key(provider: str, cfg: Dict[str, Any]) -> str:
     env = PROVIDERS[provider].get("env")
     return (cfg.get("api_key") or "").strip() or (os.environ.get(env, "") if env else "")
 
+def night_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """The night queue settings with defaults filled in: {'on', 'minutes' (longer videos wait), 'start' ('HH:MM')}."""
+    return {**default_settings()["night"], **(settings.get("night") or {})}
+
 def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> Dict[str, Any]:
     """Settings safe to send to the browser (keys are replaced by where they come from), as seen from one library."""
     settings = for_library(settings, library)
@@ -269,6 +274,7 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
         "use_descriptions": settings.get("use_descriptions", True) is not False,
         "show_descriptions": bool(settings.get("show_descriptions", False)),
         "auto_index": bool(settings.get("auto_index", False)),
+        "night": night_settings(settings),
         "rating_formula": settings.get("rating_formula") or {},
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},

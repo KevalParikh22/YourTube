@@ -186,8 +186,10 @@ async function load({ keepEdits = false } = {}) {
   for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
   if (dirty) { updateJob(); renderJobs(); toast('Updated in the background. Your unsaved category edits are kept; save to see the update.'); return; }
   render();
-  if (S.data.job.running || S.data.job.queue?.length) pollJob();
+  if (S.data.job.running || dueSoon(S.data.job)) pollJob();
 }
+// Waiting tasks that start as soon as their lane is free (not the ones waiting for the night queue's start time)
+const dueSoon = job => (job.queue || []).some(t => !t.not_before);
 function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); renderAskPop(); }
 function renderShortcutHelp() {
   const root = $('#shortcut-root');
@@ -827,12 +829,16 @@ function renderJobs() {
   const pill = active.length
     ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}" title="${active.map(l => esc(l.label)).join(', ')}${waiting ? ` (+${waiting} waiting)` : ''}"><span class="spin"></span><span class="jl">${active.length} running</span>${waiting ? `<b>+${waiting}<span class="jw"> waiting</span></b>` : ''}</button>`
     : flash ? `<button class="jobpill ${last.ok && !last.stopped ? 'ok' : 'bad'}" data-act="jobs-toggle"><span class="jl">${last.stopped ? 'Stopped' : last.ok ? 'Finished' : 'Failed'}: ${esc(last.label)}</span></button>`
+    : (job.queue || []).some(t => t.not_before) ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks waiting for the night queue" aria-label="Tasks waiting for the night queue">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="flex:none"><path d="M13 9.8A5.5 5.5 0 0 1 6.2 3 5.5 5.5 0 1 0 13 9.8z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        <b>${job.queue.filter(t => t.not_before).length}</b><span class="jw">at night</span></button>`
     : job.recent?.length ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks">Tasks</button>` : '';
-  const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
+  const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', later: 'Later', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
       <span class="jl" title="${esc(t.label)}">${esc(t.label)}</span>${action}</div>`;
   const panel = S.jobsOpen ? `<div class="jobpanel" role="dialog" aria-label="Tasks">
       ${active.length ? active.map(l => `<div><div class="faint" style="font-size:11.5px">${esc(({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[l.lane] || l.lane)}</div>${row(l, l.stopping ? 'stopping' : 'run', l.stopping ? '<button class="btn-text" disabled>Stopping…</button>' : `<button class="btn-text" data-act="job-stop-one" data-task="${l.id}">Stop</button>`)}<pre class="log" data-task="${l.id}">${esc(l.log || '')}</pre></div>`).join('') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
-      ${(job.queue || []).map(t => row({ ...t, label: `${({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[t.lane] || t.lane}: ${t.label}` }, 'wait', `<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button>`)).join('')}
+      ${(job.queue || []).map(t => row({ ...t, label: `${t.not_before ? `${atTime(t.not_before)} · ` : ''}${({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[t.lane] || t.lane}: ${t.label}` },
+        t.not_before ? 'later' : 'wait', `<span style="display:flex;gap:8px">${t.not_before ? `<button class="btn-text" data-act="job-run-now" data-task="${t.id}">Run now</button>` : ''}<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button></span>`)).join('')}
       ${(job.recent || []).length ? `<div class="faint" style="font-size:11.5px;margin:10px 0 4px">Recent</div>` + job.recent.map(t => row(t, t.stopped ? 'stop' : t.ok ? 'ok' : 'bad',
         `<span class="faint" style="font-size:11.5px">${esc(fmtLocal(t.finished_at))}</span>`)).join('') : ''}
     </div>` : '';
@@ -948,7 +954,7 @@ async function pollJob() {
       S.data.job = job;
       if (last && last.id !== seen) await taskFinished(last);
       updateJob(); renderJobs();
-      if (!job.running && !job.queue.length) break;
+      if (!job.running && !dueSoon(job)) break;
       await sleep(1000);
     }
   } catch (e) { toast(e.message, true); } finally { S.polling = false; }
@@ -981,9 +987,11 @@ function unsavedCategoryEdits() {
 }
 // After asking the server to start a task: say whether it started or is waiting, then follow the queue
 async function queued(res, what) {
-  toast(res.position ? `${what} queued. It starts after: ${res.after.join(', ')}` : `${what} started`);
+  const n = res.night, later = n && `${plural(n.videos, 'video')} longer than ${S.data.ai.night.minutes} min ${n.videos === 1 ? 'waits' : 'wait'} for ${atTime(n.at)} (night queue).`;
+  toast(n?.only ? `${what}: ${later}` : (res.position ? `${what} queued. It starts after: ${res.after.join(', ')}` : `${what} started`) + (n ? `. ${later}` : ''));
   await refreshJob();
 }
+const atTime = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }); };
 async function refreshJob() {
   try { S.data.job = await api('/api/job'); } catch (e) { return; }
   updateJob(); renderJobs(); pollJob();
@@ -1700,6 +1708,16 @@ function viewAI() {
       <span>Update the meaning index automatically after each task</span></label>
     <p class="hint">Off: Search and Ask show how much is not indexed yet, with an Update index button. On: every sync, details fetch, transcription, rating and summary is followed by an index update${tip('With a cloud embedding AI each update is a paid call and counts toward its rate limit, which is why it is off by default.')}.</p>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
+  </section>
+  <section class="section card">
+    <h2 class="h">Night queue</h2>
+    <label class="check" style="margin-top:8px"><input type="checkbox" data-change="night" id="night-on" ${ai.night.on ? 'checked' : ''}>
+      <span>Rate and summarise long videos at night</span></label>
+    <div class="route"><label class="field-label" style="margin:0" for="night-min">Longer than (minutes)</label>
+      <input type="number" id="night-min" data-change="night" min="10" max="1440" step="5" value="${ai.night.minutes}" style="width:100%"></div>
+    <div class="route"><label class="field-label" style="margin:0" for="night-at">Start at</label>
+      <input type="time" id="night-at" data-change="night" value="${esc(ai.night.start)}" style="width:100%"></div>
+    <p class="hint">Long videos use a big share of a cloud AI's limits. With this on, Rate and Summarise run the shorter videos now and queue the long ones for this time, so daytime work isn't held up. The task list shows them with <b>Run now</b>. ${tip('The dashboard must be running then (for example as a background service: bash scripts/service.sh install). Tasks waiting in the queue are lost if it is stopped or restarted.')}</p>
   </section>`;
   return { cloud, routing };
 }
@@ -2579,6 +2597,7 @@ document.addEventListener('click', async e => {
         await refreshJob();
       } catch (err) { S.stopPending = false; updateJob(); renderJobs(); toast(err.message, true); }
       break;
+    case 'job-run-now': try { await api('/api/job/run-now', { id: +el.dataset.task }); await refreshJob(); toast('It runs as soon as its lane is free'); } catch (err) { toast(err.message, true); } break;
     case 'job-drop': try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); toast('Removed from the queue'); } catch (err) { toast(err.message, true); } break;
     case 'jobs-toggle': S.jobsOpen = !S.jobsOpen; renderJobs(); break;
     case 'theme-toggle': S.theme = darkNow() ? 'light' : 'dark'; store.set('ytkb.theme', S.theme); applyTheme(); if (route().startsWith('settings')) refresh(); break;
@@ -2866,6 +2885,12 @@ document.addEventListener('change', async e => {
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
   }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
+  if (ch === 'night') {
+    const night = { on: $('#night-on').checked, minutes: Math.round(+$('#night-min').value), start: $('#night-at').value };
+    try { S.data.ai = await saveAi({ night }); toast(night.on ? `Videos over ${night.minutes} min are rated and summarised from ${night.start}` : 'Night queue off: long videos run right away'); }
+    catch (err) { toast(err.message, true); refresh(); }
+    return;
+  }
   if (ch === 'auto-index') {
     try { S.data.ai = await saveAi({ auto_index: el.checked }); toast(el.checked ? 'The index now updates after each task' : 'The index now updates when you click Update index'); }
     catch (err) { el.checked = !el.checked; toast(err.message, true); }

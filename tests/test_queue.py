@@ -206,3 +206,37 @@ class TaskUsageLineTest(unittest.TestCase):
         job.start("rate", "Rate with usage", task, lane="cloud")
         self.assertTrue(wait_until(lambda: job.snapshot()["recent"]))
         self.assertIn("AI use: 1 cloud call, 2.0k tokens in, 300 out, under $0.01.", job.snapshot()["log"])
+
+
+class StartTimeTest(unittest.TestCase):
+    def later(self, seconds):
+        from datetime import datetime, timedelta
+        return (datetime.now() + timedelta(seconds=seconds)).isoformat(timespec="seconds")
+
+    def test_task_waits_for_its_start_time_and_later_tasks_run_first(self):
+        job, ran = dashboard.Job(), []
+        night = job.start("rate", "Night", lambda: ran.append("night") or True, lane="cloud", not_before=self.later(3600))
+        job.start("rate", "Now", lambda: ran.append("now") or True, lane="cloud")
+        self.assertTrue(wait_until(lambda: ran == ["now"]))
+        time.sleep(0.2)
+        self.assertEqual(ran, ["now"])
+        self.assertEqual([t["not_before"] is not None for t in job.snapshot()["queue"]], [True])
+        self.assertTrue(job.run_now(night["id"]))       # Run now: starts without waiting for the hour
+        self.assertTrue(wait_until(lambda: ran == ["now", "night"]))
+        self.assertFalse(job.run_now(night["id"]))      # no longer waiting
+
+    def test_task_starts_on_its_own_when_the_time_comes(self):
+        job, ran = dashboard.Job(), []
+        job.start("rate", "Soon", lambda: ran.append(1) or True, lane="cloud", not_before=self.later(1))
+        self.assertTrue(wait_until(lambda: ran == [1], timeout=5))
+
+    def test_waiting_task_can_be_removed(self):
+        job = dashboard.Job()
+        night = job.start("rate", "Night", lambda: True, lane="cloud", not_before=self.later(3600))
+        self.assertTrue(job.request_stop(night["id"]))
+        self.assertEqual(job.snapshot()["queue"], [])
+
+    def test_next_time(self):
+        from datetime import datetime
+        self.assertEqual(dashboard._next_time("01:00", datetime(2026, 11, 19, 15, 30)), "2026-11-20T01:00:00")
+        self.assertEqual(dashboard._next_time("23:30", datetime(2026, 11, 19, 15, 30)), "2026-11-19T23:30:00")
