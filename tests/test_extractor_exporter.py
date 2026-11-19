@@ -185,3 +185,49 @@ class VideoLinkTest(unittest.TestCase):
                  "PLui3EUkuMTPg": None, "WL": None, "": None}
         for link, expected in cases.items():
             self.assertEqual(vid(link), expected, link)
+
+
+class ChannelReadTest(unittest.TestCase):
+    CID = "UCK8sQmJBp8GCxrOtXWBpyEA"
+
+    def _ydl(self, info, seen):
+        class FakeYDL:
+            def __init__(self, opts):
+                seen.append(opts)
+            def __enter__(self):
+                return self
+            def __exit__(self, *a):
+                return False
+            def extract_info(self, url, download=False):
+                seen.append(url)
+                return info
+        return FakeYDL
+
+    def test_resolve_channel_from_handle_video_or_id(self):
+        import extractor
+        info = {"channel_id": self.CID, "channel": "Google"}
+        for value, url in (("@Google", "https://www.youtube.com/@Google"), ("Google", "https://www.youtube.com/@Google"),
+                           ("https://youtu.be/MJ5f8oJsDaY", "https://www.youtube.com/watch?v=MJ5f8oJsDaY"),
+                           (self.CID, f"https://www.youtube.com/channel/{self.CID}"),
+                           ("youtube.com/@Google/videos", "https://youtube.com/@Google/videos")):
+            seen = []
+            with mock.patch("extractor.yt_dlp.YoutubeDL", self._ydl(info, seen)):
+                self.assertEqual(extractor.resolve_channel(value), {"id": self.CID, "title": "Google"}, value)
+            self.assertEqual(seen[1], url, value)
+            self.assertEqual(seen[0]["playlist_items"], "1")   # name and ID only, never the channel's videos
+
+    def test_no_channel_is_an_error(self):
+        import extractor
+        with mock.patch("extractor.yt_dlp.YoutubeDL", self._ydl({"id": "x"}, [])), self.assertRaises(ValueError):
+            extractor.resolve_channel("@nobody")
+
+    def test_latest_uploads_reads_only_the_newest(self):
+        import extractor
+        seen = []
+        info = {"id": "UU" + self.CID[2:], "title": "Uploads from Google",
+                "entries": [{"id": "MJ5f8oJsDaY", "title": "New", "duration": 85}]}
+        with mock.patch("extractor.yt_dlp.YoutubeDL", self._ydl(info, seen)):
+            videos = extractor.read_latest_uploads(self.CID, 5)
+        self.assertEqual(seen[1], "https://www.youtube.com/playlist?list=UU" + self.CID[2:])
+        self.assertEqual(seen[0]["playlistend"], 5)
+        self.assertEqual([(v["video_id"], v["duration_seconds"]) for v in videos], [("MJ5f8oJsDaY", 85)])

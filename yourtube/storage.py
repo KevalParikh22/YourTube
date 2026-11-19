@@ -304,6 +304,20 @@ def init_db(db_path: str = DB_PATH) -> None:
             )
         """)
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_at ON ai_usage(at)")
+        # Followed channels: their new uploads go to the source '_channel-<id>' (dashboard._check_channels).
+        # seen: the newest upload IDs already handled (added, or there when following began), newest first.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS channels (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                library_id INTEGER NOT NULL DEFAULT 1,
+                auto TEXT NOT NULL DEFAULT 'summarize',
+                seen TEXT NOT NULL DEFAULT '[]',
+                followed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_checked TIMESTAMP,
+                last_error TEXT
+            )
+        """)
         # Videos the user removed from YourTube: a playlist sync skips them (see remove_videos)
         cursor.execute("CREATE TABLE IF NOT EXISTS removed_videos (video_id TEXT PRIMARY KEY, removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         asks = _columns(cursor, "ask_history")
@@ -1740,6 +1754,61 @@ def get_summary(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
     for k, default in _SUMMARY_JSON.items():
         d[k] = json.loads(d[k] or default)
     return d
+
+CHANNEL_AUTO = ("add", "details", "rate", "summarize")   # what happens to a followed channel's new videos
+CHANNEL_SEEN_KEEP = 200
+
+def channel_source(channel_id: str) -> str:
+    """The playlists row a followed channel's videos are saved under (no URL: a re-sync can't pull its whole history)."""
+    return f"_channel-{channel_id}"
+
+def follow_channel(channel_id: str, title: str, seen: List[str], library_id: int = 1, auto: str = "summarize",
+                   db_path: str = DB_PATH) -> None:
+    """Follows a channel (or updates it). seen: its current newest uploads, which are not added."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("""
+            INSERT INTO channels (id, title, library_id, auto, seen) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET title = excluded.title, library_id = excluded.library_id, auto = excluded.auto""",
+                     (channel_id, title, int(library_id or 1), auto, json.dumps(seen[:CHANNEL_SEEN_KEEP])))
+        conn.commit()
+
+def get_channels(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Followed channels, oldest first, each with its seen list and how many of its videos are in the library."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = [dict(r) for r in conn.execute("""
+            SELECT c.*, (SELECT COUNT(*) FROM playlist_items i WHERE i.playlist_id = '_channel-' || c.id) AS videos
+            FROM channels c ORDER BY c.followed_at, c.rowid""")]
+    for r in rows:
+        r["seen"] = json.loads(r["seen"] or "[]")
+    return rows
+
+def set_channel(channel_id: str, db_path: str = DB_PATH, **fields: Any) -> bool:
+    """Changes auto, library_id, seen, last_checked (True: now) or last_error of a followed channel. False: not followed."""
+    allowed = {"auto", "library_id", "seen", "last_checked", "last_error"}
+    sets, values = [], []
+    for k, v in fields.items():
+        if k not in allowed:
+            raise ValueError(f"Unknown channel field {k}")
+        if k == "last_checked":
+            sets.append("last_checked = CURRENT_TIMESTAMP")
+            continue
+        sets.append(f"{k} = ?")
+        values.append(json.dumps(v[:CHANNEL_SEEN_KEEP]) if k == "seen" else v)
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        changed = conn.execute(f"UPDATE channels SET {', '.join(sets)} WHERE id = ?", (*values, channel_id)).rowcount
+        conn.commit()
+    return bool(changed)
+
+def unfollow_channel(channel_id: str, db_path: str = DB_PATH) -> bool:
+    """Stops following; the videos already added stay (remove them with their source on the Playlists page)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        gone = conn.execute("DELETE FROM channels WHERE id = ?", (channel_id,)).rowcount
+        conn.commit()
+    return bool(gone)
 
 def record_usage(task: str, provider: str, model: str, tokens_in: int, tokens_out: int, cost: Optional[float],
                  exact: bool = True, db_path: str = DB_PATH) -> None:

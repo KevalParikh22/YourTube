@@ -22,6 +22,7 @@ const JOB_TEXT = {
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
   embed: ['Updating the meaning index…', 'Meaning index updated', 'Index update stopped or failed. See the log.'],
   remove: ['Removing from YourTube…', 'Removed from YourTube', 'Removing failed. See the log.'],
+  channels: ['Reading followed channels…', 'Followed channels checked', 'Reading the channel failed. See the log.'],
   archive: ['Archiving playlist and freeing storage…', 'Playlist archived', 'Archiving the playlist failed. See the log.'],
   backup: ['Backing up the library…', 'Library backup created', 'Library backup failed. See the log.'],
 };
@@ -112,6 +113,7 @@ const byId = id => S.data.videos.find(v => v.video_id === id);
 const libPlaylists = () => S.lib ? S.data.playlists.filter(p => p.library_id === S.lib) : S.data.playlists;
 const libName = id => (S.data.libraries.find(l => l.id === id) || {}).name || '';
 const isSingle = id => /^_single(-\d+)?$/.test(id);
+const isChannel = id => /^_channel-UC[\w-]{22}$/.test(id);   // storage.channel_source: a followed channel's videos
 const FALLBACK = () => S.data.fallback_category;
 const playlistName = id => (S.data.playlists.find(p => p.id === id) || {}).title || id;
 const srcEntry = (v, src) => v.sources.find(s => s.id === src);
@@ -651,6 +653,7 @@ function viewSources() {
         const synced = isPlaylistSynced(p);
         const syncBtn = isSingle(p.id)
           ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>'
+          : isChannel(p.id) ? '<span class="faint" style="font-size:12.5px">Followed channel: new uploads come in by themselves</span>'
           : synced
           ? `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}" title="Reads the playlist again: adds new videos, flags removed ones. Nothing changes on YouTube.">Check for new videos</button>`
           : `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}">Sync</button>`;
@@ -670,13 +673,52 @@ function viewSources() {
         <td class="r" data-label="Watch time">${fmt(p.duration_seconds)}</td>
         ${syncCell}
         <td class="r" data-label="Actions" style="white-space:nowrap">${syncBtn}
-          ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}
+          ${isChannel(p.id) ? `<a class="btn-text" href="https://www.youtube.com/channel/${encodeURIComponent(p.id.slice(9))}" target="_blank" rel="noopener">YouTube ↗</a>`
+            : /^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}
           ${finished && !archived ? `<button class="btn-text" data-act="pl-archive" data-id="${esc(p.id)}" data-job-btn title="Keeps titles, status, notes, ratings and summaries; deletes transcripts, slide pictures and search data to free storage. Nothing changes on YouTube.">Archive</button>` : ''}
           <button class="btn-text" data-act="pl-remove" data-id="${esc(p.id)}" data-job-btn aria-label="${archived ? 'Remove completely' : 'Remove'} ${esc(p.title)} from YourTube">${archived ? 'Remove completely' : 'Remove'}</button></td>
       </tr>`;
       }).join('')}</tbody></table></div>` : `<p class="note">${S.lib && S.data.playlists.length ? `No playlists in ${esc(libName(S.lib))} yet. Add one above, or move one here from another library.` : 'No playlists yet. Add one above.'}</p>`}
   </section>
+  ${viewChannels()}
   ${viewLibraries()}`;
+}
+// Followed channels (dashboard._check_channels): their new uploads come in by themselves and are processed per CHANNEL_AUTO
+const CHANNEL_AUTO = [['summarize', 'Rate and summarise'], ['rate', 'Rate'], ['details', 'Fetch details only'], ['add', 'Just add']];
+async function loadChannels() {
+  S.channels = 'loading';
+  try { S.channels = await api('/api/channels'); } catch (e) { S.channels = { error: e.message, channels: [] }; }
+  if (route() === 'sources') refresh();
+  if (S.drawer) renderDrawer();
+}
+const followedTitle = name => Array.isArray(S.channels?.channels) && S.channels.channels.some(c => c.title === name);
+function viewChannels() {
+  const C = S.channels;
+  if (C === undefined) loadChannels();
+  const head = `<h2 class="h">Followed channels</h2>`;
+  if (!C || C === 'loading') return `<section class="section card">${head}<p class="note">Loading…</p></section>`;
+  const auto = (value, attrs) => `<select ${attrs} style="width:100%">${CHANNEL_AUTO.map(([k, l]) => `<option value="${k}" ${value === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const list = C.channels.length ? `<div class="tbl-wrap"><table class="tbl tbl-cards">
+    <thead><tr><th>Channel</th><th class="r">Videos</th><th>New videos</th><th>Last checked</th><th></th></tr></thead>
+    <tbody>${C.channels.map(c => `<tr><td data-label="Name"><a href="https://www.youtube.com/channel/${encodeURIComponent(c.id)}" target="_blank" rel="noopener">${esc(c.title)} ↗</a>
+        ${c.last_error ? `<div class="faint" style="font-size:12px;color:var(--skip)">Last check failed: ${esc(c.last_error.slice(0, 120))}</div>` : ''}</td>
+      <td class="r" data-label="Videos">${c.videos}</td>
+      <td data-label="New videos">${auto(c.auto, `data-change="channel-auto" data-id="${esc(c.id)}" aria-label="What happens to new videos from ${esc(c.title)}"`)}</td>
+      <td class="muted" data-label="Last checked">${c.last_checked ? esc(fmtRelTime(c.last_checked)) : 'Not yet'}</td>
+      <td data-label="Actions"><button class="btn-text" data-act="channel-unfollow" data-id="${esc(c.id)}" data-title="${esc(c.title)}">Unfollow</button></td></tr>`).join('')}</tbody></table></div>`
+    : `<p class="note">No channels yet. Follow one below, or open a video and click Follow channel.</p>`;
+  return `<section class="section card">${head}
+    <p class="note">New uploads from these channels are added to your library by themselves${tip('Every few hours while the dashboard runs, YourTube reads the newest uploads of each channel (anonymously) and adds the new ones to a source named after the channel, then fetches their details and rates or summarises them as chosen. The videos already there when you follow are not added. Unfollowing keeps the videos.')}</p>
+    ${list}
+    <div class="route" style="margin-top:14px"><label class="field-label" style="margin:0" for="ch-value">Follow</label>
+      <input type="text" id="ch-value" placeholder="Channel link, @handle or a video link" style="width:100%"></div>
+    <div class="route"><label class="field-label" style="margin:0" for="ch-auto">New videos</label>${auto('summarize', 'id="ch-auto"')}</div>
+    <div class="actions"><button class="btn btn-sm btn-dark" data-act="channel-follow" data-job-btn>Follow</button></div>
+    <div class="route" style="margin-top:14px"><label class="field-label" style="margin:0" for="ch-hours">Check every</label>
+      <select id="ch-hours" data-change="channel-hours" style="width:100%">${C.hour_choices.map(h => `<option value="${h}" ${h === C.hours ? 'selected' : ''}>${h} hour${h === 1 ? '' : 's'}</option>`).join('')}</select></div>
+    <p class="hint">${C.next_check ? `Next check ${esc(atTime(C.next_check))}. ` : ''}Checks run only while the dashboard runs (for example as a background service).
+      ${C.channels.length ? '<button class="btn-text" style="height:auto;padding:0" data-act="channel-check" data-job-btn>Check now</button>' : ''}</p>
+  </section>`;
 }
 function viewLibraries() {
   const libs = S.data.libraries;
@@ -821,7 +863,9 @@ function syncFailureCard(job) {
 function renderJobs() {
   const box = $('#jobs'), job = S.data?.job;
   if (!box || !job) return;
-  const waiting = job.queue?.length || 0, last = job.recent?.[0];
+  // waiting: due as soon as a lane is free; atNight: night-queue tasks (the scheduled channel check is shown on Playlists)
+  const waiting = (job.queue || []).filter(t => !t.not_before).length, last = job.recent?.[0];
+  const atNight = (job.queue || []).filter(t => t.not_before && t.kind !== 'channels').length;
   const active = (job.lanes || []).filter(l => l.running);
   const stopping = !!job.stopping || S.stopPending;
   const flash = !job.running && last && S.flash?.id === last.id && Date.now() < S.flash.until;
@@ -829,9 +873,9 @@ function renderJobs() {
   const pill = active.length
     ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}" title="${active.map(l => esc(l.label)).join(', ')}${waiting ? ` (+${waiting} waiting)` : ''}"><span class="spin"></span><span class="jl">${active.length} running</span>${waiting ? `<b>+${waiting}<span class="jw"> waiting</span></b>` : ''}</button>`
     : flash ? `<button class="jobpill ${last.ok && !last.stopped ? 'ok' : 'bad'}" data-act="jobs-toggle"><span class="jl">${last.stopped ? 'Stopped' : last.ok ? 'Finished' : 'Failed'}: ${esc(last.label)}</span></button>`
-    : (job.queue || []).some(t => t.not_before) ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks waiting for the night queue" aria-label="Tasks waiting for the night queue">
+    : atNight ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks waiting for the night queue" aria-label="Tasks waiting for the night queue">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="flex:none"><path d="M13 9.8A5.5 5.5 0 0 1 6.2 3 5.5 5.5 0 1 0 13 9.8z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-        <b>${job.queue.filter(t => t.not_before).length}</b><span class="jw">at night</span></button>`
+        <b>${atNight}</b><span class="jw">at night</span></button>`
     : job.recent?.length ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks">Tasks</button>` : '';
   const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', later: 'Later', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
       <span class="jl" title="${esc(t.label)}">${esc(t.label)}</span>${action}</div>`;
@@ -969,6 +1013,7 @@ async function taskFinished(t) {
   if (['pull', 'embed', 'sync', 'details', 'asr', 'visual', 'rate', 'summarize', 'remove'].includes(t.kind)) S.indexStatus = undefined;   // searchable text changed
   if (t.kind === 'backup') S.storage = null;
   S.usage = undefined;   // any task may have called a cloud AI
+  if (t.kind === 'channels') S.channels = undefined;
   S.flash = { id: t.id, until: Date.now() + 15000 };
   S.stopPending = false;
   if (!t.stopped) toast(t.ok ? text[1] : text[2], !t.ok);
@@ -2154,7 +2199,9 @@ function renderDrawer() {
     <div class="drawer-body">
       <div class="embed"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(v.video_id)}?rel=0" title="${esc(v.title)}"
         referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>
-      <div><h3>${esc(v.title)}</h3><div class="by">${esc(v.channel || 'Unknown channel')}</div></div>
+      <div><h3>${esc(v.title)}</h3><div class="by">${esc(v.channel || 'Unknown channel')}
+        ${S.channels === undefined ? (loadChannels(), '') : followedTitle(v.channel) ? '<span class="faint"> · Following</span>'
+          : ` · <button class="btn-text" style="height:auto;padding:0" data-act="channel-follow" data-value="${esc(v.video_id)}" data-job-btn title="Add this channel's new uploads to your library by themselves">Follow channel</button>`}</div></div>
       <div class="speeds">${d ? SPEEDS.map(s => `<span class="${s === S.speed ? 'on' : ''}">${sx(s)} <b>${fmt(d / s)}</b></span>`).join('') : 'No duration available'}</div>
       <div id="d-summary">${drawerSummary(v)}</div>
       <div id="d-rating">${drawerRating(v)}</div>
@@ -2422,6 +2469,20 @@ document.addEventListener('click', async e => {
   switch (act) {
     case 'storage-refresh': S.storage = null; await loadStorage(); break;
     case 'usage-refresh': await loadUsage(); break;
+    case 'channel-follow': {
+      const value = (el.dataset.value || $('#ch-value')?.value || '').trim();
+      if (!value) { toast('Paste a channel link, @handle or video link first', true); $('#ch-value')?.focus(); break; }
+      try { await queued(await api('/api/channels/follow', { value, auto: $('#ch-auto')?.value || 'summarize' }), 'Following the channel'); if ($('#ch-value')) $('#ch-value').value = ''; }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'channel-unfollow':
+      if (!confirm(`Stop following ${el.dataset.title}? Its videos already in your library stay.`)) break;
+      try { await api('/api/channels/unfollow', { id: el.dataset.id }); await loadChannels(); toast(`Unfollowed ${el.dataset.title}`); } catch (err) { toast(err.message, true); }
+      break;
+    case 'channel-check':
+      try { await queued(await api('/api/channels/check', {}), 'Checking followed channels'); } catch (err) { toast(err.message, true); }
+      break;
     case 'storage-backup': {
       try { await queued(await api('/api/files/backup', {}), 'Library backup'); S.storage = null; await loadStorage(); }
       catch (err) { toast(err.message, true); }
@@ -2885,6 +2946,15 @@ document.addEventListener('change', async e => {
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
   }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
+  if (ch === 'channel-auto') {
+    try { await api('/api/channels/update', { id: el.dataset.id, auto: el.value }); toast('Saved'); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (ch === 'channel-hours') {
+    try { await api('/api/channels/update', { hours: +el.value }); S.channels = undefined; await refreshJob(); refresh(); toast(`Followed channels are checked every ${el.value} h`); }
+    catch (err) { toast(err.message, true); }
+    return;
+  }
   if (ch === 'night') {
     const night = { on: $('#night-on').checked, minutes: Math.round(+$('#night-min').value), start: $('#night-at').value };
     try { S.data.ai = await saveAi({ night }); toast(night.on ? `Videos over ${night.minutes} min are rated and summarised from ${night.start}` : 'Night queue off: long videos run right away'); }
