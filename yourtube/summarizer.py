@@ -202,14 +202,21 @@ def estimate(video_ids: List[str]) -> Dict[str, Any]:
     return out
 
 
-def run_summarize(video_ids: List[str], should_stop: Callable[[], bool] = lambda: False) -> bool:
-    """Summarises the given videos (those with a transcript). Prints progress for the job log."""
+def run_summarize(video_ids: List[str], should_stop: Callable[[], bool] = lambda: False,
+                  done_since: Optional[str] = None) -> bool:
+    """
+    Summarises the given videos (those with a transcript). Prints progress for the job log.
+    done_since: skips videos summarised since then (see rater.run_rate).
+    """
     import threading
     import llm
     import parallel
     import storage
     settings = llm.load_settings()
     videos = _videos(video_ids)
+    if done_since:
+        made = storage.summary_times()
+        videos = [v for v in videos if made.get(v["video_id"], "") < done_since]
     print(f"Summarising {len(videos)} videos with {llm.describe(settings, 'summarize')} (in {settings.get('language') or 'English'}).")
     try:
         complete = llm.make_completer(settings, "summarize")
@@ -227,6 +234,10 @@ def run_summarize(video_ids: List[str], should_stop: Callable[[], bool] = lambda
                 break
             try:
                 summary = _summarize_one(v, complete, budget, model, settings)
+            except llm.QuotaError as e:
+                print(f"Error: {e}\n   Stopped with {len(videos) - n + 1} of {len(videos)} videos not summarised. "
+                      "The summaries so far are saved; Retry carries on with the rest.")
+                return False
             except LLMError as e:
                 failed += 1
                 print(f"   [{n}/{len(videos)}] Warning: {v['title'][:60]}: {e}")

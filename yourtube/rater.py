@@ -355,8 +355,13 @@ def estimate(video_ids: Optional[List[str]] = None) -> Dict[str, Any]:
     return out
 
 
-def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bool] = lambda: False) -> bool:
-    """Rates unrated, unwatched videos (or the given ones). Prints progress for the job log."""
+def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bool] = lambda: False,
+             done_since: Optional[str] = None) -> bool:
+    """
+    Rates unrated, unwatched videos (or the given ones). Prints progress for the job log.
+    done_since (UTC 'YYYY-MM-DD HH:MM:SS', when the task was queued): skips videos rated since then, by another
+    task that ran first or by an earlier try of this one, so a Retry or an overlapping batch doesn't redo them.
+    """
     import threading
     import llm
     import parallel
@@ -365,6 +370,9 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     settings = llm.load_settings()
     context = _contexts(settings)
     videos = [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
+    if done_since:
+        rated = storage.rating_times()
+        videos = [v for v in videos if rated.get(v["video_id"], "") < done_since]
     print(f"Rating {len(videos)} videos with {llm.describe(settings, 'rate')} (in {settings.get('language') or 'English'}).")
     if not videos:
         print("   Nothing to rate.")
@@ -390,6 +398,10 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
                 break
             try:
                 rating = _rate_one(v, complete, budget, model, context(v))
+            except llm.QuotaError as e:
+                print(f"Error: {e}\n   Stopped with {len(videos) - n + 1} of {len(videos)} videos not rated. "
+                      "The ratings so far are saved; Retry carries on with the rest.")
+                return False
             except LLMError as e:
                 failed += 1
                 print(f"   [{n}/{len(videos)}] Warning: {v['title'][:60]}: {e}")

@@ -117,6 +117,36 @@ class RunRateTest(unittest.TestCase):
         with mock.patch("llm.make_completer", return_value=lambda s, p: "nonsense"), contextlib.redirect_stdout(out):
             self.assertFalse(rater.run_rate(["ra", "rb", "rc"]))  # first three all failed: gives up
 
+    def test_used_up_daily_quota_stops_the_batch_at_once(self):
+        calls = []
+        def fake(system, prompt):
+            calls.append(prompt)
+            if len(calls) == 2:
+                raise llm.QuotaError("The daily limit of x.test is used up")
+            return json.dumps({"score": 8, "reason": "r", "tldr": "t"})
+        out = io.StringIO()
+        with mock.patch("llm.make_completer", return_value=fake), contextlib.redirect_stdout(out):
+            self.assertFalse(rater.run_rate(["ra", "rb", "rc"]))   # failed, so the dashboard offers Retry
+        self.assertEqual(len(calls), 2)                              # the third video isn't tried
+        self.assertIn("Stopped with 2 of 3 videos not rated", out.getvalue())
+        self.assertEqual(set(storage.rating_times()), {"ra"})       # the first rating is kept
+
+    def test_done_since_skips_videos_rated_after_the_task_was_queued(self):
+        storage.save_rating("ra", {"score": 5, "verdict": "skim"})
+        with storage.get_connection() as conn:
+            conn.execute("UPDATE video_ratings SET created_at = '2026-01-01 10:00:00' WHERE video_id = 'ra'")
+            conn.commit()
+        rated = []
+        fake = lambda s, p: rated.append(p) or json.dumps({"score": 8, "reason": "r", "tldr": "t"})
+        with mock.patch("llm.make_completer", return_value=fake), contextlib.redirect_stdout(io.StringIO()):
+            rater.run_rate(["ra", "rb"], done_since="2026-01-01 09:00:00")   # ra rated after: skipped (Retry)
+        self.assertEqual(len(rated), 1)
+        self.assertIn("Hype news", rated[0])
+        rated.clear()
+        with mock.patch("llm.make_completer", return_value=fake), contextlib.redirect_stdout(io.StringIO()):
+            rater.run_rate(["ra"], done_since="2026-01-01 11:00:00")         # rated before: asked again, so redone
+        self.assertEqual(len(rated), 1)
+
     def test_estimate(self):
         est = rater.estimate(["ra", "rb"])
         self.assertEqual((est["videos"], est["with_transcript"], est["cost"]), (2, 1, 0.0))  # local = free

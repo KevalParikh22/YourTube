@@ -144,6 +144,19 @@ class RetryOtherTest(unittest.TestCase):
         counts = parallel.share([1, 2], {"a": fail, "b": fail}, on_error=lambda n, i, e: errors.append(i), retry_other=True)
         self.assertEqual((sorted(errors), counts), ([1, 2], {"a": 0, "b": 0}))
 
+    def test_used_up_quota_stops_that_worker_at_once_and_the_other_does_the_rest(self):
+        import llm
+        tried, done = [], []
+        def cloud(x):
+            tried.append(x)
+            raise llm.QuotaError("daily limit used up")
+        def local(x):
+            time.sleep(0.01)
+            done.append(x)
+        counts = parallel.share(list(range(6)), {"cloud": cloud, "local": local}, retry_other=True)
+        self.assertEqual(len(tried), 1)                    # not three tries as for other errors
+        self.assertEqual((sorted(done), counts["local"]), (list(range(6)), 6))
+
     def test_without_retry_other_errors_are_reported_at_once(self):
         errors, done = [], []
         def fail(x):

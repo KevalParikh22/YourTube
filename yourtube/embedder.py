@@ -111,15 +111,11 @@ class GeminiEmbedder(Embedder):
                 headers={"Content-Type": "application/json", "x-goog-api-key": self.key},
                 method="POST",
             )
-            try:
-                with urllib.request.urlopen(req, timeout=120) as r:
-                    data = json.load(r)
-            except urllib.error.HTTPError as e:
-                raise RuntimeError(f"Gemini could not embed with {self.raw_model}: {e.read().decode('utf-8', 'replace')[:200]}") from None
-            except urllib.error.URLError as e:
-                raise RuntimeError(f"Gemini could not embed with {self.raw_model}: {e.reason}") from None
-            except TimeoutError:
-                raise RuntimeError(f"Timed out waiting for Gemini embeddings ({self.raw_model})") from None
+            import llm
+            try:   # through llm._open: waits and retries on 429/503 and shares the pacing with other Gemini calls
+                data = llm._open(req, 120)
+            except llm.LLMError as e:
+                raise RuntimeError(f"Gemini could not embed with {self.raw_model}: {e}") from None
             embeddings = data.get("embeddings") or []
             if len(embeddings) != len(chunk):
                 raise RuntimeError(f"Gemini returned {len(embeddings)} vectors for {len(chunk)} texts")
@@ -163,15 +159,11 @@ class OpenAIEmbedder(Embedder):
                 headers=headers,
                 method="POST",
             )
-            try:
-                with urllib.request.urlopen(req, timeout=120) as r:
-                    data = json.load(r)
-            except urllib.error.HTTPError as e:
-                raise RuntimeError(f"OpenAI could not embed with {self.raw_model}: {e.read().decode('utf-8', 'replace')[:200]}") from None
-            except urllib.error.URLError as e:
-                raise RuntimeError(f"OpenAI could not embed with {self.raw_model}: {e.reason}") from None
-            except TimeoutError:
-                raise RuntimeError(f"Timed out waiting for OpenAI embeddings ({self.raw_model})") from None
+            import llm
+            try:   # through llm._open: waits and retries on 429/503 and shares the pacing with other calls there
+                data = llm._open(req, 120)
+            except llm.LLMError as e:
+                raise RuntimeError(f"OpenAI could not embed with {self.raw_model}: {e}") from None
             items = sorted(data.get("data") or [], key=lambda x: x.get("index", 0))
             if len(items) != len(chunk):
                 raise RuntimeError(f"OpenAI returned {len(items)} vectors for {len(chunk)} texts")

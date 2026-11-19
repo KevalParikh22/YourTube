@@ -15,6 +15,7 @@ import os
 import re
 import time
 import json
+import threading
 import base64
 import urllib.request
 import urllib.error
@@ -130,6 +131,10 @@ TIMEOUT = 300  # local models can be slow on a large batch
 
 class LLMError(Exception):
     """A provider call failed in a way worth showing to the user."""
+
+class QuotaError(LLMError):
+    """The service's daily limit is used up: waiting minutes won't help, so a batch stops instead of trying each video."""
+    ends_worker = True   # parallel.share: this worker stops at once and its videos go to the other AI
 
 
 # --- settings ----------------------------------------------------------------
@@ -428,16 +433,50 @@ def _wait_for(e: urllib.error.HTTPError, body: str, attempt: int) -> Optional[fl
     seconds = float(hint) if hint and hint.replace(".", "", 1).isdigit() else float(found.group(1)) if found else 10 * 2 ** attempt
     return min(seconds + 1, 90)
 
+# Pacing: every task and helper thread calling one endpoint (URL without query; for Gemini that is per model, like
+# its limits) shares one gap between calls. It starts at 0, doubles on each 429 and shrinks again while calls succeed,
+# so a batch settles just under the service's per-minute limit instead of hitting it over and over.
+# shortcut: learned per run of the dashboard, not saved; a setting per provider would let paid tiers skip the warm-up
+_PACE: Dict[str, Dict[str, float]] = {}
+_PACE_LOCK = threading.Lock()
+PACE_MIN, PACE_MAX = 4.0, 60.0   # first gap after a 429 (Gemini free tier: 15 calls a minute) and the longest
+
+def _wait_turn(service: str) -> None:
+    with _PACE_LOCK:
+        p = _PACE.setdefault(service, {"gap": 0.0, "next": 0.0})
+        now = time.monotonic()
+        start = max(now, p["next"])
+        p["next"] = start + p["gap"]
+    if start > now:
+        time.sleep(start - now)
+
+def _pace_after(service: str, limited: bool) -> None:
+    with _PACE_LOCK:
+        p = _PACE.setdefault(service, {"gap": 0.0, "next": 0.0})
+        old = p["gap"]
+        p["gap"] = min(max(old * 2, PACE_MIN), PACE_MAX) if limited else (old * 0.95 if old > 1 else 0.0)
+    if limited and p["gap"] != old:
+        print(f"   Slowing down to one request every {p['gap']:.0f} s to stay under this AI's rate limit.")
+
 def _open(req: urllib.request.Request, timeout: int) -> Dict[str, Any]:
+    service = req.full_url.split("?")[0]
     for attempt in range(RETRIES + 1):
+        _wait_turn(service)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode("utf-8"))
+                data = json.loads(r.read().decode("utf-8"))
+            _pace_after(service, False)
+            return data
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")
             wait = _wait_for(e, body, attempt)
             if wait is None:
-                raise LLMError(f"HTTP {e.code} from {req.full_url.split('?')[0]}: {body[:300]}") from None
+                if e.code == 429 and re.search(r"per ?day|PerDay|daily", body, re.I):
+                    raise QuotaError(f"The daily limit of {service.split('/')[2]} is used up (HTTP 429). "
+                                     "It resets tomorrow (Gemini: midnight Pacific time), or use another AI.") from None
+                raise LLMError(f"HTTP {e.code} from {service}: {body[:300]}") from None
+            if e.code == 429:
+                _pace_after(service, True)
             print(f"   The AI service is busy or rate-limited (HTTP {e.code}); trying again in {wait:.0f} s.")
             time.sleep(wait)
         except urllib.error.URLError as e:

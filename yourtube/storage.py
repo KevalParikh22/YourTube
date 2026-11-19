@@ -1696,6 +1696,12 @@ def get_summary(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
         d[k] = json.loads(d[k] or default)
     return d
 
+def rating_times(db_path: str = DB_PATH) -> Dict[str, str]:
+    """{video_id: when its rating was made (UTC, 'YYYY-MM-DD HH:MM:SS')} for every rated video."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return dict(conn.execute("SELECT video_id, created_at FROM video_ratings").fetchall())
+
 def summary_times(db_path: str = DB_PATH) -> Dict[str, str]:
     """{video_id: when its summary was made} for every summarised video."""
     init_db(db_path)

@@ -23,7 +23,7 @@ import webbrowser
 import contextvars
 import shutil
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -375,6 +375,10 @@ def _add_video(video_id, library=1):
     print()
     run_enrich(video_ids=[video_id], should_stop=JOB.stop_requested)   # its details now; a failure here doesn't fail the add
     return True
+
+def _utc_now():
+    """Now in SQLite's CURRENT_TIMESTAMP form, to compare with created_at columns."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 def _label(action, ids):
     """Task label: 'Rate: 3 videos', 'Rate: <title>' for one video, or the action alone for 'everything that needs it'."""
@@ -1245,7 +1249,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(rater.estimate(ids))
                 if not llm.is_configured(llm.load_settings(), "rate"):
                     return self._error("Choose an AI for ratings in Settings → AI first")
-                return self._queued(JOB.start("rate", _label("Rate", ids), lambda: rater.run_rate(ids, should_stop=JOB.stop_requested), key=ids))
+                since = _utc_now()   # Retry, or a batch queued behind an overlapping one, skips videos rated after this
+                return self._queued(JOB.start("rate", _label("Rate", ids),
+                                              lambda: rater.run_rate(ids, should_stop=JOB.stop_requested, done_since=since), key=ids))
 
             if path == "/api/knowledge/build":
                 import knowledge
@@ -1269,8 +1275,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(summarizer.estimate(ids))
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
+                since = _utc_now()   # as for Rate: Retry and overlapping batches skip videos summarised after this
                 return self._queued(JOB.start("summarize", _label("Summarise", ids),
-                                              lambda: summarizer.run_summarize(ids, should_stop=JOB.stop_requested), key=ids))
+                                              lambda: summarizer.run_summarize(ids, should_stop=JOB.stop_requested, done_since=since), key=ids))
 
             if path == "/api/details/settings":
                 settings = llm.load_settings()
