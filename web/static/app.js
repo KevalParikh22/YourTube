@@ -2,8 +2,8 @@
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
 const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched', skipped: 'Skipped' };
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
-const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
-const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
+const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['transcript', 'Transcript pending'], ['gone', 'Not in a playlist']];
+const OPTIONAL_VIEWS = ['skipped', 'suggested', 'transcript', 'gone'];  // only shown when they have videos
 const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories']];
 const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
 const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
@@ -43,7 +43,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   statusUndo: [],
-  drawer: null, polling: false, detailCache: {}, summaryCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
@@ -285,6 +285,7 @@ function statusFilter(v, status, src) {
     case 'skipped': return v.status === 'skipped';
     case 'gone': return isGone(v, src);
     case 'suggested': return !!v.suggestion;
+    case 'transcript': return needsDetails(v);
     default: return true;
   }
 }
@@ -364,7 +365,7 @@ function renderList() {
   box.innerHTML = `
     ${q.trim().length >= 3 ? `<p class="hint" style="margin:10px 0 0"><a href="#/search?q=${encodeURIComponent(q.trim())}">Search inside transcripts, chapters and summaries for “${esc(q.trim())}” →</a></p>` : ''}
     ${S.sel.size ? selBar() : status === 'suggested' ? sugSum(list) : `<div class="list-sum"><span>Showing ${Math.min(S.limit, list.length)} of ${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
-      <span class="play-links">${list.length ? exportMenu() : ''}${playLinks(list)}</span></div>`}
+      <span class="play-links">${status === 'transcript' && list.length ? `<button class="btn btn-sm" data-act="details-these" data-ids="${esc(list.map(v => v.video_id).join(','))}" data-job-btn>Fetch these ${list.length}</button>` : ''}${list.length ? exportMenu() : ''}${playLinks(list)}</span></div>`}
     ${scoped.some(v => v.rating || (!v.rating && !isDone(v))) ? `<div class="verdict-bar">${scoped.some(v => v.rating) ? `<div class="chips">${[['', 'All'], ['watch', 'Watch'], ['skim', 'Skim'], ['skip', 'Skip'], ['unrated', 'Not rated']].map(([k, label]) => {
       const count = k === '' ? scoped.length : k === 'unrated' ? scoped.filter(v => !v.rating).length : scoped.filter(v => v.rating?.verdict === k).length;
       return `<button class="chip ${verdict === k ? 'on' : ''}" data-act="v-verdict" data-v="${k}">${label}<span class="c">${count}</span></button>`;
@@ -380,7 +381,8 @@ function renderList() {
 function row(v) {
   const d = v.duration_seconds || 0;
   const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : `<span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span>`,
-    isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '']
+    isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '',
+    isSummarised(v.video_id) ? `<span class="sum-mark" title="Summarised: open it to read the summary instead of watching"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7l3 3v8H3z M10 2.5v3h3 M5.5 8h5 M5.5 10.5h5"/></svg>summarised</span>` : '']
     .filter(Boolean).join(' · ');
   return `<li class="row ${isDone(v) ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
     <input type="checkbox" class="pick" data-act="pick" data-id="${esc(v.video_id)}" ${S.sel.has(v.video_id) ? 'checked' : ''} aria-label="Select">
@@ -541,20 +543,29 @@ async function statusUndo() {
   for (const [st, ids] of Object.entries(by)) await update(ids, { status: st });
   toast('Undone');
 }
-async function startRate(ids) {
+const isSummarised = id => (S.data.summarised || []).includes(id);
+// Bulk Rate/Summarise of a selection: leave out videos that already have one (said in the run's confirm),
+// or ask before redoing them when all of them have one. Returns { ids, note } or null when cancelled.
+function newOnly(ids, has, what, again) {
+  const fresh = ids.filter(id => !has(id)), n = ids.length - fresh.length;
+  if (!n) return { ids, note: '' };
+  if (!fresh.length) return confirm(`${n === 1 ? 'The selected video is' : `All ${n} selected videos are`} already ${what}. ${again} again?`) ? { ids, note: '' } : null;
+  return { ids: fresh, note: `${plural(n, 'selected video')} already ${what} ${n === 1 ? 'is' : 'are'} left out. To redo ${n === 1 ? 'it' : 'them'}, select only ${n === 1 ? 'it' : 'those'}.\n\n` };
+}
+async function startRate(ids, note = '') {
   if (!ids && S.lib) ids = videos().filter(v => !isDone(v) && !v.rating).map(v => v.video_id);   // only this library
   if (ids && !ids.length) { toast('Nothing to rate in this library'); return; }
   try {
     const est = await api('/api/rate/estimate', ids ? { ids } : {});
     if (!est.videos) { toast('Nothing to rate'); return; }
-    if (!ids || ids.length > 1) {
+    if (!ids || ids.length > 1 || note) {
       const cost = est.cost === 0 ? 'free (local model)' : est.cost == null ? 'cost unknown for this model' : `about $${est.cost < 0.01 ? '0.01 or less' : est.cost.toFixed(2)}`;
-      if (!confirm(`Rate ${plural(est.videos, 'video')} with ${est.uses}?\n\n${est.with_transcript} with transcripts, ${est.videos - est.with_transcript} from title only.\n≈ ${Math.round(est.tokens_in / 1000)}k tokens in, ${cost}.`)) return;
+      if (!confirm(`${note}Rate ${plural(est.videos, 'video')} with ${est.uses}?\n\n${est.with_transcript} with transcripts, ${est.videos - est.with_transcript} from title only.\n≈ ${Math.round(est.tokens_in / 1000)}k tokens in, ${cost}.`)) return;
     }
     await queued(await api('/api/rate', ids ? { ids } : {}), ids?.length === 1 ? 'Rating' : 'Rating run');
   } catch (e) { toast(e.message, true); }
 }
-async function startSummary(ids) {
+async function startSummary(ids, note = '') {
   if (!ids?.length) { toast('Select at least one video', true); return; }
   try {
     const batches = [];
@@ -562,12 +573,12 @@ async function startSummary(ids) {
     const estimates = await Promise.all(batches.map(batch => api('/api/summarize/estimate', { ids: batch })));
     const count = estimates.reduce((n, e) => n + (e.videos || 0), 0);
     if (!count) { toast('Nothing to summarise'); return; }
-    if (count > 1) {
+    if (count > 1 || note) {
       const sum = estimates.reduce((n, e) => n + (e.cost || 0), 0);
       const unknown = estimates.some(e => e.cost == null);
       const cost = unknown ? 'cost unknown for this model' : sum === 0 ? 'free (local model)' : `about $${sum < 0.01 ? '0.01 or less' : sum.toFixed(2)}`;
       const uses = [...new Set(estimates.map(e => e.uses).filter(Boolean))].join(', ');
-      if (!confirm(`Summarise ${plural(count, 'video')} with ${uses}?\n\n≈ ${cost}. Local models take about 1–2 minutes per video.`)) return;
+      if (!confirm(`${note}Summarise ${plural(count, 'video')} with ${uses}?\n\n≈ ${cost}. Local models take about 1–2 minutes per video.`)) return;
     }
     for (const batch of batches) await queued(await api('/api/summarize', { ids: batch }), batch.length === 1 ? 'Summarising' : 'Summaries');
   } catch (e) { toast(e.message, true); }
@@ -2061,9 +2072,9 @@ function renderDrawer() {
   const i = S.visible.findIndex(x => x.video_id === v.video_id);
   const cats = categoryNames();
   if (!cats.includes(v.category)) cats.unshift(v.category);
-  box.innerHTML = `
+  const html = `
   <div class="scrim" data-act="close"></div>
-  <aside class="drawer" role="dialog" aria-label="Video details">
+  <aside class="drawer" role="dialog" aria-label="Video details" data-id="${esc(v.video_id)}">
     <div class="drawer-top">
       <button class="btn icon-btn" data-act="step" data-dir="-1" ${i > 0 ? '' : 'disabled'} aria-label="Previous video">↑</button>
       <button class="btn icon-btn" data-act="step" data-dir="1" ${i >= 0 && i < S.visible.length - 1 ? '' : 'disabled'} aria-label="Next video">↓</button>
@@ -2094,6 +2105,18 @@ function renderDrawer() {
       <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
     </div>
   </aside>`;
+  const old = box.querySelector('.drawer');
+  if (old && old.dataset.id === v.video_id) {
+    // Same video redrawn (a background task finished): keep the playing video and the scroll position.
+    // The player is never moved in the DOM, because moving an iframe reloads it.
+    const scroll = old.scrollTop, embed = old.querySelector('.embed');
+    const t = document.createElement('div'); t.innerHTML = html;
+    old.querySelector('.drawer-top').replaceWith(t.querySelector('.drawer-top'));
+    const body = old.querySelector('.drawer-body');
+    [...body.children].forEach(c => c !== embed && c.remove());
+    body.append(...[...t.querySelector('.drawer-body').children].filter(c => !c.classList.contains('embed')));
+    old.scrollTop = scroll;
+  } else box.innerHTML = html;
   loadSummary(v.video_id);
 }
 function drawerRating(v) {
@@ -2142,7 +2165,7 @@ function drawerSummary(v) {
     ${s.tldr ? `<p class="tldr">${esc(s.tldr)}</p>` : ''}
     ${s.minutes?.length ? `<div class="field-label">Minutes</div><ul>${s.minutes.map((m, i) => `<li><div class="chap"><span>${time(m.t)}</span><span><b>${esc(m.topic)}</b>${(m.notes || []).map(n => `<small class="minute-note">${esc(n)}</small>`).join('')}${(moments[i] || []).length ? `<span class="also">Also in ${(moments[i] || []).map(x => `<button class="also-chip" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${at(x.t)}" title="${esc(x.title)} @ ${clock(at(x.t))}">${esc(x.title)} · ${clock(at(x.t))}</button>`).join('')}</span>` : ''}</span></div></li>`).join('')}</ul>` : ''}
     ${s.claims?.length ? `<div class="field-label">Key claims and quotes</div><ul>${s.claims.map(c => `<li><div class="chap"><span>${time(c.t)}</span><span><b>${esc(c.kind)}</b> · ${esc(c.text)}</span></div></li>`).join('')}</ul>` : ''}
-    ${s.quiz?.length ? `<div class="field-label">Check yourself</div><ul>${s.quiz.map(q => `<li><div class="chap"><span>${time(q.t)}</span><span>${esc(q.q)} <details><summary>Show answer</summary><p>${esc(q.a)}</p></details></span></div></li>`).join('')}</ul>` : ''}
+    ${s.quiz?.length ? `<div class="field-label">Check yourself</div><ul>${s.quiz.map((q, i) => `<li><div class="chap"><span>${time(q.t)}</span><span>${esc(q.q)} <details ${keepOpen('quiz' + i)}><summary>Show answer</summary><p>${esc(q.a)}</p></details></span></div></li>`).join('')}</ul>` : ''}
     ${s.takeaways?.length ? `<div class="field-label">Takeaways</div><ul>${s.takeaways.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${Object.entries(grouped).map(([kind, items]) => `<div class="field-label">${esc(relationLabel[kind] || kind)}</div><ul>${items.map(x => `<li><button class="btn-text" data-act="open" data-id="${esc(x.video_id)}">${esc(x.video_id)}</button> · ${esc(x.why)}</li>`).join('')}</ul>`).join('')}
     ${(s.learn_more?.searches || []).length ? `<div class="field-label">YouTube searches</div><ul>${s.learn_more.searches.map(x => `<li><a href="https://www.youtube.com/results?search_query=${encodeURIComponent(x.query || '')}" target="_blank" rel="noopener">${esc(x.query)}</a> · ${esc(x.why)}</li>`).join('')}</ul>` : ''}
@@ -2177,7 +2200,7 @@ function drawerSlides(v) {
   else if (vis.slides && full?.visuals) {
     body = `<div class="strip">${full.visuals.filter(x => x.thumb).map(x => `<button data-act="seek" data-t="${Math.floor(x.t)}" title="${esc((x.text || x.visual || '').slice(0, 140))}">
         <img src="/frames/${encodeURIComponent(v.video_id)}/${esc(x.thumb.replace('.jpg', ''))}.jpg" alt="" loading="lazy"><time>${clock(x.t)}</time></button>`).join('')}</div>
-      <details style="margin-top:6px"><summary>On-screen text · ${plural(full.visuals.length, 'slide')}</summary>
+      <details style="margin-top:6px" ${keepOpen('slides')}><summary>On-screen text · ${plural(full.visuals.length, 'slide')}</summary>
         ${full.visuals.map(x => `<button class="tline" data-act="seek" data-t="${Math.floor(x.t)}"><time>${clock(x.t)}</time><span>${x.visual ? `<i>${esc(x.visual)}</i><br>` : ''}<span class="slide-text">${esc(x.text)}</span></span></button>`).join('')}
       </details>
       <div class="kv-line">${readBtn('Read again')}</div>`;
@@ -2212,8 +2235,8 @@ function drawerDetails(v) {
   return `<span class="field-label">Details</span><div class="kv-line">${head}${det.sources.includes('local-asr') && det.sources.length === 1 ? ' · local transcript' : ''} · ${fetchBtn('Refresh')}</div>
     ${asrLine}
     ${full.chapters.length ? `<div style="margin-top:10px">${full.chapters.map(c => `<button class="chap" data-act="seek" data-t="${Math.floor(c.start)}"><time>${clock(c.start)}</time><span>${esc(c.title)}</span></button>`).join('')}</div>` : ''}
-    ${full.description ? `<details style="margin-top:12px" ${S.data.ai.show_descriptions ? 'open' : ''}><summary>Show description</summary><p class="desc-text">${esc(full.description)}</p></details>` : ''}
-    ${full.segments.length ? `<details style="margin-top:10px"><summary>Transcript · ${plural(full.segments.length, 'line')}</summary>
+    ${full.description ? `<details style="margin-top:12px" ${keepOpen('desc', S.data.ai.show_descriptions)}><summary>Show description</summary><p class="desc-text">${esc(full.description)}</p></details>` : ''}
+    ${full.segments.length ? `<details style="margin-top:10px" ${keepOpen('transcript')}><summary>Transcript · ${plural(full.segments.length, 'line')}</summary>
       <div class="transcript">${full.segments.map(g => `<button class="tline" data-act="seek" data-t="${Math.floor(g.start)}"><time>${clock(g.start)}</time><span>${esc(g.text)}</span></button>`).join('')}</div></details>` : ''}`;
 }
 async function loadDetails(id) {
@@ -2246,7 +2269,10 @@ function saveNotes() {
   const ta = $('#d-notes'), v = S.drawer && byId(S.drawer);
   if (ta && v && ta.value !== (v.notes || '')) update([v.video_id], { notes: ta.value });
 }
-function openDrawer(id) { saveNotes(); S.drawer = id; renderDrawer(); }
+function openDrawer(id) { saveNotes(); if (S.drawer !== id) S.drawerOpen = {}; S.drawer = id; renderDrawer(); }
+// Open/closed sections of the video panel, remembered so redraws (a task finishing, details reloading) don't close them
+const keepOpen = (k, dflt = false) => `data-keep="${k}" ${(S.drawerOpen[k] ?? dflt) ? 'open' : ''}`;
+document.addEventListener('toggle', e => { const k = e.target.dataset?.keep; if (k) S.drawerOpen[k] = e.target.open; }, true);
 function closeDrawer() { saveNotes(); S.drawer = null; renderDrawer(); }
 
 /* ---------------- updates ---------------- */
@@ -2453,15 +2479,15 @@ document.addEventListener('click', async e => {
     case 'rate-batch': startRate(null); break;
     case 'rate-filtered': startRate(el.dataset.ids.split(',').filter(Boolean)); break;
     case 'rate-one': startRate([id]); break;
-    case 'rate-sel': startRate([...S.sel]); break;
+    case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
-    case 'summarize-sel': startSummary([...S.sel]); break;
+    case 'summarize-sel': { const r = newOnly([...S.sel], isSummarised, 'summarised', 'Summarise'); if (r) startSummary(r.ids, r.note); break; }
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
     case 'knowledge-summarize-five': summarizeKnowledgeFive(el.dataset.cat); break;
-    case 'details-fetch': case 'details-one': {
+    case 'details-fetch': case 'details-one': case 'details-these': {
       try {
-        const res = await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : {});
+        const res = await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : act === 'details-these' ? { ids: el.dataset.ids.split(',') } : {});
         if (act === 'details-one') delete S.detailCache[id];
         await queued(res, 'Fetching details');
       } catch (err) { toast(err.message, true); }
