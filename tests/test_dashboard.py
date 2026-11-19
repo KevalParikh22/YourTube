@@ -224,6 +224,25 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual((b["category"], b["category_source"]), ("Cooking", "ai"))
         self.call("/api/videos/update", {"ids": ["b"], "reset_category": True})
 
+    def test_remove_videos_endpoint(self):
+        storage.save_playlist(playlist("PL_RV"), [video("rv_gone", "Drop me"), video("rv_kept", "Keep me")])
+        self.assertEqual(self.call("/api/videos/remove", {"ids": []})[0], 400)
+        self.assertEqual(self.call("/api/videos/remove", {"ids": "rv_gone"})[0], 400)
+        started = []
+        with mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None: started.append((kind, fn)) or {"id": 998, "position": 0}):
+            self.assertEqual(self.call("/api/videos/remove", {"ids": ["rv_gone"]})[0], 200)
+        kind, fn = started[0]
+        self.assertEqual(kind, "remove")
+        with tempfile.TemporaryDirectory() as frames, mock.patch.object(dashboard, "FRAMES_DIR", frames):
+            os.makedirs(os.path.join(frames, "rv_gone"))
+            os.makedirs(os.path.join(frames, "rv_kept"))
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertTrue(fn())
+            self.assertEqual(os.listdir(frames), ["rv_kept"])
+        self.assertIn("Nothing changes on YouTube", out.getvalue())
+        ids = {v["video_id"] for v in storage.get_library()}
+        self.assertEqual(("rv_gone" in ids, "rv_kept" in ids), (False, True))
+
     def test_remove_playlist_endpoints(self):
         storage.save_playlist(playlist("PL_RM"), [video("rm_solo", "Gone soon"), video("a", "Pasta recipe", category="Cooking")])
         self.assertEqual(self.call("/api/playlists/remove?id=PL_RM"), (200, {"removed": 1, "kept_notes": 0, "shared": 1}))

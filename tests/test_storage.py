@@ -415,3 +415,42 @@ class RemovePlaylistTest(unittest.TestCase):
     def test_unknown_playlist(self):
         with self.assertRaises(ValueError):
             storage.remove_playlist_plan("NOPE", db_path=self.db)
+
+
+class RemoveVideosTest(unittest.TestCase):
+    def setUp(self):
+        self.db = temp_db()
+        self.list_a = [video("gone", "Talk to drop"), video("kept", "Talk to keep")]
+        storage.save_playlist(playlist("A"), self.list_a, db_path=self.db)
+        storage.save_playlist(playlist("B"), [video("gone", "Talk to drop")], db_path=self.db)
+        storage.update_videos(["gone"], notes="private thoughts", db_path=self.db)
+        for vid in ("gone", "kept"):
+            storage.save_details(vid, {"status": "done", "segments": [{"start": 0, "text": f"spoken words of {vid}"}]}, db_path=self.db)
+            storage.save_rating(vid, {"score": 7, "verdict": "watch", "reason": "good"}, db_path=self.db)
+            storage.save_summary(vid, {"tldr": f"summary of {vid}"}, db_path=self.db)
+        storage.save_embeddings("m", [(h, 1, b"\0\0\0\0") for (h,) in sqlite3.connect(self.db).execute("SELECT hash FROM search_docs")],
+                                db_path=self.db)
+
+    def rows(self, table, vid):
+        with sqlite3.connect(self.db) as c:
+            return c.execute(f"SELECT COUNT(*) FROM {table} WHERE video_id = ?", (vid,)).fetchone()[0]
+
+    def test_removes_the_video_everywhere_and_leaves_the_others(self):
+        self.assertEqual(storage.remove_videos(["gone", "never-existed"], db_path=self.db), ["gone"])
+        for table in storage.VIDEO_DATA_TABLES + ("search_docs", "playlist_items", "videos"):
+            self.assertEqual(self.rows(table, "gone"), 0, table)
+            if table not in ("category_suggestions", "visual_segments", "media_jobs"):
+                self.assertGreater(self.rows(table, "kept"), 0, table)
+        self.assertEqual(storage.search("private thoughts", db_path=self.db)["results"], [])
+        with sqlite3.connect(self.db) as c:
+            orphans = c.execute("SELECT COUNT(*) FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs)").fetchone()[0]
+        self.assertEqual(orphans, 0)
+
+    def test_a_sync_does_not_bring_it_back_but_adding_it_by_link_does(self):
+        storage.remove_videos(["gone"], db_path=self.db)
+        storage.init_db(self.db)
+        storage.save_playlist(playlist("A"), self.list_a, db_path=self.db)          # the playlist still has it on YouTube
+        self.assertEqual([v["video_id"] for v in storage.get_library(db_path=self.db)], ["kept"])
+        storage.save_playlist(storage.SINGLE_SOURCE, [video("gone", "Talk to drop")], db_path=self.db, partial=True)
+        storage.save_playlist(playlist("A"), self.list_a, db_path=self.db)
+        self.assertEqual(self.rows("playlist_items", "gone"), 2)                     # back, and in A again

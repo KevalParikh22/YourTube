@@ -162,6 +162,7 @@ def default_settings() -> Dict[str, Any]:
         "embed_model": "qwen3-embedding:0.6b",   # Ollama embedding model for meaning-based search (Phase 2)
         "use_descriptions": True, # search video descriptions and send them to the AI (they are fetched either way)
         "show_descriptions": False,
+        "auto_index": False,      # update the meaning index after every sync/details/AI task; off: Update index on click
         "rating_formula": {},     # overrides of rater.DEFAULT_FORMULA (weights, interest penalty and bonus)
     }
 
@@ -266,6 +267,7 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
         "embed_model": settings.get("embed_model") or "qwen3-embedding:0.6b",
         "use_descriptions": settings.get("use_descriptions", True) is not False,
         "show_descriptions": bool(settings.get("show_descriptions", False)),
+        "auto_index": bool(settings.get("auto_index", False)),
         "rating_formula": settings.get("rating_formula") or {},
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},

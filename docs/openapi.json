@@ -1907,6 +1907,38 @@
         }
       }
     },
+    "/api/videos/remove": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Queue removing videos from YourTube with their notes, transcripts, slides, ratings, summaries and search data (never from YouTube); a playlist sync won't add them again, adding one by its link does",
+        "operationId": "removeVideos",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+                },
+                "required": ["ids"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Removal job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
     "/api/videos/update": {
       "post": {
         "tags": ["Videos"],
@@ -2671,6 +2703,7 @@
                   "helpers": {"type": "object"},
                   "auto_after_sync": {"type": "boolean"},
                   "show_descriptions": {"type": "boolean"},
+                  "auto_index": {"type": "boolean", "description": "Update the meaning index after every sync, details, transcription, slide reading, rating and summary task (default false: update on request)"},
                   "local_only": {"type": "boolean"},
                   "asr_model": {"type": "string"},
                   "vision_model": {"type": "string"},

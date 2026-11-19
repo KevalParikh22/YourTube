@@ -288,6 +288,8 @@ def init_db(db_path: str = DB_PATH) -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Videos the user removed from YourTube: a playlist sync skips them (see remove_videos)
+        cursor.execute("CREATE TABLE IF NOT EXISTS removed_videos (video_id TEXT PRIMARY KEY, removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         asks = _columns(cursor, "ask_history")
         for col, ddl in (("thread_id", "INTEGER"), ("standalone", "TEXT")):   # follow-ups (Phase 2 step 4)
             if col not in asks:
@@ -315,6 +317,12 @@ def save_playlist(playlist_info: Dict[str, Any], videos: List[Dict[str, Any]], d
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         playlist_id = playlist_info['id']
+        if partial:   # adding a video by its own link brings back one removed earlier
+            cursor.execute("DELETE FROM removed_videos WHERE video_id IN (SELECT value FROM json_each(?))",
+                           (json.dumps([v['video_id'] for v in videos]),))
+        else:         # a sync never brings back a video the user removed from YourTube
+            gone = {r[0] for r in cursor.execute("SELECT video_id FROM removed_videos")}
+            videos = [v for v in videos if v['video_id'] not in gone]
 
         known = {row[0] for row in cursor.execute(
             "SELECT video_id FROM playlist_items WHERE playlist_id = ?", (playlist_id,)
@@ -566,6 +574,27 @@ def remove_playlist(playlist_id: str, db_path: str = DB_PATH) -> Dict[str, Any]:
         cursor.execute("DELETE FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs WHERE hash IS NOT NULL)")
         conn.commit()
     return {**{k: len(v) for k, v in groups.items()}, "cleared": cleared}
+
+def remove_videos(video_ids: Iterable[str], db_path: str = DB_PATH) -> List[str]:
+    """
+    Removes videos from YourTube (never from YouTube) in one transaction: the row with its notes, every playlist
+    membership, and everything fetched or made for them, with their search pieces and vectors. A later playlist sync
+    skips them (removed_videos); adding one by its own link brings it back. Returns the ids that existed (the caller
+    removes their frames/ folders).
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        found = [r[0] for r in cursor.execute("SELECT video_id FROM videos WHERE video_id IN (SELECT value FROM json_each(?))",
+                                              (json.dumps(list(video_ids)),))]
+        ids = json.dumps(found)
+        for table in VIDEO_DATA_TABLES + ("playlist_items", "videos"):
+            cursor.execute(f"DELETE FROM {table} WHERE video_id IN (SELECT value FROM json_each(?))", (ids,))
+        cursor.executemany("INSERT OR IGNORE INTO removed_videos (video_id) VALUES (?)", [(v,) for v in found])
+        _reindex(cursor, found)
+        cursor.execute("DELETE FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs WHERE hash IS NOT NULL)")
+        conn.commit()
+    return found
 
 # Archiving keeps what the user made or reads (row, status, notes, details, rating, summary) and frees the rest
 ARCHIVE_TABLES = ("transcript_segments", "visual_segments", "media_jobs")

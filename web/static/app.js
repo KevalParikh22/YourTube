@@ -21,7 +21,7 @@ const JOB_TEXT = {
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
   embed: ['Updating the meaning index…', 'Meaning index updated', 'Index update stopped or failed. See the log.'],
-  remove: ['Removing the playlist from YourTube…', 'Playlist removed from YourTube', 'Removing the playlist failed. See the log.'],
+  remove: ['Removing from YourTube…', 'Removed from YourTube', 'Removing failed. See the log.'],
   archive: ['Archiving playlist and freeing storage…', 'Playlist archived', 'Archiving the playlist failed. See the log.'],
   backup: ['Backing up the library…', 'Library backup created', 'Library backup failed. See the log.'],
 };
@@ -444,6 +444,7 @@ function selBar() {
     <span class="grow"></span>
     ${S.sel.size < S.visible.length ? `<button class="btn-text" data-act="sel-all">Select all ${S.visible.length}</button>` : ''}
     <button class="btn-text" data-act="export-notes" data-scope="sel">Export notes</button>
+    <button class="btn-text" data-act="remove-sel" data-job-btn title="Delete these videos and everything YourTube keeps for them. Nothing changes on YouTube.">Remove from YourTube</button>
     <button class="btn-text" data-act="sel-clear">Clear</button>
   </div>`;
 }
@@ -959,6 +960,7 @@ async function taskFinished(t) {
   if (['summarize', 'knowledge', 'remove'].includes(t.kind)) { S.knowledge.list = null; S.knowledge.pages = {}; }
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
+  if (['pull', 'embed', 'sync', 'details', 'asr', 'visual', 'rate', 'summarize', 'remove'].includes(t.kind)) S.indexStatus = undefined;   // searchable text changed
   if (t.kind === 'backup') S.storage = null;
   S.flash = { id: t.id, until: Date.now() + 15000 };
   S.stopPending = false;
@@ -1137,6 +1139,19 @@ const SEARCH_KINDS = [['all', 'Everything'], ['transcript', 'Transcripts'], ['sl
 const KIND_LABEL = { title: 'Title', chapter: 'Chapter', transcript: 'Transcript', slide: 'On screen', summary: 'AI summary', notes: 'Your notes', description: 'Description' };
 // Snippets arrive with \x02…\x03 around matches: escape first, then highlight
 const hl = s => esc(s).replace(/\x02/g, '<mark>').replace(/\x03/g, '</mark>');
+// Search and Ask say when the meaning index is behind (it updates on click unless automatic updates are on)
+async function loadIndexStatus() {
+  S.indexStatus = 'loading';
+  try { S.indexStatus = await api('/api/embed/status'); } catch (e) { S.indexStatus = {}; }
+  $$('.index-note').forEach(el => { el.innerHTML = indexNote(); });
+}
+function indexNote() {
+  const E = S.indexStatus;
+  if (E === undefined) { loadIndexStatus(); return ''; }
+  if (E === 'loading' || !E.available || !(E.pieces > E.embedded)) return '';
+  return ` ${plural(E.pieces - E.embedded, 'piece')} not in the meaning index yet, so meaning-based results miss them.
+    <button class="btn-text" style="height:auto;padding:0" data-act="embed-run" data-job-btn>Update index</button>`;
+}
 function viewSearch() {
   const sr = S.search;
   const indexed = videos().filter(v => v.details?.status === 'done').length;
@@ -1153,7 +1168,7 @@ function viewSearch() {
       <label class="check" style="align-items:center">
         <input type="checkbox" data-change="s-meaning" ${sr.meaning ? 'checked' : ''} style="margin:0"><span class="note">By meaning</span></label></div>
     <p class="hint">By meaning ${tip('Find pieces with similar meaning, even when they use different words or another language. Results are ordered by closeness, so check the top matches.')}</p>
-    <p class="hint">${indexed} of ${plural(videos().length, 'video')} have transcripts. ${indexed < videos().length ? '<a href="#/sources">Fetch details</a> to search inside more.' : ''}</p>
+    <p class="hint">${indexed} of ${plural(videos().length, 'video')} have transcripts. ${indexed < videos().length ? '<a href="#/sources">Fetch details</a> to search inside more.' : ''}<span class="index-note">${indexNote()}</span></p>
   </section>
   <div id="sresults"></div>`;
 }
@@ -1228,7 +1243,7 @@ function viewAsk() {
         ${libPlaylists().map(p => `<option value="${esc(p.id)}" ${a.src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select></label>` : ''}
       <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched</span> ${tip('Include videos marked watched or skipped in the answer.')}</label>`}
     </div>
-    <p class="hint">${ready ? `Answer model: ${esc(ai.uses.ask)}${local ? ' · Runs on this computer' : ''}.` : 'Set up an AI for questions in Settings → AI.'} ${tip("Answers use your videos' transcripts, slides, chapters, summaries and notes. Click a citation number to play that moment.")}</p>`}
+    <p class="hint">${ready ? `Answer model: ${esc(ai.uses.ask)}${local ? ' · Runs on this computer' : ''}.` : 'Set up an AI for questions in Settings → AI.'} ${tip("Answers use your videos' transcripts, slides, chapters, summaries and notes. Click a citation number to play that moment.")}<span class="index-note">${indexNote()}</span></p>`}
   </section>
   <div class="ask">
     <div id="aresult">${askResult()}${follow ? `<div style="margin-top:22px">${box}</div>` : ''}</div>
@@ -1680,6 +1695,9 @@ function viewAI() {
     ${Object.entries(ai.task_labels).map(([t, label]) => row(label, pick(t, ai.tasks[t] || '', true), t)).join('')}
     ${Object.entries(media).map(([t, meta]) => row(meta.label, pickMedia(t, meta), t)).join('')}
     <p class="hint" id="media-sends">${esc(mediaSends(ai, Object.fromEntries(Object.entries(media).map(([t, m]) => [t, m.selected || 'local']))))}</p>
+    <label class="check" style="margin-top:12px"><input type="checkbox" data-change="auto-index" ${ai.auto_index ? 'checked' : ''}>
+      <span>Update the meaning index automatically after each task</span></label>
+    <p class="hint">Off: Search and Ask show how much is not indexed yet, with an Update index button. On: every sync, details fetch, transcription, rating and summary is followed by an index update${tip('With a cloud embedding AI each update is a paid call and counts toward its rate limit, which is why it is off by default.')}.</p>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
   </section>`;
   return { cloud, routing };
@@ -1894,11 +1912,11 @@ function viewEmbed(L, running) {
   const state = !L.ollama.running ? 'Ollama is not running: questions and search use keywords only.'
     : !E.installed ? `${E.model} isn't downloaded yet: questions and search use keywords only.`
     : !E.pieces ? 'Nothing to index yet: sync a playlist and fetch details.'
-    : E.embedded >= E.pieces ? `All ${E.pieces} pieces indexed.` : `${E.embedded} of ${E.pieces} pieces indexed (${pct}%). The rest are added after the next sync or with Update index.`;
+    : E.embedded >= E.pieces ? `All ${E.pieces} pieces indexed.` : `${E.embedded} of ${E.pieces} pieces indexed (${pct}%). The rest are added with Update index${S.data.ai.auto_index ? ' or after the next task' : ''}.`;
   const known = E.choices.some(c => c.model === E.model) ? E.choices : [{ model: E.model, size: '', why: 'Your choice.', installed: E.installed }, ...E.choices];
   return `
     <h3 style="font-size:14px;margin:22px 0 4px">Meaning-based search</h3>
-    <p class="note">Meaning index ${tip('Ask and Search → By meaning finds pieces by what they mean, in any language, using a small embedding model. The index updates after syncs, details, transcription, slide reading and ratings.')}</p>
+    <p class="note">Meaning index ${tip('Ask and Search → By meaning finds pieces by what they mean, in any language, using a small embedding model. It updates when you click Update index, or after each task if that is turned on in Settings → Which AI does what.')}</p>
     <div class="prov"><div><span class="dot ${E.installed && E.embedded >= E.pieces && E.pieces ? 'ok' : ''}"></span><b style="font-weight:500">Index</b>
       <span class="faint" style="font-size:12.5px"> · ${esc(state)}</span></div><span></span></div>
     ${E.pieces ? `<div class="progress" style="margin:6px 0 4px"><i style="width:${pct}%"></i></div>` : ''}
@@ -2481,6 +2499,15 @@ document.addEventListener('click', async e => {
     case 'rate-one': startRate([id]); break;
     case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
+    case 'remove-sel': {
+      const ids = [...S.sel], one = ids.length === 1, notes = ids.filter(x => byId(x)?.notes?.trim()).length;
+      if (!confirm(`Remove ${plural(ids.length, 'video')} from YourTube?\n\nThis deletes ${one ? 'its' : 'their'} transcripts, slides, ratings, summaries and search data`
+        + `${notes ? `, and your notes on ${plural(notes, 'video')}` : ''}. It can't be undone.\n\nNothing changes on YouTube. A playlist sync won't add `
+        + `${one ? 'it' : 'them'} back; adding ${one ? 'it' : 'one'} by its link does.`)) break;
+      try { await queued(await api('/api/videos/remove', { ids }), 'Removing'); S.sel.clear(); renderList(); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'summarize-sel': { const r = newOnly([...S.sel], isSummarised, 'summarised', 'Summarise'); if (r) startSummary(r.ids, r.note); break; }
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
@@ -2807,6 +2834,11 @@ document.addEventListener('change', async e => {
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
   }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
+  if (ch === 'auto-index') {
+    try { S.data.ai = await saveAi({ auto_index: el.checked }); toast(el.checked ? 'The index now updates after each task' : 'The index now updates when you click Update index'); }
+    catch (err) { el.checked = !el.checked; toast(err.message, true); }
+    return;
+  }
   if (ch === 'show-descriptions') {
     try { S.data.ai = await saveAi({ show_descriptions: el.checked }); renderView(); if (S.drawer) renderDrawer(); toast('Saved'); }
     catch (err) { el.checked = !el.checked; toast(err.message, true); }

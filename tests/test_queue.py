@@ -4,6 +4,7 @@ import unittest
 from unittest import mock
 
 import dashboard
+import llm
 
 
 def wait_until(cond, timeout=5):
@@ -131,7 +132,19 @@ class LaneTest(unittest.TestCase):
         self.assertTrue(all(l["stopping"] for l in job.snapshot()["lanes"] if l["running"]))
         gate.set()
 
+    def test_auto_embed_is_off_by_default(self):
+        self.assertFalse(llm.load_settings().get("auto_index"))
+        job = dashboard.Job()
+        job.start("rate", "R0", lambda: True, lane="cloud")
+        self.assertTrue(wait_until(lambda: len(job.snapshot()["recent"]) == 1))
+        time.sleep(0.2)
+        self.assertEqual(job.snapshot()["queue"], [])
+        self.assertFalse(any(l["running"] for l in job.snapshot()["lanes"]))
+
     def test_auto_embed_is_queued_once(self):
+        s = llm.load_settings()
+        llm.save_settings({**s, "auto_index": True})
+        self.addCleanup(llm.save_settings, s)
         job, gate = dashboard.Job(), threading.Event()
         job.start("embed", "Busy index", lambda: gate.wait(5), lane="local", key="other")
         self.assertTrue(wait_until(lambda: job.snapshot()["running"]))

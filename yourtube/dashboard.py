@@ -282,12 +282,14 @@ class Job:
             self.tasks = {task_id: task for task_id, task in self.tasks.items() if task_id in retained}
         applog.log_task(state.get("kind"), state.get("label"), bool(ok), stopped,
                         state.get("started_at"), state.get("finished_at"), state["log"])
-        # Keep the meaning index current after anything that adds or changes searchable text, as its own task
+        # With Settings → "Update the meaning index automatically" on, keep the index current after anything that adds
+        # or changes searchable text, as its own task. Off (the default), Search and Ask offer Update index instead.
         # shortcut: an index update already running doesn't queue another, so text saved meanwhile waits for the next one
         if ok and not stopped and state["kind"] in AUTO_EMBED_KINDS:
             import embedder
             try:
-                if embedder.available(llm.load_settings()):
+                settings = llm.load_settings()
+                if settings.get("auto_index") and embedder.available(settings):
                     self.start("embed", "Update meaning index",
                                lambda: embedder.run_embed(should_stop=self.stop_requested, quiet=True), key="auto")
             except Exception:  # never let this end the lane's worker thread
@@ -316,9 +318,7 @@ def _remove_playlist(playlist_id, title):
     """Removes a playlist from YourTube only (storage.remove_playlist); the YouTube playlist is never touched."""
     print(f'Removing "{title}" from YourTube. Nothing changes on YouTube.')
     done = storage.remove_playlist(playlist_id)
-    for vid in done["cleared"]:
-        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
-            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
+    _delete_frames(done["cleared"])
     n = lambda k, word: f"{done[k]} {word}{'' if done[k] == 1 else 's'}"
     print(f"   {n('removed', 'video')} removed with their subtitles, ratings and summaries.")
     if done["kept_notes"]:
@@ -327,6 +327,21 @@ def _remove_playlist(playlist_id, title):
         print(f"   {n('shared', 'video')} also in other playlists stayed.")
     _vacuum()
     return True
+
+def _remove_videos(ids):
+    """Removes videos from YourTube only (storage.remove_videos); YouTube playlists are never touched."""
+    print(f"Removing {len(ids)} video{'' if len(ids) == 1 else 's'} from YourTube. Nothing changes on YouTube.")
+    gone = storage.remove_videos(ids)
+    _delete_frames(gone)
+    print(f"   {len(gone)} removed with their notes, subtitles, slides, ratings, summaries and search data. "
+          "A playlist sync won't add them again; adding one by its link does.")
+    _vacuum()
+    return True
+
+def _delete_frames(video_ids):
+    for vid in video_ids:
+        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
+            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
 
 def _vacuum():
     """SQLite keeps freed pages until VACUUM; another task writing at the same time only delays it."""
@@ -340,9 +355,7 @@ def _archive_playlist(playlist_id, title):
     """Frees a finished playlist's transcripts, slide text and search data (storage.archive_playlist)."""
     print(f'Archiving "{title}". Titles, status, notes, ratings and summaries stay. Nothing changes on YouTube.')
     done = storage.archive_playlist(playlist_id)
-    for vid in done["archived"]:
-        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
-            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
+    _delete_frames(done["archived"])
     print(f"   {len(done['archived'])} videos archived."
           + (f" {done['shared']} also in an unfinished playlist kept everything." if done["shared"] else ""))
     _vacuum()
@@ -888,6 +901,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("Unknown action")
                 return self._json({"ok": True, "libraries": storage.get_libraries()})
 
+            if path == "/api/videos/remove":
+                ids = body.get("ids")
+                if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+                    return self._error("ids must be a non-empty list of video IDs")
+                return self._queued(JOB.start("remove", _label("Remove", ids), lambda: _remove_videos(ids), key=ids))
+
             if path == "/api/playlists/remove":
                 pid = _clean(body.get("id")) or ""
                 found = storage.get_playlist(pid)
@@ -1384,6 +1403,8 @@ class Handler(BaseHTTPRequestHandler):
                 settings["show_descriptions"] = bool(body["show_descriptions"])
             if "local_only" in body:
                 settings["local_only"] = bool(body["local_only"])
+            if "auto_index" in body:
+                settings["auto_index"] = bool(body["auto_index"])
             if body.get("asr_model") in ("auto", "large-v3-turbo", "small", "medium", "distil-large-v3"):
                 settings["asr_model"] = body["asr_model"]
             if isinstance(body.get("vision_model"), str) and re.fullmatch(r"[\w.\-/:]*", body["vision_model"]):
