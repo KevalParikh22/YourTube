@@ -92,6 +92,21 @@ def _gemini_chunk(url: str, key: str, path: str, model: str) -> Dict[str, Any]:
     raise CloudASRError("Transcription service failed")
 
 
+def _record(provider: str, model: str, reply: Any) -> None:
+    """One usage row per audio chunk, priced per audio hour (llm.MEDIA_PRICES) like the estimate before the run."""
+    reply = reply if isinstance(reply, dict) else {}
+    u = reply.get("usageMetadata") if isinstance(reply.get("usageMetadata"), dict) else {}
+    audio = next((d.get("tokenCount") for d in u.get("promptTokensDetails") or []
+                  if isinstance(d, dict) and d.get("modality") == "AUDIO"), None)
+    # Groq/OpenAI say the duration; Gemini counts 32 tokens per audio second
+    # shortcut: with neither, a full chunk is assumed, so the last (shorter) chunk is overcounted
+    seconds = reply.get("duration") or (audio / 32 if audio else CHUNK_SECONDS)
+    price = llm.MEDIA_PRICES.get((provider, model))
+    llm.record_usage("transcribe", provider, model, u.get("promptTokenCount") or 0,
+                     (u.get("candidatesTokenCount") or 0) + (u.get("thoughtsTokenCount") or 0),
+                     cost=None if price is None else round(float(seconds) / 3600 * price, 6),
+                     exact=bool(u) or provider != "gemini")
+
 def _gemini_result(response: Dict[str, Any]) -> Dict[str, Any]:
     try:
         text = response["candidates"][0]["content"]["parts"][0]["text"]
@@ -157,13 +172,16 @@ def transcribe(path: str, provider: str, settings: Dict[str, Any],
         for index, chunk in enumerate(chunks):
             offset = index * CHUNK_SECONDS
             if provider == "gemini":
-                parsed = _gemini_result(_gemini_chunk(url, key, chunk, model))
+                reply = _gemini_chunk(url, key, chunk, model)
+                _record(provider, model, reply)
+                parsed = _gemini_result(reply)
                 # a chunk of music or silence has no speech; the whole video still fails below if nothing was heard
                 rows = _normalize_gemini(parsed.get("segments"), CHUNK_SECONDS, offset)
                 language = language or str(parsed.get("language") or "")
                 segments.extend(rows)
             else:
                 data = _openai_chunk(url, key, chunk, model)
+                _record(provider, model, data)
                 language = language or str(data.get("language") or "")
                 chunk_segments = data.get("segments")
                 if not isinstance(chunk_segments, list):

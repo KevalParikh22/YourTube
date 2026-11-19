@@ -23,7 +23,7 @@ import webbrowser
 import contextvars
 import shutil
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -261,6 +261,7 @@ class Job:
     def _run(self, lane, fn):
         ok = False
         out, stop = _OUT.set(lane.buf), _STOP.set(lane.stop)
+        usage = llm.start_run()   # this task's cloud AI calls, from its own thread and its helper threads
         try:
             ok = fn()
         except Exception as e:  # surface anything unexpected in the job log
@@ -269,6 +270,9 @@ class Job:
         finally:
             _OUT.reset(out)
             _STOP.reset(stop)
+        line = llm.run_usage_line(usage)
+        if line:
+            lane.buf.write(line + "\n")
         with self.lock:
             stopped = lane.stop.is_set()
             state = {**lane.state, "running": False, "ok": bool(ok), "stopped": stopped, "log": lane.buf.getvalue(),
@@ -637,6 +641,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, data, ctype, extra_headers=headers)
         if url.path == "/api/files":
             return self._json({**files.usage(), "backups": files.list_backups(), "exports": files.list_exports()})
+        if url.path == "/api/ai/usage":
+            midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)   # this computer's day
+            utc = lambda t: t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            return self._json({"today": storage.usage_summary(utc(midnight)),
+                               "days30": storage.usage_summary(utc(midnight - timedelta(days=29)))})
         if url.path == "/api/openapi.json":
             spec_path = os.path.join(ROOT_DIR, "docs", "openapi.json")
             if not os.path.isfile(spec_path):

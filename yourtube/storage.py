@@ -288,6 +288,22 @@ def init_db(db_path: str = DB_PATH) -> None:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # One row per cloud AI call (llm.record_usage): tokens as the service reported them (exact = 0: estimated
+        # from the text length), cost from llm's price table (NULL when the model's price is unknown)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS ai_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                task TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                tokens_in INTEGER NOT NULL DEFAULT 0,
+                tokens_out INTEGER NOT NULL DEFAULT 0,
+                cost REAL,
+                exact INTEGER NOT NULL DEFAULT 1
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_usage_at ON ai_usage(at)")
         # Videos the user removed from YourTube: a playlist sync skips them (see remove_videos)
         cursor.execute("CREATE TABLE IF NOT EXISTS removed_videos (video_id TEXT PRIMARY KEY, removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         asks = _columns(cursor, "ask_history")
@@ -1724,6 +1740,26 @@ def get_summary(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any
     for k, default in _SUMMARY_JSON.items():
         d[k] = json.loads(d[k] or default)
     return d
+
+def record_usage(task: str, provider: str, model: str, tokens_in: int, tokens_out: int, cost: Optional[float],
+                 exact: bool = True, db_path: str = DB_PATH) -> None:
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("INSERT INTO ai_usage (task, provider, model, tokens_in, tokens_out, cost, exact) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                     (task, provider, model, int(tokens_in), int(tokens_out), cost, int(bool(exact))))
+        conn.commit()
+
+def usage_summary(since: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """
+    Cloud AI use since a UTC time ('YYYY-MM-DD HH:MM:SS'), one row per task, provider and model, most tokens first:
+    calls, tokens_in, tokens_out, cost (of the calls with a known price), unpriced and estimated (call counts).
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return [dict(r) for r in conn.execute("""
+            SELECT task, provider, model, COUNT(*) AS calls, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out,
+                   ROUND(COALESCE(SUM(cost), 0), 4) AS cost, SUM(cost IS NULL) AS unpriced, SUM(exact = 0) AS estimated
+            FROM ai_usage WHERE at >= ? GROUP BY task, provider, model ORDER BY SUM(tokens_in + tokens_out) DESC""", (since,))]
 
 def rating_times(db_path: str = DB_PATH) -> Dict[str, str]:
     """{video_id: when its rating was made (UTC, 'YYYY-MM-DD HH:MM:SS')} for every rated video."""

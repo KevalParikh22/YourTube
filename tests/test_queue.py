@@ -195,3 +195,14 @@ class ConcurrentWritesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TaskUsageLineTest(unittest.TestCase):
+    def test_a_task_that_called_a_cloud_ai_ends_its_log_with_the_use(self):
+        job = dashboard.Job()
+        def task():
+            llm.record_usage("rate", "gemini", "gemini-2.5-flash", 2000, 300)
+            return True
+        job.start("rate", "Rate with usage", task, lane="cloud")
+        self.assertTrue(wait_until(lambda: job.snapshot()["recent"]))
+        self.assertIn("AI use: 1 cloud call, 2.0k tokens in, 300 out, under $0.01.", job.snapshot()["log"])

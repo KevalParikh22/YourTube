@@ -962,6 +962,7 @@ async function taskFinished(t) {
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
   if (['pull', 'embed', 'sync', 'details', 'asr', 'visual', 'rate', 'summarize', 'remove'].includes(t.kind)) S.indexStatus = undefined;   // searchable text changed
   if (t.kind === 'backup') S.storage = null;
+  S.usage = undefined;   // any task may have called a cloud AI
   S.flash = { id: t.id, until: Date.now() + 15000 };
   S.stopPending = false;
   if (!t.stopped) toast(t.ok ? text[1] : text[2], !t.ok);
@@ -1676,7 +1677,7 @@ function viewAI() {
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
-  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local));
+  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local)) + usageCard();
   const media = ai.media_tasks || {};
   const pickMedia = (t, meta) => `<select id="media-${esc(t)}" data-media-task="${esc(t)}" aria-label="${esc(meta.label)} runs on" style="width:100%">
       ${meta.providers.map(k => { const p = ai.providers[k], ready = k === 'local' || p?.ready;
@@ -1701,6 +1702,36 @@ function viewAI() {
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
   </section>`;
   return { cloud, routing };
+}
+// Settings → Cloud AI: what the cloud AIs were sent (llm.record_usage), today and over the last 30 days
+async function loadUsage() {
+  S.usage = 'loading';
+  try { S.usage = await api('/api/ai/usage'); } catch (e) { S.usage = { error: e.message }; }
+  if (route() === 'settings/cloud') refresh();
+}
+const tokens = n => n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n || 0);
+function usageCard() {
+  const U = S.usage, ai = S.data.ai;
+  if (U === undefined) loadUsage();
+  const head = `<h2 class="h">Usage</h2>`;
+  if (!U || U === 'loading') return `<section class="section card">${head}<p class="note">Loading…</p></section>`;
+  if (U.error) return `<section class="section card">${head}<p class="note">Could not load usage: ${esc(U.error)}</p></section>`;
+  const label = t => ai.task_labels[t] || ai.media_tasks?.[t]?.label || (t === 'default' ? 'Other' : t);
+  const money = r => r.unpriced === r.calls ? 'price unknown' : `$${r.cost < 0.01 && r.cost > 0 ? '<0.01' : r.cost.toFixed(2)}${r.unpriced ? ' + unpriced' : ''}`;
+  const sum = rows => rows.reduce((t, r) => ({ calls: t.calls + r.calls, tokens_in: t.tokens_in + r.tokens_in, tokens_out: t.tokens_out + r.tokens_out,
+    cost: t.cost + r.cost, unpriced: t.unpriced + r.unpriced, estimated: t.estimated + r.estimated }), { calls: 0, tokens_in: 0, tokens_out: 0, cost: 0, unpriced: 0, estimated: 0 });
+  const cells = (r, name) => `<td data-label="Task">${name}</td><td class="r" data-label="Calls">${r.calls}</td>
+    <td class="r" data-label="Tokens in">${r.estimated && r.tokens_in ? '≈ ' : ''}${tokens(r.tokens_in)}</td><td class="r" data-label="Tokens out">${r.estimated && r.tokens_out ? '≈ ' : ''}${tokens(r.tokens_out)}</td>
+    <td class="r" data-label="Cost">${money(r)}</td>`;
+  const table = (title, rows) => rows.length ? `<h3 style="font-size:14px;margin:18px 0 0">${title}</h3>
+    <div class="tbl-wrap"><table class="tbl tbl-cards"><thead><tr><th>Task · model</th><th class="r">Calls</th><th class="r">Tokens in</th><th class="r">Tokens out</th><th class="r">Cost</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>${cells(r, `${esc(label(r.task))} <span class="faint">· ${esc(r.model)}</span>`)}</tr>`).join('')}</tbody>
+      ${rows.length > 1 ? `<tfoot><tr>${cells(sum(rows), 'All')}</tr></tfoot>` : ''}</table></div>`
+    : `<h3 style="font-size:14px;margin:18px 0 0">${title}</h3><p class="note">No cloud AI calls.</p>`;
+  return `<section class="section card">${head}
+    <p class="hint">Every call to a cloud AI, as the service reported it. ${tip('≈ marks counts estimated from the text length, for services that report none (Gemini embeddings). Costs use approximate list prices; models without one show price unknown. Models on this computer are free and not counted. Check the provider console for the exact bill.')}</p>
+    ${table('Today', U.today)}${table('Last 30 days', U.days30)}
+    <div class="actions"><button class="btn btn-sm" data-act="usage-refresh">Refresh</button></div></section>`;
 }
 function providerCards(providers) {
   const edit = S.ai.provider;
@@ -2372,6 +2403,7 @@ document.addEventListener('click', async e => {
   if (el.tagName === 'A' && el.getAttribute('href') === '#/') e.preventDefault();
   switch (act) {
     case 'storage-refresh': S.storage = null; await loadStorage(); break;
+    case 'usage-refresh': await loadUsage(); break;
     case 'storage-backup': {
       try { await queued(await api('/api/files/backup', {}), 'Library backup'); S.storage = null; await loadStorage(); }
       catch (err) { toast(err.message, true); }

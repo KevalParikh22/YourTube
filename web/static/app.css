@@ -566,7 +566,7 @@
     .tbl-cards td { display: flex; flex-direction: column; min-width: 0; padding: 0; border: 0; text-align: left; overflow-wrap: anywhere; }
     .tbl-cards td.r { text-align: left; align-items: flex-start; }
     .tbl-cards td::before { content: attr(data-label); color: var(--ink-3); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
-    .tbl-cards td[data-label="Playlist"], .tbl-cards td[data-label="Topic"], .tbl-cards td[data-label="Name"] { grid-column: 1 / -1; }
+    .tbl-cards td[data-label="Playlist"], .tbl-cards td[data-label="Topic"], .tbl-cards td[data-label="Name"], .tbl-cards td[data-label="Task"] { grid-column: 1 / -1; }
     .tbl-cards td[data-label="Actions"], .tbl-cards td[data-label="Action"] { grid-column: 1 / -1; }
     .tbl-cards td[data-label="Actions"] > div { justify-content: flex-start !important; flex-wrap: wrap; }
     .tbl-cards tfoot tr { border-style: dashed; }

@@ -450,6 +450,7 @@ When something fails, the task's card shows the cause and a fix. **Try again** r
 | Ollama "not running" | Run `ollama serve` (or `systemctl start ollama`). |
 | Local model very slow | The model doesn't fit in GPU memory. Pick a smaller one, or lower the context size. |
 | AI returns errors | Settings → Cloud AI or Local AI → **Save and test** shows the exact error. |
+| How much did the cloud AI use? | Settings → Cloud AI → **Usage** lists calls, tokens and approximate cost per task and model, today and over the last 30 days; each task's log also ends with an "AI use" line. Costs use approximate list prices (a model without one shows "price unknown"); the provider's console has the exact bill. |
 | `pip install` says "externally-managed-environment" | Don't install into the system Python. Run `bash scripts/setup.sh`, or `python3 -m pip --python .venv/bin/python install -r requirements.txt` |
 | Local transcription "needs faster-whisper" | `bash scripts/setup.sh --local-ai`, or `.venv/bin/python -m pip install -r requirements-local.txt` |
 | Local transcription very slow | It runs on the CPU: check the GPU line in Settings → Local AI. NVIDIA: `.venv/bin/python -m pip install -r requirements-nvidia.txt`. AMD: see **Graphics cards** (section 5). Intel GPUs and older laptop graphics always use the CPU. |

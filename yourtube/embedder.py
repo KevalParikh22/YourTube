@@ -116,6 +116,8 @@ class GeminiEmbedder(Embedder):
                 data = llm._open(req, 120)
             except llm.LLMError as e:
                 raise RuntimeError(f"Gemini could not embed with {self.raw_model}: {e}") from None
+            # Gemini's embedding reply has no token count: about 4 characters per token, marked as estimated
+            llm.record_usage("embed", "gemini", self.raw_model, sum(len(t) for t in chunk) // 4, 0, exact=False)
             embeddings = data.get("embeddings") or []
             if len(embeddings) != len(chunk):
                 raise RuntimeError(f"Gemini returned {len(embeddings)} vectors for {len(chunk)} texts")
@@ -164,6 +166,8 @@ class OpenAIEmbedder(Embedder):
                 data = llm._open(req, 120)
             except llm.LLMError as e:
                 raise RuntimeError(f"OpenAI could not embed with {self.raw_model}: {e}") from None
+            used = (data.get("usage") or {}).get("prompt_tokens")
+            llm.record_usage("embed", "openai", self.raw_model, used or sum(len(t) for t in chunk) // 4, 0, exact=used is not None)
             items = sorted(data.get("data") or [], key=lambda x: x.get("index", 0))
             if len(items) != len(chunk):
                 raise RuntimeError(f"OpenAI returned {len(items)} vectors for {len(chunk)} texts")

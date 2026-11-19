@@ -2683,6 +2683,32 @@
         }
       }
     },
+    "/api/ai/usage": {
+      "get": {
+        "tags": ["AI"],
+        "summary": "Cloud AI use (calls, tokens, approximate cost) today and over the last 30 days, per task, provider and model",
+        "operationId": "getAiUsage",
+        "responses": {
+          "200": {
+            "description": "Usage rows, most tokens first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "today": {"type": "array", "items": {"$ref": "#/components/schemas/AiUsageRow"}},
+                    "days30": {"type": "array", "items": {"$ref": "#/components/schemas/AiUsageRow"}}
+                  },
+                  "required": ["today", "days30"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
     "/api/ai/settings": {
       "post": {
         "tags": ["AI"],
@@ -3118,6 +3144,21 @@
       }
     },
     "schemas": {
+      "AiUsageRow": {
+        "type": "object",
+        "properties": {
+          "task": {"type": "string", "description": "categorize, rate, summarize, ask, interests, transcribe, slides, embed or default"},
+          "provider": {"type": "string"},
+          "model": {"type": "string"},
+          "calls": {"type": "integer"},
+          "tokens_in": {"type": "integer"},
+          "tokens_out": {"type": "integer"},
+          "cost": {"type": "number", "description": "Approximate USD of the calls with a known price"},
+          "unpriced": {"type": "integer", "description": "Calls whose model has no price in the table"},
+          "estimated": {"type": "integer", "description": "Calls whose tokens were estimated from the text length"}
+        },
+        "required": ["task", "provider", "model", "calls", "tokens_in", "tokens_out", "cost", "unpriced", "estimated"]
+      },
       "Error": {
         "type": "object",
         "properties": {
