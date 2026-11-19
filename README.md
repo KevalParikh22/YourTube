@@ -34,7 +34,7 @@ Many people have a Watch Later playlist running into hundreds of videos with no 
 - Optional cloud AI providers: Claude (Anthropic), Gemini (Google), OpenAI, Groq, or OpenAI-compatible endpoints.
 - API keys stay in `settings.json` or environment variables; keys are never logged or sent to the browser.
 - AI only suggests: ratings, category assignments, and knowledge pages are proposals you review and accept.
-- Cloud AI rate limits are handled: a "too many requests" or "busy" answer is waited for and retried; a used-up daily quota is reported at once.
+- Cloud AI rate limits are handled: a "too many requests" or "busy" answer is waited for and retried, and calls are then spaced out to stay under the limit (shared by every task, helper and the meaning index); a used-up daily quota stops the run, and Retry continues with the videos not done yet.
 - Works on phone, tablet and desktop widths, in light and dark mode.
 
 ## Install

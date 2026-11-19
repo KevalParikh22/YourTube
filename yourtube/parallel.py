@@ -83,7 +83,8 @@ def share(
                 try:
                     fn(item)
                 except Exception as exc:
-                    consecutive_errors += 1
+                    # an error that says this worker can't go on (llm.QuotaError: daily limit used up) stops it now
+                    consecutive_errors = 3 if getattr(exc, "ends_worker", False) else consecutive_errors + 1
                     with cond:
                         in_flight[0] -= 1
                         tried = tried | {name}

@@ -2,8 +2,8 @@
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
 const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched', skipped: 'Skipped' };
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
-const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['gone', 'Not in a playlist']];
-const OPTIONAL_VIEWS = ['skipped', 'suggested', 'gone'];  // only shown when they have videos
+const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['transcript', 'Transcript pending'], ['gone', 'Not in a playlist']];
+const OPTIONAL_VIEWS = ['skipped', 'suggested', 'transcript', 'gone'];  // only shown when they have videos
 const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories']];
 const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
 const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
@@ -21,7 +21,7 @@ const JOB_TEXT = {
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
   embed: ['Updating the meaning index…', 'Meaning index updated', 'Index update stopped or failed. See the log.'],
-  remove: ['Removing the playlist from YourTube…', 'Playlist removed from YourTube', 'Removing the playlist failed. See the log.'],
+  remove: ['Removing from YourTube…', 'Removed from YourTube', 'Removing failed. See the log.'],
   archive: ['Archiving playlist and freeing storage…', 'Playlist archived', 'Archiving the playlist failed. See the log.'],
   backup: ['Backing up the library…', 'Library backup created', 'Library backup failed. See the log.'],
 };
@@ -43,7 +43,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   statusUndo: [],
-  drawer: null, polling: false, detailCache: {}, summaryCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
@@ -186,8 +186,10 @@ async function load({ keepEdits = false } = {}) {
   for (const id of [...S.sel]) if (!ids.has(id)) S.sel.delete(id);
   if (dirty) { updateJob(); renderJobs(); toast('Updated in the background. Your unsaved category edits are kept; save to see the update.'); return; }
   render();
-  if (S.data.job.running || S.data.job.queue?.length) pollJob();
+  if (S.data.job.running || dueSoon(S.data.job)) pollJob();
 }
+// Waiting tasks that start as soon as their lane is free (not the ones waiting for the night queue's start time)
+const dueSoon = job => (job.queue || []).some(t => !t.not_before);
 function render() { renderBar(); renderView(); renderDrawer(); renderJobs(); renderAskPop(); }
 function renderShortcutHelp() {
   const root = $('#shortcut-root');
@@ -285,6 +287,7 @@ function statusFilter(v, status, src) {
     case 'skipped': return v.status === 'skipped';
     case 'gone': return isGone(v, src);
     case 'suggested': return !!v.suggestion;
+    case 'transcript': return needsDetails(v);
     default: return true;
   }
 }
@@ -364,7 +367,7 @@ function renderList() {
   box.innerHTML = `
     ${q.trim().length >= 3 ? `<p class="hint" style="margin:10px 0 0"><a href="#/search?q=${encodeURIComponent(q.trim())}">Search inside transcripts, chapters and summaries for “${esc(q.trim())}” →</a></p>` : ''}
     ${S.sel.size ? selBar() : status === 'suggested' ? sugSum(list) : `<div class="list-sum"><span>Showing ${Math.min(S.limit, list.length)} of ${plural(list.length, 'video')} · ${fmt(st.rem / S.speed)} at ${sx(S.speed)}</span>
-      <span class="play-links">${list.length ? exportMenu() : ''}${playLinks(list)}</span></div>`}
+      <span class="play-links">${status === 'transcript' && list.length ? `<button class="btn btn-sm" data-act="details-these" data-ids="${esc(list.map(v => v.video_id).join(','))}" data-job-btn>Fetch these ${list.length}</button>` : ''}${list.length ? exportMenu() : ''}${playLinks(list)}</span></div>`}
     ${scoped.some(v => v.rating || (!v.rating && !isDone(v))) ? `<div class="verdict-bar">${scoped.some(v => v.rating) ? `<div class="chips">${[['', 'All'], ['watch', 'Watch'], ['skim', 'Skim'], ['skip', 'Skip'], ['unrated', 'Not rated']].map(([k, label]) => {
       const count = k === '' ? scoped.length : k === 'unrated' ? scoped.filter(v => !v.rating).length : scoped.filter(v => v.rating?.verdict === k).length;
       return `<button class="chip ${verdict === k ? 'on' : ''}" data-act="v-verdict" data-v="${k}">${label}<span class="c">${count}</span></button>`;
@@ -380,7 +383,8 @@ function renderList() {
 function row(v) {
   const d = v.duration_seconds || 0;
   const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : `<span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span>`,
-    isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '']
+    isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '',
+    isSummarised(v.video_id) ? `<span class="sum-mark" title="Summarised: open it to read the summary instead of watching"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7l3 3v8H3z M10 2.5v3h3 M5.5 8h5 M5.5 10.5h5"/></svg>summarised</span>` : '']
     .filter(Boolean).join(' · ');
   return `<li class="row ${isDone(v) ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
     <input type="checkbox" class="pick" data-act="pick" data-id="${esc(v.video_id)}" ${S.sel.has(v.video_id) ? 'checked' : ''} aria-label="Select">
@@ -442,6 +446,7 @@ function selBar() {
     <span class="grow"></span>
     ${S.sel.size < S.visible.length ? `<button class="btn-text" data-act="sel-all">Select all ${S.visible.length}</button>` : ''}
     <button class="btn-text" data-act="export-notes" data-scope="sel">Export notes</button>
+    <button class="btn-text" data-act="remove-sel" data-job-btn title="Delete these videos and everything YourTube keeps for them. Nothing changes on YouTube.">Remove from YourTube</button>
     <button class="btn-text" data-act="sel-clear">Clear</button>
   </div>`;
 }
@@ -541,20 +546,29 @@ async function statusUndo() {
   for (const [st, ids] of Object.entries(by)) await update(ids, { status: st });
   toast('Undone');
 }
-async function startRate(ids) {
+const isSummarised = id => (S.data.summarised || []).includes(id);
+// Bulk Rate/Summarise of a selection: leave out videos that already have one (said in the run's confirm),
+// or ask before redoing them when all of them have one. Returns { ids, note } or null when cancelled.
+function newOnly(ids, has, what, again) {
+  const fresh = ids.filter(id => !has(id)), n = ids.length - fresh.length;
+  if (!n) return { ids, note: '' };
+  if (!fresh.length) return confirm(`${n === 1 ? 'The selected video is' : `All ${n} selected videos are`} already ${what}. ${again} again?`) ? { ids, note: '' } : null;
+  return { ids: fresh, note: `${plural(n, 'selected video')} already ${what} ${n === 1 ? 'is' : 'are'} left out. To redo ${n === 1 ? 'it' : 'them'}, select only ${n === 1 ? 'it' : 'those'}.\n\n` };
+}
+async function startRate(ids, note = '') {
   if (!ids && S.lib) ids = videos().filter(v => !isDone(v) && !v.rating).map(v => v.video_id);   // only this library
   if (ids && !ids.length) { toast('Nothing to rate in this library'); return; }
   try {
     const est = await api('/api/rate/estimate', ids ? { ids } : {});
     if (!est.videos) { toast('Nothing to rate'); return; }
-    if (!ids || ids.length > 1) {
+    if (!ids || ids.length > 1 || note) {
       const cost = est.cost === 0 ? 'free (local model)' : est.cost == null ? 'cost unknown for this model' : `about $${est.cost < 0.01 ? '0.01 or less' : est.cost.toFixed(2)}`;
-      if (!confirm(`Rate ${plural(est.videos, 'video')} with ${est.uses}?\n\n${est.with_transcript} with transcripts, ${est.videos - est.with_transcript} from title only.\n≈ ${Math.round(est.tokens_in / 1000)}k tokens in, ${cost}.`)) return;
+      if (!confirm(`${note}Rate ${plural(est.videos, 'video')} with ${est.uses}?\n\n${est.with_transcript} with transcripts, ${est.videos - est.with_transcript} from title only.\n≈ ${Math.round(est.tokens_in / 1000)}k tokens in, ${cost}.`)) return;
     }
     await queued(await api('/api/rate', ids ? { ids } : {}), ids?.length === 1 ? 'Rating' : 'Rating run');
   } catch (e) { toast(e.message, true); }
 }
-async function startSummary(ids) {
+async function startSummary(ids, note = '') {
   if (!ids?.length) { toast('Select at least one video', true); return; }
   try {
     const batches = [];
@@ -562,12 +576,12 @@ async function startSummary(ids) {
     const estimates = await Promise.all(batches.map(batch => api('/api/summarize/estimate', { ids: batch })));
     const count = estimates.reduce((n, e) => n + (e.videos || 0), 0);
     if (!count) { toast('Nothing to summarise'); return; }
-    if (count > 1) {
+    if (count > 1 || note) {
       const sum = estimates.reduce((n, e) => n + (e.cost || 0), 0);
       const unknown = estimates.some(e => e.cost == null);
       const cost = unknown ? 'cost unknown for this model' : sum === 0 ? 'free (local model)' : `about $${sum < 0.01 ? '0.01 or less' : sum.toFixed(2)}`;
       const uses = [...new Set(estimates.map(e => e.uses).filter(Boolean))].join(', ');
-      if (!confirm(`Summarise ${plural(count, 'video')} with ${uses}?\n\n≈ ${cost}. Local models take about 1–2 minutes per video.`)) return;
+      if (!confirm(`${note}Summarise ${plural(count, 'video')} with ${uses}?\n\n≈ ${cost}. Local models take about 1–2 minutes per video.`)) return;
     }
     for (const batch of batches) await queued(await api('/api/summarize', { ids: batch }), batch.length === 1 ? 'Summarising' : 'Summaries');
   } catch (e) { toast(e.message, true); }
@@ -815,12 +829,16 @@ function renderJobs() {
   const pill = active.length
     ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}" title="${active.map(l => esc(l.label)).join(', ')}${waiting ? ` (+${waiting} waiting)` : ''}"><span class="spin"></span><span class="jl">${active.length} running</span>${waiting ? `<b>+${waiting}<span class="jw"> waiting</span></b>` : ''}</button>`
     : flash ? `<button class="jobpill ${last.ok && !last.stopped ? 'ok' : 'bad'}" data-act="jobs-toggle"><span class="jl">${last.stopped ? 'Stopped' : last.ok ? 'Finished' : 'Failed'}: ${esc(last.label)}</span></button>`
+    : (job.queue || []).some(t => t.not_before) ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks waiting for the night queue" aria-label="Tasks waiting for the night queue">
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="flex:none"><path d="M13 9.8A5.5 5.5 0 0 1 6.2 3 5.5 5.5 0 1 0 13 9.8z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
+        <b>${job.queue.filter(t => t.not_before).length}</b><span class="jw">at night</span></button>`
     : job.recent?.length ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks">Tasks</button>` : '';
-  const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
+  const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', later: 'Later', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
       <span class="jl" title="${esc(t.label)}">${esc(t.label)}</span>${action}</div>`;
   const panel = S.jobsOpen ? `<div class="jobpanel" role="dialog" aria-label="Tasks">
       ${active.length ? active.map(l => `<div><div class="faint" style="font-size:11.5px">${esc(({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[l.lane] || l.lane)}</div>${row(l, l.stopping ? 'stopping' : 'run', l.stopping ? '<button class="btn-text" disabled>Stopping…</button>' : `<button class="btn-text" data-act="job-stop-one" data-task="${l.id}">Stop</button>`)}<pre class="log" data-task="${l.id}">${esc(l.log || '')}</pre></div>`).join('') : '<p class="note faint" style="margin:0 0 6px">Nothing running.</p>'}
-      ${(job.queue || []).map(t => row({ ...t, label: `${({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[t.lane] || t.lane}: ${t.label}` }, 'wait', `<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button>`)).join('')}
+      ${(job.queue || []).map(t => row({ ...t, label: `${t.not_before ? `${atTime(t.not_before)} · ` : ''}${({youtube:'YouTube',local:'This computer',cloud:'Cloud'})[t.lane] || t.lane}: ${t.label}` },
+        t.not_before ? 'later' : 'wait', `<span style="display:flex;gap:8px">${t.not_before ? `<button class="btn-text" data-act="job-run-now" data-task="${t.id}">Run now</button>` : ''}<button class="btn-text" data-act="job-drop" data-task="${t.id}">Remove</button></span>`)).join('')}
       ${(job.recent || []).length ? `<div class="faint" style="font-size:11.5px;margin:10px 0 4px">Recent</div>` + job.recent.map(t => row(t, t.stopped ? 'stop' : t.ok ? 'ok' : 'bad',
         `<span class="faint" style="font-size:11.5px">${esc(fmtLocal(t.finished_at))}</span>`)).join('') : ''}
     </div>` : '';
@@ -936,7 +954,7 @@ async function pollJob() {
       S.data.job = job;
       if (last && last.id !== seen) await taskFinished(last);
       updateJob(); renderJobs();
-      if (!job.running && !job.queue.length) break;
+      if (!job.running && !dueSoon(job)) break;
       await sleep(1000);
     }
   } catch (e) { toast(e.message, true); } finally { S.polling = false; }
@@ -948,7 +966,9 @@ async function taskFinished(t) {
   if (['summarize', 'knowledge', 'remove'].includes(t.kind)) { S.knowledge.list = null; S.knowledge.pages = {}; }
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
+  if (['pull', 'embed', 'sync', 'details', 'asr', 'visual', 'rate', 'summarize', 'remove'].includes(t.kind)) S.indexStatus = undefined;   // searchable text changed
   if (t.kind === 'backup') S.storage = null;
+  S.usage = undefined;   // any task may have called a cloud AI
   S.flash = { id: t.id, until: Date.now() + 15000 };
   S.stopPending = false;
   if (!t.stopped) toast(t.ok ? text[1] : text[2], !t.ok);
@@ -967,9 +987,11 @@ function unsavedCategoryEdits() {
 }
 // After asking the server to start a task: say whether it started or is waiting, then follow the queue
 async function queued(res, what) {
-  toast(res.position ? `${what} queued. It starts after: ${res.after.join(', ')}` : `${what} started`);
+  const n = res.night, later = n && `${plural(n.videos, 'video')} longer than ${S.data.ai.night.minutes} min ${n.videos === 1 ? 'waits' : 'wait'} for ${atTime(n.at)} (night queue).`;
+  toast(n?.only ? `${what}: ${later}` : (res.position ? `${what} queued. It starts after: ${res.after.join(', ')}` : `${what} started`) + (n ? `. ${later}` : ''));
   await refreshJob();
 }
+const atTime = iso => { const d = new Date(iso || ''); return isNaN(d) ? '' : d.toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' }); };
 async function refreshJob() {
   try { S.data.job = await api('/api/job'); } catch (e) { return; }
   updateJob(); renderJobs(); pollJob();
@@ -1126,6 +1148,19 @@ const SEARCH_KINDS = [['all', 'Everything'], ['transcript', 'Transcripts'], ['sl
 const KIND_LABEL = { title: 'Title', chapter: 'Chapter', transcript: 'Transcript', slide: 'On screen', summary: 'AI summary', notes: 'Your notes', description: 'Description' };
 // Snippets arrive with \x02…\x03 around matches: escape first, then highlight
 const hl = s => esc(s).replace(/\x02/g, '<mark>').replace(/\x03/g, '</mark>');
+// Search and Ask say when the meaning index is behind (it updates on click unless automatic updates are on)
+async function loadIndexStatus() {
+  S.indexStatus = 'loading';
+  try { S.indexStatus = await api('/api/embed/status'); } catch (e) { S.indexStatus = {}; }
+  $$('.index-note').forEach(el => { el.innerHTML = indexNote(); });
+}
+function indexNote() {
+  const E = S.indexStatus;
+  if (E === undefined) { loadIndexStatus(); return ''; }
+  if (E === 'loading' || !E.available || !(E.pieces > E.embedded)) return '';
+  return ` ${plural(E.pieces - E.embedded, 'piece')} not in the meaning index yet, so meaning-based results miss them.
+    <button class="btn-text" style="height:auto;padding:0" data-act="embed-run" data-job-btn>Update index</button>`;
+}
 function viewSearch() {
   const sr = S.search;
   const indexed = videos().filter(v => v.details?.status === 'done').length;
@@ -1142,7 +1177,7 @@ function viewSearch() {
       <label class="check" style="align-items:center">
         <input type="checkbox" data-change="s-meaning" ${sr.meaning ? 'checked' : ''} style="margin:0"><span class="note">By meaning</span></label></div>
     <p class="hint">By meaning ${tip('Find pieces with similar meaning, even when they use different words or another language. Results are ordered by closeness, so check the top matches.')}</p>
-    <p class="hint">${indexed} of ${plural(videos().length, 'video')} have transcripts. ${indexed < videos().length ? '<a href="#/sources">Fetch details</a> to search inside more.' : ''}</p>
+    <p class="hint">${indexed} of ${plural(videos().length, 'video')} have transcripts. ${indexed < videos().length ? '<a href="#/sources">Fetch details</a> to search inside more.' : ''}<span class="index-note">${indexNote()}</span></p>
   </section>
   <div id="sresults"></div>`;
 }
@@ -1217,7 +1252,7 @@ function viewAsk() {
         ${libPlaylists().map(p => `<option value="${esc(p.id)}" ${a.src === p.id ? 'selected' : ''}>${esc(p.title)}</option>`).join('')}</select></label>` : ''}
       <label class="check" style="align-items:center"><input type="checkbox" data-change="ask-done" ${a.done ? 'checked' : ''} style="margin:0"><span class="note">Include watched</span> ${tip('Include videos marked watched or skipped in the answer.')}</label>`}
     </div>
-    <p class="hint">${ready ? `Answer model: ${esc(ai.uses.ask)}${local ? ' · Runs on this computer' : ''}.` : 'Set up an AI for questions in Settings → AI.'} ${tip("Answers use your videos' transcripts, slides, chapters, summaries and notes. Click a citation number to play that moment.")}</p>`}
+    <p class="hint">${ready ? `Answer model: ${esc(ai.uses.ask)}${local ? ' · Runs on this computer' : ''}.` : 'Set up an AI for questions in Settings → AI.'} ${tip("Answers use your videos' transcripts, slides, chapters, summaries and notes. Click a citation number to play that moment.")}<span class="index-note">${indexNote()}</span></p>`}
   </section>
   <div class="ask">
     <div id="aresult">${askResult()}${follow ? `<div style="margin-top:22px">${box}</div>` : ''}</div>
@@ -1650,7 +1685,7 @@ function viewAI() {
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
-  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local));
+  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local)) + usageCard();
   const media = ai.media_tasks || {};
   const pickMedia = (t, meta) => `<select id="media-${esc(t)}" data-media-task="${esc(t)}" aria-label="${esc(meta.label)} runs on" style="width:100%">
       ${meta.providers.map(k => { const p = ai.providers[k], ready = k === 'local' || p?.ready;
@@ -1669,9 +1704,52 @@ function viewAI() {
     ${Object.entries(ai.task_labels).map(([t, label]) => row(label, pick(t, ai.tasks[t] || '', true), t)).join('')}
     ${Object.entries(media).map(([t, meta]) => row(meta.label, pickMedia(t, meta), t)).join('')}
     <p class="hint" id="media-sends">${esc(mediaSends(ai, Object.fromEntries(Object.entries(media).map(([t, m]) => [t, m.selected || 'local']))))}</p>
+    <label class="check" style="margin-top:12px"><input type="checkbox" data-change="auto-index" ${ai.auto_index ? 'checked' : ''}>
+      <span>Update the meaning index automatically after each task</span></label>
+    <p class="hint">Off: Search and Ask show how much is not indexed yet, with an Update index button. On: every sync, details fetch, transcription, rating and summary is followed by an index update${tip('With a cloud embedding AI each update is a paid call and counts toward its rate limit, which is why it is off by default.')}.</p>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-routes">Save</button></div>
+  </section>
+  <section class="section card">
+    <h2 class="h">Night queue</h2>
+    <label class="check" style="margin-top:8px"><input type="checkbox" data-change="night" id="night-on" ${ai.night.on ? 'checked' : ''}>
+      <span>Rate and summarise long videos at night</span></label>
+    <div class="route"><label class="field-label" style="margin:0" for="night-min">Longer than (minutes)</label>
+      <input type="number" id="night-min" data-change="night" min="10" max="1440" step="5" value="${ai.night.minutes}" style="width:100%"></div>
+    <div class="route"><label class="field-label" style="margin:0" for="night-at">Start at</label>
+      <input type="time" id="night-at" data-change="night" value="${esc(ai.night.start)}" style="width:100%"></div>
+    <p class="hint">Long videos use a big share of a cloud AI's limits. With this on, Rate and Summarise run the shorter videos now and queue the long ones for this time, so daytime work isn't held up. The task list shows them with <b>Run now</b>. ${tip('The dashboard must be running then (for example as a background service: bash scripts/service.sh install). Tasks waiting in the queue are lost if it is stopped or restarted.')}</p>
   </section>`;
   return { cloud, routing };
+}
+// Settings → Cloud AI: what the cloud AIs were sent (llm.record_usage), today and over the last 30 days
+async function loadUsage() {
+  S.usage = 'loading';
+  try { S.usage = await api('/api/ai/usage'); } catch (e) { S.usage = { error: e.message }; }
+  if (route() === 'settings/cloud') refresh();
+}
+const tokens = n => n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : String(n || 0);
+function usageCard() {
+  const U = S.usage, ai = S.data.ai;
+  if (U === undefined) loadUsage();
+  const head = `<h2 class="h">Usage</h2>`;
+  if (!U || U === 'loading') return `<section class="section card">${head}<p class="note">Loading…</p></section>`;
+  if (U.error) return `<section class="section card">${head}<p class="note">Could not load usage: ${esc(U.error)}</p></section>`;
+  const label = t => ai.task_labels[t] || ai.media_tasks?.[t]?.label || (t === 'default' ? 'Other' : t);
+  const money = r => r.unpriced === r.calls ? 'price unknown' : `$${r.cost < 0.01 && r.cost > 0 ? '<0.01' : r.cost.toFixed(2)}${r.unpriced ? ' + unpriced' : ''}`;
+  const sum = rows => rows.reduce((t, r) => ({ calls: t.calls + r.calls, tokens_in: t.tokens_in + r.tokens_in, tokens_out: t.tokens_out + r.tokens_out,
+    cost: t.cost + r.cost, unpriced: t.unpriced + r.unpriced, estimated: t.estimated + r.estimated }), { calls: 0, tokens_in: 0, tokens_out: 0, cost: 0, unpriced: 0, estimated: 0 });
+  const cells = (r, name) => `<td data-label="Task">${name}</td><td class="r" data-label="Calls">${r.calls}</td>
+    <td class="r" data-label="Tokens in">${r.estimated && r.tokens_in ? '≈ ' : ''}${tokens(r.tokens_in)}</td><td class="r" data-label="Tokens out">${r.estimated && r.tokens_out ? '≈ ' : ''}${tokens(r.tokens_out)}</td>
+    <td class="r" data-label="Cost">${money(r)}</td>`;
+  const table = (title, rows) => rows.length ? `<h3 style="font-size:14px;margin:18px 0 0">${title}</h3>
+    <div class="tbl-wrap"><table class="tbl tbl-cards"><thead><tr><th>Task · model</th><th class="r">Calls</th><th class="r">Tokens in</th><th class="r">Tokens out</th><th class="r">Cost</th></tr></thead>
+      <tbody>${rows.map(r => `<tr>${cells(r, `${esc(label(r.task))} <span class="faint">· ${esc(r.model)}</span>`)}</tr>`).join('')}</tbody>
+      ${rows.length > 1 ? `<tfoot><tr>${cells(sum(rows), 'All')}</tr></tfoot>` : ''}</table></div>`
+    : `<h3 style="font-size:14px;margin:18px 0 0">${title}</h3><p class="note">No cloud AI calls.</p>`;
+  return `<section class="section card">${head}
+    <p class="hint">Every call to a cloud AI, as the service reported it. ${tip('≈ marks counts estimated from the text length, for services that report none (Gemini embeddings). Costs use approximate list prices; models without one show price unknown. Models on this computer are free and not counted. Check the provider console for the exact bill.')}</p>
+    ${table('Today', U.today)}${table('Last 30 days', U.days30)}
+    <div class="actions"><button class="btn btn-sm" data-act="usage-refresh">Refresh</button></div></section>`;
 }
 function providerCards(providers) {
   const edit = S.ai.provider;
@@ -1883,11 +1961,11 @@ function viewEmbed(L, running) {
   const state = !L.ollama.running ? 'Ollama is not running: questions and search use keywords only.'
     : !E.installed ? `${E.model} isn't downloaded yet: questions and search use keywords only.`
     : !E.pieces ? 'Nothing to index yet: sync a playlist and fetch details.'
-    : E.embedded >= E.pieces ? `All ${E.pieces} pieces indexed.` : `${E.embedded} of ${E.pieces} pieces indexed (${pct}%). The rest are added after the next sync or with Update index.`;
+    : E.embedded >= E.pieces ? `All ${E.pieces} pieces indexed.` : `${E.embedded} of ${E.pieces} pieces indexed (${pct}%). The rest are added with Update index${S.data.ai.auto_index ? ' or after the next task' : ''}.`;
   const known = E.choices.some(c => c.model === E.model) ? E.choices : [{ model: E.model, size: '', why: 'Your choice.', installed: E.installed }, ...E.choices];
   return `
     <h3 style="font-size:14px;margin:22px 0 4px">Meaning-based search</h3>
-    <p class="note">Meaning index ${tip('Ask and Search → By meaning finds pieces by what they mean, in any language, using a small embedding model. The index updates after syncs, details, transcription, slide reading and ratings.')}</p>
+    <p class="note">Meaning index ${tip('Ask and Search → By meaning finds pieces by what they mean, in any language, using a small embedding model. It updates when you click Update index, or after each task if that is turned on in Settings → Which AI does what.')}</p>
     <div class="prov"><div><span class="dot ${E.installed && E.embedded >= E.pieces && E.pieces ? 'ok' : ''}"></span><b style="font-weight:500">Index</b>
       <span class="faint" style="font-size:12.5px"> · ${esc(state)}</span></div><span></span></div>
     ${E.pieces ? `<div class="progress" style="margin:6px 0 4px"><i style="width:${pct}%"></i></div>` : ''}
@@ -2061,9 +2139,9 @@ function renderDrawer() {
   const i = S.visible.findIndex(x => x.video_id === v.video_id);
   const cats = categoryNames();
   if (!cats.includes(v.category)) cats.unshift(v.category);
-  box.innerHTML = `
+  const html = `
   <div class="scrim" data-act="close"></div>
-  <aside class="drawer" role="dialog" aria-label="Video details">
+  <aside class="drawer" role="dialog" aria-label="Video details" data-id="${esc(v.video_id)}">
     <div class="drawer-top">
       <button class="btn icon-btn" data-act="step" data-dir="-1" ${i > 0 ? '' : 'disabled'} aria-label="Previous video">↑</button>
       <button class="btn icon-btn" data-act="step" data-dir="1" ${i >= 0 && i < S.visible.length - 1 ? '' : 'disabled'} aria-label="Next video">↓</button>
@@ -2094,6 +2172,18 @@ function renderDrawer() {
       <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
     </div>
   </aside>`;
+  const old = box.querySelector('.drawer');
+  if (old && old.dataset.id === v.video_id) {
+    // Same video redrawn (a background task finished): keep the playing video and the scroll position.
+    // The player is never moved in the DOM, because moving an iframe reloads it.
+    const scroll = old.scrollTop, embed = old.querySelector('.embed');
+    const t = document.createElement('div'); t.innerHTML = html;
+    old.querySelector('.drawer-top').replaceWith(t.querySelector('.drawer-top'));
+    const body = old.querySelector('.drawer-body');
+    [...body.children].forEach(c => c !== embed && c.remove());
+    body.append(...[...t.querySelector('.drawer-body').children].filter(c => !c.classList.contains('embed')));
+    old.scrollTop = scroll;
+  } else box.innerHTML = html;
   loadSummary(v.video_id);
 }
 function drawerRating(v) {
@@ -2142,7 +2232,7 @@ function drawerSummary(v) {
     ${s.tldr ? `<p class="tldr">${esc(s.tldr)}</p>` : ''}
     ${s.minutes?.length ? `<div class="field-label">Minutes</div><ul>${s.minutes.map((m, i) => `<li><div class="chap"><span>${time(m.t)}</span><span><b>${esc(m.topic)}</b>${(m.notes || []).map(n => `<small class="minute-note">${esc(n)}</small>`).join('')}${(moments[i] || []).length ? `<span class="also">Also in ${(moments[i] || []).map(x => `<button class="also-chip" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${at(x.t)}" title="${esc(x.title)} @ ${clock(at(x.t))}">${esc(x.title)} · ${clock(at(x.t))}</button>`).join('')}</span>` : ''}</span></div></li>`).join('')}</ul>` : ''}
     ${s.claims?.length ? `<div class="field-label">Key claims and quotes</div><ul>${s.claims.map(c => `<li><div class="chap"><span>${time(c.t)}</span><span><b>${esc(c.kind)}</b> · ${esc(c.text)}</span></div></li>`).join('')}</ul>` : ''}
-    ${s.quiz?.length ? `<div class="field-label">Check yourself</div><ul>${s.quiz.map(q => `<li><div class="chap"><span>${time(q.t)}</span><span>${esc(q.q)} <details><summary>Show answer</summary><p>${esc(q.a)}</p></details></span></div></li>`).join('')}</ul>` : ''}
+    ${s.quiz?.length ? `<div class="field-label">Check yourself</div><ul>${s.quiz.map((q, i) => `<li><div class="chap"><span>${time(q.t)}</span><span>${esc(q.q)} <details ${keepOpen('quiz' + i)}><summary>Show answer</summary><p>${esc(q.a)}</p></details></span></div></li>`).join('')}</ul>` : ''}
     ${s.takeaways?.length ? `<div class="field-label">Takeaways</div><ul>${s.takeaways.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
     ${Object.entries(grouped).map(([kind, items]) => `<div class="field-label">${esc(relationLabel[kind] || kind)}</div><ul>${items.map(x => `<li><button class="btn-text" data-act="open" data-id="${esc(x.video_id)}">${esc(x.video_id)}</button> · ${esc(x.why)}</li>`).join('')}</ul>`).join('')}
     ${(s.learn_more?.searches || []).length ? `<div class="field-label">YouTube searches</div><ul>${s.learn_more.searches.map(x => `<li><a href="https://www.youtube.com/results?search_query=${encodeURIComponent(x.query || '')}" target="_blank" rel="noopener">${esc(x.query)}</a> · ${esc(x.why)}</li>`).join('')}</ul>` : ''}
@@ -2177,7 +2267,7 @@ function drawerSlides(v) {
   else if (vis.slides && full?.visuals) {
     body = `<div class="strip">${full.visuals.filter(x => x.thumb).map(x => `<button data-act="seek" data-t="${Math.floor(x.t)}" title="${esc((x.text || x.visual || '').slice(0, 140))}">
         <img src="/frames/${encodeURIComponent(v.video_id)}/${esc(x.thumb.replace('.jpg', ''))}.jpg" alt="" loading="lazy"><time>${clock(x.t)}</time></button>`).join('')}</div>
-      <details style="margin-top:6px"><summary>On-screen text · ${plural(full.visuals.length, 'slide')}</summary>
+      <details style="margin-top:6px" ${keepOpen('slides')}><summary>On-screen text · ${plural(full.visuals.length, 'slide')}</summary>
         ${full.visuals.map(x => `<button class="tline" data-act="seek" data-t="${Math.floor(x.t)}"><time>${clock(x.t)}</time><span>${x.visual ? `<i>${esc(x.visual)}</i><br>` : ''}<span class="slide-text">${esc(x.text)}</span></span></button>`).join('')}
       </details>
       <div class="kv-line">${readBtn('Read again')}</div>`;
@@ -2212,8 +2302,8 @@ function drawerDetails(v) {
   return `<span class="field-label">Details</span><div class="kv-line">${head}${det.sources.includes('local-asr') && det.sources.length === 1 ? ' · local transcript' : ''} · ${fetchBtn('Refresh')}</div>
     ${asrLine}
     ${full.chapters.length ? `<div style="margin-top:10px">${full.chapters.map(c => `<button class="chap" data-act="seek" data-t="${Math.floor(c.start)}"><time>${clock(c.start)}</time><span>${esc(c.title)}</span></button>`).join('')}</div>` : ''}
-    ${full.description ? `<details style="margin-top:12px" ${S.data.ai.show_descriptions ? 'open' : ''}><summary>Show description</summary><p class="desc-text">${esc(full.description)}</p></details>` : ''}
-    ${full.segments.length ? `<details style="margin-top:10px"><summary>Transcript · ${plural(full.segments.length, 'line')}</summary>
+    ${full.description ? `<details style="margin-top:12px" ${keepOpen('desc', S.data.ai.show_descriptions)}><summary>Show description</summary><p class="desc-text">${esc(full.description)}</p></details>` : ''}
+    ${full.segments.length ? `<details style="margin-top:10px" ${keepOpen('transcript')}><summary>Transcript · ${plural(full.segments.length, 'line')}</summary>
       <div class="transcript">${full.segments.map(g => `<button class="tline" data-act="seek" data-t="${Math.floor(g.start)}"><time>${clock(g.start)}</time><span>${esc(g.text)}</span></button>`).join('')}</div></details>` : ''}`;
 }
 async function loadDetails(id) {
@@ -2246,7 +2336,10 @@ function saveNotes() {
   const ta = $('#d-notes'), v = S.drawer && byId(S.drawer);
   if (ta && v && ta.value !== (v.notes || '')) update([v.video_id], { notes: ta.value });
 }
-function openDrawer(id) { saveNotes(); S.drawer = id; renderDrawer(); }
+function openDrawer(id) { saveNotes(); if (S.drawer !== id) S.drawerOpen = {}; S.drawer = id; renderDrawer(); }
+// Open/closed sections of the video panel, remembered so redraws (a task finishing, details reloading) don't close them
+const keepOpen = (k, dflt = false) => `data-keep="${k}" ${(S.drawerOpen[k] ?? dflt) ? 'open' : ''}`;
+document.addEventListener('toggle', e => { const k = e.target.dataset?.keep; if (k) S.drawerOpen[k] = e.target.open; }, true);
 function closeDrawer() { saveNotes(); S.drawer = null; renderDrawer(); }
 
 /* ---------------- updates ---------------- */
@@ -2328,6 +2421,7 @@ document.addEventListener('click', async e => {
   if (el.tagName === 'A' && el.getAttribute('href') === '#/') e.preventDefault();
   switch (act) {
     case 'storage-refresh': S.storage = null; await loadStorage(); break;
+    case 'usage-refresh': await loadUsage(); break;
     case 'storage-backup': {
       try { await queued(await api('/api/files/backup', {}), 'Library backup'); S.storage = null; await loadStorage(); }
       catch (err) { toast(err.message, true); }
@@ -2453,15 +2547,24 @@ document.addEventListener('click', async e => {
     case 'rate-batch': startRate(null); break;
     case 'rate-filtered': startRate(el.dataset.ids.split(',').filter(Boolean)); break;
     case 'rate-one': startRate([id]); break;
-    case 'rate-sel': startRate([...S.sel]); break;
+    case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
-    case 'summarize-sel': startSummary([...S.sel]); break;
+    case 'remove-sel': {
+      const ids = [...S.sel], one = ids.length === 1, notes = ids.filter(x => byId(x)?.notes?.trim()).length;
+      if (!confirm(`Remove ${plural(ids.length, 'video')} from YourTube?\n\nThis deletes ${one ? 'its' : 'their'} transcripts, slides, ratings, summaries and search data`
+        + `${notes ? `, and your notes on ${plural(notes, 'video')}` : ''}. It can't be undone.\n\nNothing changes on YouTube. A playlist sync won't add `
+        + `${one ? 'it' : 'them'} back; adding ${one ? 'it' : 'one'} by its link does.`)) break;
+      try { await queued(await api('/api/videos/remove', { ids }), 'Removing'); S.sel.clear(); renderList(); }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'summarize-sel': { const r = newOnly([...S.sel], isSummarised, 'summarised', 'Summarise'); if (r) startSummary(r.ids, r.note); break; }
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
     case 'knowledge-summarize-five': summarizeKnowledgeFive(el.dataset.cat); break;
-    case 'details-fetch': case 'details-one': {
+    case 'details-fetch': case 'details-one': case 'details-these': {
       try {
-        const res = await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : {});
+        const res = await api('/api/details/fetch', act === 'details-one' ? { ids: [id] } : act === 'details-these' ? { ids: el.dataset.ids.split(',') } : {});
         if (act === 'details-one') delete S.detailCache[id];
         await queued(res, 'Fetching details');
       } catch (err) { toast(err.message, true); }
@@ -2494,6 +2597,7 @@ document.addEventListener('click', async e => {
         await refreshJob();
       } catch (err) { S.stopPending = false; updateJob(); renderJobs(); toast(err.message, true); }
       break;
+    case 'job-run-now': try { await api('/api/job/run-now', { id: +el.dataset.task }); await refreshJob(); toast('It runs as soon as its lane is free'); } catch (err) { toast(err.message, true); } break;
     case 'job-drop': try { await api('/api/job/cancel', { id: +el.dataset.task }); await refreshJob(); toast('Removed from the queue'); } catch (err) { toast(err.message, true); } break;
     case 'jobs-toggle': S.jobsOpen = !S.jobsOpen; renderJobs(); break;
     case 'theme-toggle': S.theme = darkNow() ? 'light' : 'dark'; store.set('ytkb.theme', S.theme); applyTheme(); if (route().startsWith('settings')) refresh(); break;
@@ -2781,6 +2885,17 @@ document.addEventListener('change', async e => {
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
   }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
+  if (ch === 'night') {
+    const night = { on: $('#night-on').checked, minutes: Math.round(+$('#night-min').value), start: $('#night-at').value };
+    try { S.data.ai = await saveAi({ night }); toast(night.on ? `Videos over ${night.minutes} min are rated and summarised from ${night.start}` : 'Night queue off: long videos run right away'); }
+    catch (err) { toast(err.message, true); refresh(); }
+    return;
+  }
+  if (ch === 'auto-index') {
+    try { S.data.ai = await saveAi({ auto_index: el.checked }); toast(el.checked ? 'The index now updates after each task' : 'The index now updates when you click Update index'); }
+    catch (err) { el.checked = !el.checked; toast(err.message, true); }
+    return;
+  }
   if (ch === 'show-descriptions') {
     try { S.data.ai = await saveAi({ show_descriptions: el.checked }); renderView(); if (S.drawer) renderDrawer(); toast('Saved'); }
     catch (err) { el.checked = !el.checked; toast(err.message, true); }

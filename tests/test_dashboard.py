@@ -224,6 +224,73 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual((b["category"], b["category_source"]), ("Cooking", "ai"))
         self.call("/api/videos/update", {"ids": ["b"], "reset_category": True})
 
+    def test_ai_usage_endpoint(self):
+        with storage.get_connection() as conn:
+            conn.execute("DELETE FROM ai_usage")
+            conn.execute("INSERT INTO ai_usage (at, task, provider, model, tokens_in, tokens_out, cost) "
+                         "VALUES ('2000-01-01 00:00:00', 'rate', 'gemini', 'old', 9, 9, 0.1)")   # older than 30 days
+            conn.commit()
+        storage.record_usage("rate", "gemini", "gemini-2.5-flash", 1000, 100, 0.00055)
+        storage.record_usage("rate", "gemini", "gemini-2.5-flash", 3000, 200, 0.0014)
+        storage.record_usage("embed", "gemini", "gemini-embedding-001", 500, 0, 0.000075, exact=False)
+        code, body = self.call("/api/ai/usage")
+        self.assertEqual(code, 200)
+        self.assertEqual(body["today"], body["days30"])
+        self.assertEqual([(r["task"], r["calls"], r["tokens_in"], r["estimated"]) for r in body["today"]],
+                         [("rate", 2, 4000, 0), ("embed", 1, 500, 1)])
+
+    def test_night_queue_setting_and_split(self):
+        saved = llm.load_settings()
+        self.addCleanup(llm.save_settings, saved)
+        for bad in ({"on": True, "minutes": 5, "start": "01:00"}, {"on": True, "minutes": 90, "start": "25:00"}, "on"):
+            self.assertEqual(self.call("/api/ai/settings", {"night": bad})[0], 400, bad)
+        code, body = self.call("/api/ai/settings", {"night": {"on": True, "minutes": 90, "start": "01:00"}})
+        self.assertEqual((code, body["ai"]["night"]), (200, {"on": True, "minutes": 90, "start": "01:00"}))
+        storage.save_playlist(playlist("PL_NIGHT"), [video("n_short", "Short talk", duration=20 * 60),
+                                                     video("n_long", "Four hour course", duration=4 * 3600)])
+        calls = []
+        fake = lambda kind, label, fn, key=None, not_before=None: calls.append((label, not_before)) or {"id": 100 + len(calls), "position": 0}
+        with mock.patch("llm.is_configured", return_value=True), mock.patch.object(dashboard.JOB, "start", side_effect=fake):
+            code, body = self.call("/api/summarize", {"ids": ["n_short", "n_long"]})
+            self.assertEqual(code, 200)
+            self.assertEqual([(label, at is not None) for label, at in calls],
+                             [("Summarise at night: Four hour course", True), ("Summarise: Short talk", False)])
+            self.assertEqual((body["night"]["videos"], body["night"]["only"], body["night"]["at"][11:]), (1, False, "01:00:00"))
+            calls.clear()
+            code, body = self.call("/api/rate", {"ids": ["n_long"]})   # only long videos: one task, at night
+            self.assertEqual(([at is not None for _, at in calls], body["night"]["only"]), ([True], True))
+        llm.save_settings({**llm.load_settings(), "night": {"on": False, "minutes": 90, "start": "01:00"}})
+        calls.clear()
+        with mock.patch("llm.is_configured", return_value=True), mock.patch.object(dashboard.JOB, "start", side_effect=fake):
+            code, body = self.call("/api/summarize", {"ids": ["n_short", "n_long"]})
+        self.assertEqual(([at for _, at in calls], "night" in body), ([None], False))   # off: one task, now
+
+    def test_run_now_endpoint(self):
+        self.assertEqual(self.call("/api/job/run-now", {"id": "x"})[0], 400)
+        self.assertEqual(self.call("/api/job/run-now", {"id": 987654})[0], 404)
+        with mock.patch.object(dashboard.JOB, "run_now", return_value=True) as run_now:
+            self.assertEqual(self.call("/api/job/run-now", {"id": 5}), (200, {"ok": True}))
+        run_now.assert_called_once_with(5)
+
+    def test_remove_videos_endpoint(self):
+        storage.save_playlist(playlist("PL_RV"), [video("rv_gone", "Drop me"), video("rv_kept", "Keep me")])
+        self.assertEqual(self.call("/api/videos/remove", {"ids": []})[0], 400)
+        self.assertEqual(self.call("/api/videos/remove", {"ids": "rv_gone"})[0], 400)
+        started = []
+        with mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None: started.append((kind, fn)) or {"id": 998, "position": 0}):
+            self.assertEqual(self.call("/api/videos/remove", {"ids": ["rv_gone"]})[0], 200)
+        kind, fn = started[0]
+        self.assertEqual(kind, "remove")
+        with tempfile.TemporaryDirectory() as frames, mock.patch.object(dashboard, "FRAMES_DIR", frames):
+            os.makedirs(os.path.join(frames, "rv_gone"))
+            os.makedirs(os.path.join(frames, "rv_kept"))
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                self.assertTrue(fn())
+            self.assertEqual(os.listdir(frames), ["rv_kept"])
+        self.assertIn("Nothing changes on YouTube", out.getvalue())
+        ids = {v["video_id"] for v in storage.get_library()}
+        self.assertEqual(("rv_gone" in ids, "rv_kept" in ids), (False, True))
+
     def test_remove_playlist_endpoints(self):
         storage.save_playlist(playlist("PL_RM"), [video("rm_solo", "Gone soon"), video("a", "Pasta recipe", category="Cooking")])
         self.assertEqual(self.call("/api/playlists/remove?id=PL_RM"), (200, {"removed": 1, "kept_notes": 0, "shared": 1}))

@@ -23,7 +23,7 @@ import webbrowser
 import contextvars
 import shutil
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 
@@ -133,11 +133,12 @@ def _idle(lane=None):
 class _Lane:
     def __init__(self, name):
         self.name = name
-        self.pending = []    # [{'id', 'kind', 'label', 'fn', 'key', 'retry_key', 'lane', 'queued_at'}]
+        self.pending = []    # [{'id', 'kind', 'label', 'fn', 'key', 'retry_key', 'lane', 'queued_at', 'not_before'}]
         self.state = _idle(name)
         self.buf = io.StringIO()
         self.stop = threading.Event()
         self.worker = None
+        self.wake = threading.Event()   # set when a task is added or let run now: a worker waiting for a start time looks again
 
 class Job:
     """
@@ -194,16 +195,18 @@ class Job:
                               "started_at": l.state["started_at"] if l.state["running"] else None,
                               "log": l.buf.getvalue() if l.state["running"] else "",
                               "stopping": bool(l.state["running"] and l.stop.is_set())} for l in self.lanes.values()]
-            snap["queue"] = sorted(({k: t[k] for k in ("id", "kind", "label", "lane", "queued_at")}
+            snap["queue"] = sorted(({k: t.get(k) for k in ("id", "kind", "label", "lane", "queued_at", "not_before")}
                                     for l in self.lanes.values() for t in l.pending), key=lambda t: t["id"])
             snap["recent"] = list(self.done)
             snap["dismissed"] = bool(snap.get("dismissed"))
         return snap
 
-    def start(self, kind, label, fn, key=None, lane=None):
+    def start(self, kind, label, fn, key=None, lane=None, not_before=None):
         """
         Queues a task in its lane (lane_for(kind) unless given). Returns {'id', 'position', 'lane'} (position 0 =
         started now), or None when the same task (kind + key, default the label) is already waiting or running.
+        not_before (local time, ISO 'YYYY-MM-DDTHH:MM:SS'): the task waits until then; tasks queued after it that
+        are due run first.
         """
         lane = lane or lane_for(kind, llm.load_settings())
         retry_key = key if key is not None else label
@@ -214,14 +217,26 @@ class Job:
                     return None
             target = self.lanes[lane]
             task = {"id": self._next, "kind": kind, "label": label, "fn": fn, "key": key, "retry_key": retry_key, "lane": lane,
-                    "queued_at": datetime.now().isoformat(timespec="seconds")}
+                    "queued_at": datetime.now().isoformat(timespec="seconds"), "not_before": not_before}
             self._next += 1
             target.pending.append(task)
             position = len(target.pending) - (0 if target.state["running"] else 1)
+            target.wake.set()
             if not (target.worker and target.worker.is_alive()):
                 target.worker = threading.Thread(target=self._work, args=(target,), daemon=True)
                 target.worker.start()
         return {"id": task["id"], "position": position, "lane": lane}
+
+    def run_now(self, task_id):
+        """Lets a task waiting for its start time (not_before) run as soon as its lane is free. False when not found."""
+        with self.lock:
+            for lane in self.lanes.values():
+                for t in lane.pending:
+                    if t["id"] == task_id and t.get("not_before"):
+                        t["not_before"] = None
+                        lane.wake.set()
+                        return True
+        return False
 
     def retry(self, task_id):
         with self.lock:
@@ -250,17 +265,29 @@ class Job:
                 if not lane.pending:
                     lane.worker = None
                     return
-                task = lane.pending.pop(0)
-                self.tasks[task["id"]] = task
-                lane.buf = io.StringIO()
-                lane.stop = threading.Event()
-                lane.state = {**_idle(lane.name), "id": task["id"], "key": task["key"], "running": True, "kind": task["kind"],
-                              "label": task["label"], "started_at": datetime.now().isoformat(timespec="seconds")}
+                now = datetime.now().isoformat(timespec="seconds")
+                task = next((t for t in lane.pending if not t.get("not_before") or t["not_before"] <= now), None)
+                if task is None:   # only tasks waiting for a start time: sleep until the first, or until woken
+                    first = min(datetime.fromisoformat(t["not_before"]) for t in lane.pending)
+                    # shortcut: wakes at least every 5 min, so a clock change (sleep, DST) is picked up late by up to that
+                    wait = min(max((first - datetime.now()).total_seconds(), 1), 300)
+                    lane.wake.clear()   # under the lock: a start() after this sets it again, so no wake-up is lost
+                else:
+                    lane.pending.remove(task)
+                    self.tasks[task["id"]] = task
+                    lane.buf = io.StringIO()
+                    lane.stop = threading.Event()
+                    lane.state = {**_idle(lane.name), "id": task["id"], "key": task["key"], "running": True, "kind": task["kind"],
+                                  "label": task["label"], "started_at": datetime.now().isoformat(timespec="seconds")}
+            if task is None:
+                lane.wake.wait(wait)
+                continue
             self._run(lane, task["fn"])
 
     def _run(self, lane, fn):
         ok = False
         out, stop = _OUT.set(lane.buf), _STOP.set(lane.stop)
+        usage = llm.start_run()   # this task's cloud AI calls, from its own thread and its helper threads
         try:
             ok = fn()
         except Exception as e:  # surface anything unexpected in the job log
@@ -269,6 +296,9 @@ class Job:
         finally:
             _OUT.reset(out)
             _STOP.reset(stop)
+        line = llm.run_usage_line(usage)
+        if line:
+            lane.buf.write(line + "\n")
         with self.lock:
             stopped = lane.stop.is_set()
             state = {**lane.state, "running": False, "ok": bool(ok), "stopped": stopped, "log": lane.buf.getvalue(),
@@ -282,12 +312,14 @@ class Job:
             self.tasks = {task_id: task for task_id, task in self.tasks.items() if task_id in retained}
         applog.log_task(state.get("kind"), state.get("label"), bool(ok), stopped,
                         state.get("started_at"), state.get("finished_at"), state["log"])
-        # Keep the meaning index current after anything that adds or changes searchable text, as its own task
+        # With Settings → "Update the meaning index automatically" on, keep the index current after anything that adds
+        # or changes searchable text, as its own task. Off (the default), Search and Ask offer Update index instead.
         # shortcut: an index update already running doesn't queue another, so text saved meanwhile waits for the next one
         if ok and not stopped and state["kind"] in AUTO_EMBED_KINDS:
             import embedder
             try:
-                if embedder.available(llm.load_settings()):
+                settings = llm.load_settings()
+                if settings.get("auto_index") and embedder.available(settings):
                     self.start("embed", "Update meaning index",
                                lambda: embedder.run_embed(should_stop=self.stop_requested, quiet=True), key="auto")
             except Exception:  # never let this end the lane's worker thread
@@ -316,9 +348,7 @@ def _remove_playlist(playlist_id, title):
     """Removes a playlist from YourTube only (storage.remove_playlist); the YouTube playlist is never touched."""
     print(f'Removing "{title}" from YourTube. Nothing changes on YouTube.')
     done = storage.remove_playlist(playlist_id)
-    for vid in done["cleared"]:
-        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
-            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
+    _delete_frames(done["cleared"])
     n = lambda k, word: f"{done[k]} {word}{'' if done[k] == 1 else 's'}"
     print(f"   {n('removed', 'video')} removed with their subtitles, ratings and summaries.")
     if done["kept_notes"]:
@@ -327,6 +357,21 @@ def _remove_playlist(playlist_id, title):
         print(f"   {n('shared', 'video')} also in other playlists stayed.")
     _vacuum()
     return True
+
+def _remove_videos(ids):
+    """Removes videos from YourTube only (storage.remove_videos); YouTube playlists are never touched."""
+    print(f"Removing {len(ids)} video{'' if len(ids) == 1 else 's'} from YourTube. Nothing changes on YouTube.")
+    gone = storage.remove_videos(ids)
+    _delete_frames(gone)
+    print(f"   {len(gone)} removed with their notes, subtitles, slides, ratings, summaries and search data. "
+          "A playlist sync won't add them again; adding one by its link does.")
+    _vacuum()
+    return True
+
+def _delete_frames(video_ids):
+    for vid in video_ids:
+        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
+            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
 
 def _vacuum():
     """SQLite keeps freed pages until VACUUM; another task writing at the same time only delays it."""
@@ -340,9 +385,7 @@ def _archive_playlist(playlist_id, title):
     """Frees a finished playlist's transcripts, slide text and search data (storage.archive_playlist)."""
     print(f'Archiving "{title}". Titles, status, notes, ratings and summaries stay. Nothing changes on YouTube.')
     done = storage.archive_playlist(playlist_id)
-    for vid in done["archived"]:
-        if re.fullmatch(r"[\w-]+", vid):   # never a path outside frames/
-            shutil.rmtree(os.path.join(FRAMES_DIR, vid), ignore_errors=True)
+    _delete_frames(done["archived"])
     print(f"   {len(done['archived'])} videos archived."
           + (f" {done['shared']} also in an unfinished playlist kept everything." if done["shared"] else ""))
     _vacuum()
@@ -375,6 +418,28 @@ def _add_video(video_id, library=1):
     print()
     run_enrich(video_ids=[video_id], should_stop=JOB.stop_requested)   # its details now; a failure here doesn't fail the add
     return True
+
+def _next_time(hh_mm, now=None):
+    """The next local time it is hh_mm ('01:00'), as ISO 'YYYY-MM-DDTHH:MM:SS': today if still ahead, else tomorrow."""
+    now = now or datetime.now()
+    at = now.replace(hour=int(hh_mm[:2]), minute=int(hh_mm[3:]), second=0, microsecond=0)
+    return (at if at > now else at + timedelta(days=1)).isoformat(timespec="seconds")
+
+def _night_split(ids):
+    """
+    With Settings → Night queue on: (ids to run now, ids of videos longer than its limit, when those start).
+    Off, or no ids: (ids, [], None).
+    """
+    night = llm.night_settings(llm.load_settings())
+    if not night["on"] or not ids:
+        return ids, [], None
+    length = {v["video_id"]: v.get("duration_seconds") or 0 for v in storage.get_all_videos(include_removed=True)}
+    late = [i for i in ids if length.get(i, 0) > night["minutes"] * 60]
+    return [i for i in ids if i not in late], late, _next_time(night["start"])
+
+def _utc_now():
+    """Now in SQLite's CURRENT_TIMESTAMP form, to compare with created_at columns."""
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 def _label(action, ids):
     """Task label: 'Rate: 3 videos', 'Rate: <title>' for one video, or the action alone for 'everything that needs it'."""
@@ -515,14 +580,25 @@ class Handler(BaseHTTPRequestHandler):
                                         urlparse(self.path).path, msg)
         self._json({"error": msg}, code)
 
-    def _queued(self, started):
+    def _queued(self, started, **extra):
         """Reply for a task handed to JOB: where it is in the queue, or 409 when it is already there."""
         if started is None:
             return self._error("That task is already running or waiting in the queue", 409)
         snap, lane = JOB.snapshot(), started.get("lane")
         ahead = [l["label"] for l in snap["lanes"] if l["running"] and l["lane"] == lane and l["id"] != started["id"]] + \
-                [t["label"] for t in snap["queue"] if t["lane"] == lane and t["id"] < started["id"]]
-        return self._json({"ok": True, "id": started["id"], "position": started["position"], "after": ahead})
+                [t["label"] for t in snap["queue"] if t["lane"] == lane and t["id"] < started["id"] and not t["not_before"]]
+        return self._json({"ok": True, "id": started["id"], "position": started["position"], "after": ahead, **extra})
+
+    def _queued_split(self, kind, action, ids, run):
+        """
+        Queues run(ids) (a task function) now. With Settings → Night queue on, the longer videos go in a second task
+        that waits for the night; the reply then has night: {videos, at, only (nothing runs now)}.
+        """
+        now_ids, late, at = _night_split(ids)
+        night = JOB.start(kind, _label(f"{action} at night", late), run(late), key=["night"] + late, not_before=at) if late else None
+        started = JOB.start(kind, _label(action, now_ids), run(now_ids), key=now_ids) if now_ids or not night else None
+        extra = {"night": {"videos": len(late), "at": at, "only": started is None}} if night else {}
+        return self._queued(started or night, **extra)
 
     def _body(self):
         try:
@@ -620,6 +696,11 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, data, ctype, extra_headers=headers)
         if url.path == "/api/files":
             return self._json({**files.usage(), "backups": files.list_backups(), "exports": files.list_exports()})
+        if url.path == "/api/ai/usage":
+            midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)   # this computer's day
+            utc = lambda t: t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+            return self._json({"today": storage.usage_summary(utc(midnight)),
+                               "days30": storage.usage_summary(utc(midnight - timedelta(days=29)))})
         if url.path == "/api/openapi.json":
             spec_path = os.path.join(ROOT_DIR, "docs", "openapi.json")
             if not os.path.isfile(spec_path):
@@ -884,6 +965,12 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("Unknown action")
                 return self._json({"ok": True, "libraries": storage.get_libraries()})
 
+            if path == "/api/videos/remove":
+                ids = body.get("ids")
+                if not isinstance(ids, list) or not ids or not all(isinstance(i, str) for i in ids):
+                    return self._error("ids must be a non-empty list of video IDs")
+                return self._queued(JOB.start("remove", _label("Remove", ids), lambda: _remove_videos(ids), key=ids))
+
             if path == "/api/playlists/remove":
                 pid = _clean(body.get("id")) or ""
                 found = storage.get_playlist(pid)
@@ -1096,6 +1183,14 @@ class Handler(BaseHTTPRequestHandler):
                 ok = JOB.request_stop(task_id)
                 return self._json({"ok": ok, "stopping": ok})
 
+            if path == "/api/job/run-now":
+                task_id = body.get("id")
+                if not isinstance(task_id, int) or isinstance(task_id, bool):
+                    return self._error("id must be a number")
+                if not JOB.run_now(task_id):
+                    return self._error("No task with that id is waiting for a start time", 404)
+                return self._json({"ok": True})
+
             if path in ("/api/job/retry", "/api/job/dismiss"):
                 task_id = body.get("id")
                 if not isinstance(task_id, int) or isinstance(task_id, bool):
@@ -1245,7 +1340,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(rater.estimate(ids))
                 if not llm.is_configured(llm.load_settings(), "rate"):
                     return self._error("Choose an AI for ratings in Settings → AI first")
-                return self._queued(JOB.start("rate", _label("Rate", ids), lambda: rater.run_rate(ids, should_stop=JOB.stop_requested), key=ids))
+                since = _utc_now()   # Retry, or a batch queued behind an overlapping one, skips videos rated after this
+                if ids is None and llm.night_settings(llm.load_settings())["on"]:   # name them, so long ones can wait
+                    ids = [v["video_id"] for v in storage.videos_for_rating()]
+                return self._queued_split("rate", "Rate", ids, lambda part: lambda: rater.run_rate(
+                    part, should_stop=JOB.stop_requested, done_since=since))
 
             if path == "/api/knowledge/build":
                 import knowledge
@@ -1269,8 +1368,9 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(summarizer.estimate(ids))
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
-                return self._queued(JOB.start("summarize", _label("Summarise", ids),
-                                              lambda: summarizer.run_summarize(ids, should_stop=JOB.stop_requested), key=ids))
+                since = _utc_now()   # as for Rate: Retry and overlapping batches skip videos summarised after this
+                return self._queued_split("summarize", "Summarise", ids, lambda part: lambda: summarizer.run_summarize(
+                    part, should_stop=JOB.stop_requested, done_since=since))
 
             if path == "/api/details/settings":
                 settings = llm.load_settings()
@@ -1377,6 +1477,15 @@ class Handler(BaseHTTPRequestHandler):
                 settings["show_descriptions"] = bool(body["show_descriptions"])
             if "local_only" in body:
                 settings["local_only"] = bool(body["local_only"])
+            if "auto_index" in body:
+                settings["auto_index"] = bool(body["auto_index"])
+            if "night" in body:
+                night = body["night"] if isinstance(body["night"], dict) else {}
+                minutes, start = night.get("minutes"), night.get("start")
+                if (not isinstance(minutes, int) or isinstance(minutes, bool) or not 10 <= minutes <= 1440
+                        or not isinstance(start, str) or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", start)):
+                    return self._error("night needs on, minutes (10 to 1440) and start (HH:MM)")
+                settings["night"] = {"on": bool(night.get("on")), "minutes": minutes, "start": start}
             if body.get("asr_model") in ("auto", "large-v3-turbo", "small", "medium", "distil-large-v3"):
                 settings["asr_model"] = body["asr_model"]
             if isinstance(body.get("vision_model"), str) and re.fullmatch(r"[\w.\-/:]*", body["vision_model"]):

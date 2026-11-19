@@ -336,6 +336,38 @@
         }
       }
     },
+    "/api/job/run-now": {
+      "post": {
+        "tags": ["Jobs"],
+        "summary": "Let a task waiting for its start time (night queue) run as soon as its lane is free",
+        "operationId": "runJobNow",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "integer", "description": "ID of a queued task that has not_before"}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The task no longer waits",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
     "/api/job/cancel": {
       "post": {
         "tags": ["Jobs"],
@@ -1907,6 +1939,38 @@
         }
       }
     },
+    "/api/videos/remove": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Queue removing videos from YourTube with their notes, transcripts, slides, ratings, summaries and search data (never from YouTube); a playlist sync won't add them again, adding one by its link does",
+        "operationId": "removeVideos",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ids": {"type": "array", "items": {"type": "string"}, "minItems": 1}
+                },
+                "required": ["ids"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Removal job queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
     "/api/videos/update": {
       "post": {
         "tags": ["Videos"],
@@ -2651,6 +2715,32 @@
         }
       }
     },
+    "/api/ai/usage": {
+      "get": {
+        "tags": ["AI"],
+        "summary": "Cloud AI use (calls, tokens, approximate cost) today and over the last 30 days, per task, provider and model",
+        "operationId": "getAiUsage",
+        "responses": {
+          "200": {
+            "description": "Usage rows, most tokens first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "today": {"type": "array", "items": {"$ref": "#/components/schemas/AiUsageRow"}},
+                    "days30": {"type": "array", "items": {"$ref": "#/components/schemas/AiUsageRow"}}
+                  },
+                  "required": ["today", "days30"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
     "/api/ai/settings": {
       "post": {
         "tags": ["AI"],
@@ -2671,6 +2761,17 @@
                   "helpers": {"type": "object"},
                   "auto_after_sync": {"type": "boolean"},
                   "show_descriptions": {"type": "boolean"},
+                  "auto_index": {"type": "boolean", "description": "Update the meaning index after every sync, details, transcription, slide reading, rating and summary task (default false: update on request)"},
+                  "night": {
+                    "type": "object",
+                    "description": "Night queue: Rate and Summarise of videos longer than minutes wait for start (local time)",
+                    "properties": {
+                      "on": {"type": "boolean"},
+                      "minutes": {"type": "integer", "minimum": 10, "maximum": 1440},
+                      "start": {"type": "string", "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"}
+                    },
+                    "required": ["on", "minutes", "start"]
+                  },
                   "local_only": {"type": "boolean"},
                   "asr_model": {"type": "string"},
                   "vision_model": {"type": "string"},
@@ -3085,6 +3186,21 @@
       }
     },
     "schemas": {
+      "AiUsageRow": {
+        "type": "object",
+        "properties": {
+          "task": {"type": "string", "description": "categorize, rate, summarize, ask, interests, transcribe, slides, embed or default"},
+          "provider": {"type": "string"},
+          "model": {"type": "string"},
+          "calls": {"type": "integer"},
+          "tokens_in": {"type": "integer"},
+          "tokens_out": {"type": "integer"},
+          "cost": {"type": "number", "description": "Approximate USD of the calls with a known price"},
+          "unpriced": {"type": "integer", "description": "Calls whose model has no price in the table"},
+          "estimated": {"type": "integer", "description": "Calls whose tokens were estimated from the text length"}
+        },
+        "required": ["task", "provider", "model", "calls", "tokens_in", "tokens_out", "cost", "unpriced", "estimated"]
+      },
       "Error": {
         "type": "object",
         "properties": {

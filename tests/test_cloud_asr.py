@@ -85,3 +85,16 @@ class CloudASRTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UsageRecordTest(unittest.TestCase):
+    def test_transcription_is_priced_per_audio_hour(self):
+        with mock.patch("llm.record_usage") as rec:
+            cloud_asr._record("groq", "whisper-large-v3-turbo", {"duration": 1800, "segments": []})
+            cloud_asr._record("gemini", "gemini-2.5-flash", {"usageMetadata": {
+                "promptTokenCount": 19300, "candidatesTokenCount": 900,
+                "promptTokensDetails": [{"modality": "TEXT", "tokenCount": 100}, {"modality": "AUDIO", "tokenCount": 19200}]}})
+        groq, gemini = rec.call_args_list
+        self.assertAlmostEqual(groq.kwargs["cost"], 0.02)                 # half an hour at $0.04
+        self.assertEqual(gemini.args[3:5], (19300, 900))
+        self.assertAlmostEqual(gemini.kwargs["cost"], 600 / 3600 * 0.09)  # 19,200 audio tokens = 600 s

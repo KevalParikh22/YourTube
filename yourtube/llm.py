@@ -15,6 +15,8 @@ import os
 import re
 import time
 import json
+import threading
+import contextvars
 import base64
 import urllib.request
 import urllib.error
@@ -131,6 +133,10 @@ TIMEOUT = 300  # local models can be slow on a large batch
 class LLMError(Exception):
     """A provider call failed in a way worth showing to the user."""
 
+class QuotaError(LLMError):
+    """The service's daily limit is used up: waiting minutes won't help, so a batch stops instead of trying each video."""
+    ends_worker = True   # parallel.share: this worker stops at once and its videos go to the other AI
+
 
 # --- settings ----------------------------------------------------------------
 
@@ -157,6 +163,8 @@ def default_settings() -> Dict[str, Any]:
         "embed_model": "qwen3-embedding:0.6b",   # Ollama embedding model for meaning-based search (Phase 2)
         "use_descriptions": True, # search video descriptions and send them to the AI (they are fetched either way)
         "show_descriptions": False,
+        "auto_index": False,      # update the meaning index after every sync/details/AI task; off: Update index on click
+        "night": {"on": False, "minutes": 90, "start": "01:00"},   # Rate/Summarise of longer videos wait for this time
         "rating_formula": {},     # overrides of rater.DEFAULT_FORMULA (weights, interest penalty and bonus)
     }
 
@@ -220,6 +228,10 @@ def _api_key(provider: str, cfg: Dict[str, Any]) -> str:
     env = PROVIDERS[provider].get("env")
     return (cfg.get("api_key") or "").strip() or (os.environ.get(env, "") if env else "")
 
+def night_settings(settings: Dict[str, Any]) -> Dict[str, Any]:
+    """The night queue settings with defaults filled in: {'on', 'minutes' (longer videos wait), 'start' ('HH:MM')}."""
+    return {**default_settings()["night"], **(settings.get("night") or {})}
+
 def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> Dict[str, Any]:
     """Settings safe to send to the browser (keys are replaced by where they come from), as seen from one library."""
     settings = for_library(settings, library)
@@ -261,6 +273,8 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
         "embed_model": settings.get("embed_model") or "qwen3-embedding:0.6b",
         "use_descriptions": settings.get("use_descriptions", True) is not False,
         "show_descriptions": bool(settings.get("show_descriptions", False)),
+        "auto_index": bool(settings.get("auto_index", False)),
+        "night": night_settings(settings),
         "rating_formula": settings.get("rating_formula") or {},
         "ready": is_configured(settings),
         "ready_for": {t: is_configured(settings, t) for t in TASKS},
@@ -407,6 +421,70 @@ def estimate_cost(settings: Dict[str, Any], task: str, tokens_in: int, tokens_ou
     return round(tokens_in / 1e6 * price[0] + tokens_out / 1e6 * price[1], 4)
 
 
+# --- usage tracking --------------------------------------------------------------
+
+_CALL = threading.local()   # the tokens the provider call that just returned on this thread reported
+_RUN: contextvars.ContextVar = contextvars.ContextVar("ai_run_usage", default=None)   # totals of the running task
+_RUN_LOCK = threading.Lock()
+
+def _reported(tokens_in: Any, tokens_out: Any) -> None:
+    """Called by a provider with the token counts from its reply."""
+    _CALL.last = (int(tokens_in or 0), int(tokens_out or 0))
+
+def price_of(provider: str, model: str, tokens_in: int, tokens_out: int) -> Optional[float]:
+    """Approximate USD from PRICES (text) or MEDIA_PRICES (embeddings, per 1M tokens in); None when unknown."""
+    text = PRICES.get(model)
+    if text:
+        return round(tokens_in / 1e6 * text[0] + tokens_out / 1e6 * text[1], 6)
+    per_m = MEDIA_PRICES.get((provider, model))
+    return round(tokens_in / 1e6 * per_m, 6) if per_m is not None else None
+
+def record_usage(task: str, provider: str, model: str, tokens_in: int, tokens_out: int,
+                 cost: Optional[float] = None, exact: bool = True) -> None:
+    """
+    Saves one cloud AI call (storage.ai_usage) and adds it to the running task's totals (start_run). Calls to a
+    model on this computer are free and not recorded. Never raises: a missing usage row must not fail the AI call.
+    """
+    if PROVIDERS.get(provider, {}).get("local"):
+        return
+    if cost is None:
+        cost = price_of(provider, model, tokens_in, tokens_out)
+    try:
+        import storage
+        storage.record_usage(task, provider, model, tokens_in, tokens_out, cost, exact)
+    except Exception:
+        import applog
+        applog.get("llm").exception("Could not save AI usage")
+    run = _RUN.get()
+    if run is not None:
+        with _RUN_LOCK:
+            run["calls"] += 1
+            run["tokens_in"] += tokens_in
+            run["tokens_out"] += tokens_out
+            run["cost"] += cost or 0
+            run["unpriced"] += cost is None
+            run["estimated"] += not exact
+            run["models"].add(model)
+
+def start_run() -> Dict[str, Any]:
+    """Starts counting this task's cloud AI use; helper threads started with copy_context() add to the same totals."""
+    run = {"calls": 0, "tokens_in": 0, "tokens_out": 0, "cost": 0.0, "unpriced": 0, "estimated": 0, "models": set()}
+    _RUN.set(run)
+    return run
+
+def run_usage_line(run: Dict[str, Any]) -> str:
+    """'AI use: 12 cloud calls, 48.2k tokens in, 3.1k out (model), about $0.02' or '' when nothing was sent."""
+    if not run["calls"]:
+        return ""
+    k = lambda n: f"{n / 1e6:.2f}M" if n >= 1e6 else f"{n / 1e3:.1f}k" if n >= 1e3 else str(n)
+    approx = "about " if run["estimated"] else ""
+    cost = (f", price unknown for {', '.join(sorted(run['models']))}" if run["unpriced"] == run["calls"]
+            else (", under $0.01" if 0 < run["cost"] < 0.01 else f", about ${run['cost']:.2f}")
+            + (" (some calls unpriced)" if run["unpriced"] else ""))
+    return (f"AI use: {run['calls']} cloud call{'' if run['calls'] == 1 else 's'}, {approx}{k(run['tokens_in'])} tokens in, "
+            f"{approx}{k(run['tokens_out'])} out{cost}.")
+
+
 # --- HTTP helper ---------------------------------------------------------------
 
 def _post_json(url: str, body: Dict[str, Any], headers: Dict[str, str], timeout: int = TIMEOUT) -> Dict[str, Any]:
@@ -428,16 +506,50 @@ def _wait_for(e: urllib.error.HTTPError, body: str, attempt: int) -> Optional[fl
     seconds = float(hint) if hint and hint.replace(".", "", 1).isdigit() else float(found.group(1)) if found else 10 * 2 ** attempt
     return min(seconds + 1, 90)
 
+# Pacing: every task and helper thread calling one endpoint (URL without query; for Gemini that is per model, like
+# its limits) shares one gap between calls. It starts at 0, doubles on each 429 and shrinks again while calls succeed,
+# so a batch settles just under the service's per-minute limit instead of hitting it over and over.
+# shortcut: learned per run of the dashboard, not saved; a setting per provider would let paid tiers skip the warm-up
+_PACE: Dict[str, Dict[str, float]] = {}
+_PACE_LOCK = threading.Lock()
+PACE_MIN, PACE_MAX = 4.0, 60.0   # first gap after a 429 (Gemini free tier: 15 calls a minute) and the longest
+
+def _wait_turn(service: str) -> None:
+    with _PACE_LOCK:
+        p = _PACE.setdefault(service, {"gap": 0.0, "next": 0.0})
+        now = time.monotonic()
+        start = max(now, p["next"])
+        p["next"] = start + p["gap"]
+    if start > now:
+        time.sleep(start - now)
+
+def _pace_after(service: str, limited: bool) -> None:
+    with _PACE_LOCK:
+        p = _PACE.setdefault(service, {"gap": 0.0, "next": 0.0})
+        old = p["gap"]
+        p["gap"] = min(max(old * 2, PACE_MIN), PACE_MAX) if limited else (old * 0.95 if old > 1 else 0.0)
+    if limited and p["gap"] != old:
+        print(f"   Slowing down to one request every {p['gap']:.0f} s to stay under this AI's rate limit.")
+
 def _open(req: urllib.request.Request, timeout: int) -> Dict[str, Any]:
+    service = req.full_url.split("?")[0]
     for attempt in range(RETRIES + 1):
+        _wait_turn(service)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                return json.loads(r.read().decode("utf-8"))
+                data = json.loads(r.read().decode("utf-8"))
+            _pace_after(service, False)
+            return data
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace")
             wait = _wait_for(e, body, attempt)
             if wait is None:
-                raise LLMError(f"HTTP {e.code} from {req.full_url.split('?')[0]}: {body[:300]}") from None
+                if e.code == 429 and re.search(r"per ?day|PerDay|daily", body, re.I):
+                    raise QuotaError(f"The daily limit of {service.split('/')[2]} is used up (HTTP 429). "
+                                     "It resets tomorrow (Gemini: midnight Pacific time), or use another AI.") from None
+                raise LLMError(f"HTTP {e.code} from {service}: {body[:300]}") from None
+            if e.code == 429:
+                _pace_after(service, True)
             print(f"   The AI service is busy or rate-limited (HTTP {e.code}); trying again in {wait:.0f} s.")
             time.sleep(wait)
         except urllib.error.URLError as e:
@@ -477,6 +589,10 @@ def _anthropic(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
         raise LLMError(f"Claude API error {e.status_code}: {e.message}") from None
     except anthropic.APIConnectionError:
         raise LLMError("Could not reach the Claude API. Check your connection.") from None
+    usage = getattr(response, "usage", None)
+    if usage is not None:   # cache reads and writes are billed input tokens too
+        _reported(sum(getattr(usage, f, 0) or 0 for f in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")),
+                  getattr(usage, "output_tokens", 0))
     if response.stop_reason == "refusal":
         raise LLMError("Claude declined this request")
     if response.stop_reason == "max_tokens":
@@ -490,6 +606,7 @@ def _gemini(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
     }, {"x-goog-api-key": key})
+    _gemini_usage(data)
     try:
         parts = data["candidates"][0]["content"]["parts"]
     except (KeyError, IndexError):
@@ -497,12 +614,23 @@ def _gemini(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
         raise LLMError(f"Gemini returned no answer ({reason})") from None
     return "".join(p.get("text", "") for p in parts)
 
+def _gemini_usage(data: Dict[str, Any]) -> None:
+    u = data.get("usageMetadata") if isinstance(data, dict) else None
+    if isinstance(u, dict):   # thinking tokens are billed as output
+        _reported(u.get("promptTokenCount"), (u.get("candidatesTokenCount") or 0) + (u.get("thoughtsTokenCount") or 0))
+
+def _openai_usage(data: Dict[str, Any]) -> None:
+    u = data.get("usage") if isinstance(data, dict) else None
+    if isinstance(u, dict):
+        _reported(u.get("prompt_tokens"), u.get("completion_tokens"))
+
 def _openai(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     data = _post_json(cfg["base_url"].rstrip("/") + "/chat/completions", {
         "model": cfg["model"], "temperature": 0,
         "messages": [{"role": "system", "content": system}, {"role": "user", "content": prompt}],
     }, headers)
+    _openai_usage(data)
     try:
         return data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError):
@@ -518,6 +646,14 @@ def see(settings: Dict[str, Any], provider: str, image_bytes: bytes, prompt: str
         raise LLMError(f"{PROVIDERS[provider]['label']} is not configured")
     encoded = base64.b64encode(image_bytes).decode("ascii")
     kind = PROVIDERS[provider]["kind"]
+    _CALL.last = None
+    try:
+        return _see(kind, cfg, key, encoded, prompt)
+    finally:   # recorded even when the reply can't be read: the tokens were billed
+        if _CALL.last:
+            record_usage("slides", provider, cfg["model"], *_CALL.last)
+
+def _see(kind: str, cfg: Dict[str, Any], key: str, encoded: str, prompt: str) -> str:
     if kind == "anthropic":
         data = _post_json("https://api.anthropic.com/v1/messages", {
             "model": cfg["model"], "max_tokens": 2048, "temperature": 0,
@@ -526,6 +662,9 @@ def see(settings: Dict[str, Any], provider: str, image_bytes: bytes, prompt: str
                 {"type": "text", "text": prompt},
             ]}],
         }, {"x-api-key": key, "anthropic-version": "2023-06-01"})
+        u = data.get("usage") if isinstance(data, dict) else None
+        if isinstance(u, dict):
+            _reported(u.get("input_tokens"), u.get("output_tokens"))
         try:
             return "".join(x.get("text", "") for x in data["content"] if x.get("type") == "text")
         except (KeyError, TypeError):
@@ -536,6 +675,7 @@ def see(settings: Dict[str, Any], provider: str, image_bytes: bytes, prompt: str
             {"inline_data": {"mime_type": "image/jpeg", "data": encoded}}, {"text": prompt},
         ]}], "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}},
                            {"x-goog-api-key": key})
+        _gemini_usage(data)
         try:
             return "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"])
         except (KeyError, IndexError, TypeError):
@@ -547,6 +687,7 @@ def see(settings: Dict[str, Any], provider: str, image_bytes: bytes, prompt: str
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{encoded}"}},
         ]}],
     }, {"Authorization": f"Bearer {key}"})
+    _openai_usage(data)
     try:
         return data["choices"][0]["message"]["content"] or ""
     except (KeyError, IndexError, TypeError):
@@ -596,7 +737,18 @@ def make_completer(settings: Dict[str, Any], task: Optional[str] = None) -> Call
     if settings.get("local_only") and not PROVIDERS[provider].get("local"):
         raise LLMError(f"Local only is on: {PROVIDERS[provider]['label']} is a cloud service. Choose a local model.")
     call = _CALLS[PROVIDERS[provider]["kind"]]
-    return lambda system, prompt: call(cfg, key, system, prompt)
+
+    def complete(system: str, prompt: str) -> str:
+        _CALL.last, text = None, None
+        try:
+            text = call(cfg, key, system, prompt)
+            return text
+        finally:   # also when the reply was unusable but its tokens were reported (billed)
+            if _CALL.last or text is not None:
+                # a host that reports no usage: about 4 characters per token, marked as estimated
+                used = _CALL.last or ((len(system) + len(prompt)) // 4, len(text) // 4)
+                record_usage(task or "default", provider, cfg["model"], *used, exact=bool(_CALL.last))
+    return complete
 
 def list_models(provider: str, settings: Dict[str, Any]) -> List[str]:
     """Models a provider offers. Queried live for OpenAI-compatible and local servers."""
