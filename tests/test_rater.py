@@ -18,6 +18,13 @@ SEGS = [{"start": float(i * 10), "text": f"line {i}"} for i in range(12)]
 
 
 class PromptTest(unittest.TestCase):
+    def test_rating_prompt_caps_and_samples_long_transcripts(self):
+        self.assertEqual(rater.RATE_CHAR_BUDGET, 48_000)
+        segments = [{"start": i * 10, "text": "x" * 1000} for i in range(200)]
+        prompt, _ = rater.build_prompt(VIDEO, segments, {})
+        self.assertLess(len(prompt), rater.RATE_CHAR_BUDGET + 6_000)
+        self.assertIn("evenly sampled", prompt)
+
     def test_blocks_and_sampling(self):
         blocks = rater.transcript_blocks(SEGS, block=30)
         self.assertEqual([b["start"] for b in blocks], [0, 30, 60, 90])
@@ -151,6 +158,29 @@ class RunRateTest(unittest.TestCase):
         est = rater.estimate(["ra", "rb"])
         self.assertEqual((est["videos"], est["with_transcript"], est["cost"]), (2, 1, 0.0))  # local = free
         self.assertGreater(est["tokens_in"], 100)
+
+    def test_estimate_uses_capped_rating_prompt(self):
+        original = rater.build_prompt
+        budgets = []
+        def capture(video, segments, settings, budget=rater.RATE_CHAR_BUDGET, **kwargs):
+            budgets.append(budget)
+            return original(video, segments, settings, budget=budget, **kwargs)
+        with mock.patch("llm.context_chars", return_value=200_000), mock.patch("rater.build_prompt", side_effect=capture):
+            rater.estimate(["ra"])
+        self.assertEqual(budgets, [rater.RATE_CHAR_BUDGET])
+
+    def test_cloud_rating_budget_is_capped(self):
+        s = llm.load_settings()
+        s.update(provider="openai", tasks={"rate": None})
+        s["providers"]["openai"]["model"] = "gpt-test"
+        llm.save_settings(s)
+        result = {"verdict": "watch", "score": 8}
+        with (mock.patch("llm.make_completer", return_value=lambda *_: "{}"),
+              mock.patch("llm.context_chars", return_value=200_000),
+              mock.patch("rater._rate_one", return_value=result) as rate_one,
+              contextlib.redirect_stdout(io.StringIO())):
+            self.assertTrue(rater.run_rate(["ra"]))
+        self.assertLessEqual(rate_one.call_args.args[2], rater.RATE_CHAR_BUDGET)
 
 
 class CostTest(unittest.TestCase):

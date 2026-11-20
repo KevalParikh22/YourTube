@@ -19,6 +19,7 @@ from llm import LLMError, parse_json
 VERDICTS = ("watch", "skim", "skip")
 BLOCK_SECONDS = 30            # transcript lines are merged into blocks this long
 CHAR_BUDGET_REMOTE = 200_000  # about 50k tokens of transcript
+RATE_CHAR_BUDGET = 48_000   # ratings need the gist, not every word: ~12k tokens, a ~50 min talk in full
 OUTPUT_TOKENS = 1100          # rough output per rating (breakdown, minutes, takeaways), for cost estimates
 # The overall score is computed in code from four factor scores, so every number can be explained:
 #   score = quality - penalty * clamp((FIT_OK - fit) / FIT_SPAN, 0, 1) + (bonus if fit >= FIT_BONUS)
@@ -73,7 +74,7 @@ _FILLER = re.compile(r"\b(intro|introduction|introductory|fluff|filler|sponsor|o
 
 
 def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
-                 budget: int = CHAR_BUDGET_REMOTE, today: Optional[dt.date] = None) -> (str, str):
+                 budget: int = RATE_CHAR_BUDGET, today: Optional[dt.date] = None) -> (str, str):
     """Returns (prompt, basis) where basis is 'transcript' or 'metadata'."""
     today = today or dt.date.today()
     language = settings.get("language") or "English"
@@ -289,7 +290,7 @@ def validate(raw: Any, duration: int, formula: Optional[Dict[str, float]] = None
 
 
 def rate_video(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
-               complete: Callable[[str, str], str], budget: int = CHAR_BUDGET_REMOTE) -> Dict[str, Any]:
+               complete: Callable[[str, str], str], budget: int = RATE_CHAR_BUDGET) -> Dict[str, Any]:
     prompt, basis = build_prompt(video, segments, settings, budget=budget)
     rating = validate(parse_json(complete(SYSTEM, prompt)), video.get('duration_seconds') or 0, formula_of(settings))
     return {**rating, "basis": basis, "language": settings.get("language") or "English"}
@@ -328,7 +329,7 @@ def estimate(video_ids: Optional[List[str]] = None) -> Dict[str, Any]:
 
     settings = llm.load_settings()
     context = _contexts(settings)
-    budget = llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE)
+    budget = min(llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE), RATE_CHAR_BUDGET)
     videos = [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
     chars = with_transcript = 0
     for v in videos:
@@ -383,7 +384,7 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     except LLMError as e:
         print(f"Error: {e}")
         return False
-    budget, model = llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE), llm.model_for(settings, "rate")
+    budget, model = min(llm.context_chars(settings, "rate", CHAR_BUDGET_REMOTE), RATE_CHAR_BUDGET), llm.model_for(settings, "rate")
     no_transcript = sum(1 for v in videos if v.get('details_status') != 'done')
     if no_transcript:
         print(f"   {no_transcript} have no transcript, so they are rated from title and description only. "
@@ -423,7 +424,7 @@ def run_rate(video_ids: Optional[List[str]] = None, should_stop: Callable[[], bo
     except LLMError as e:
         print(f"Error: {e}")
         return False
-    helper_budget = llm.context_chars(helper_settings, "rate", CHAR_BUDGET_REMOTE)
+    helper_budget = min(llm.context_chars(helper_settings, "rate", CHAR_BUDGET_REMOTE), RATE_CHAR_BUDGET)
     helper_model = llm.model_for(helper_settings, "rate")
 
     main_label = llm.describe(settings, "rate")
