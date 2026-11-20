@@ -31,3 +31,21 @@ docs/Phase-0-Research-and-Improvements.md
 docs/MANUAL-TESTS.md
 docs/future/
 spikes/
+
+# >>> conductor: local files, not committed (conductor init --share keeps them in git)
+.conductor/
+docs/plan/
+.claude/commands/conduct-*
+.agents/skills/conduct-*/
+.claude/rules/conductor-*
+.agents/rules/conductor-*
+.claude/agents/conductor-*
+.agents/agents/conductor-*
+.codex/agents/conductor-*
+.opencode/agents/conductor-*
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+HANDOFF.md
+.mcp.json
+# <<< conductor

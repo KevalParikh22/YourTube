@@ -2,8 +2,8 @@
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
 const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched', skipped: 'Skipped' };
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
-const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['transcript', 'Transcript pending'], ['gone', 'Not in a playlist']];
-const OPTIONAL_VIEWS = ['skipped', 'suggested', 'transcript', 'gone'];  // only shown when they have videos
+const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['transcript', 'Transcript pending'], ['has_transcript', 'Has transcript'], ['unsummarised', 'Not summarised'], ['summarised', 'Summarised'], ['unindexed', 'Not in meaning index'], ['gone', 'Not in a playlist']];
+const OPTIONAL_VIEWS = ['skipped', 'suggested', 'transcript', 'has_transcript', 'unsummarised', 'summarised', 'unindexed', 'gone'];  // only shown when they have videos
 const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories']];
 const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
 const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
@@ -260,6 +260,7 @@ function renderView() {
   }
   else if (r === 'knowledge') {
     const cat = routeParam('category');
+    if ((S.knowledge.scope || null) !== routeParam('channel')) S.knowledge = { list: null, pages: {}, loadingList: false, loadingPage: null, scope: routeParam('channel') };
     if (cat) {
       v.innerHTML = viewKnowledgePage(cat);
       if (!S.knowledge.pages[cat] && S.knowledge.loadingPage !== cat) loadKnowledgePage(cat);
@@ -296,6 +297,10 @@ function statusFilter(v, status, src) {
     case 'gone': return isGone(v, src);
     case 'suggested': return !!v.suggestion;
     case 'transcript': return needsDetails(v);
+    case 'has_transcript': return hasTranscript(v);
+    case 'summarised': return isSummarised(v.video_id);
+    case 'unsummarised': return hasTranscript(v) && !isSummarised(v.video_id);
+    case 'unindexed': return !isIndexed(v.video_id);
     default: return true;
   }
 }
@@ -392,7 +397,9 @@ function row(v) {
   const d = v.duration_seconds || 0;
   const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : `<span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span>`,
     isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '',
-    isSummarised(v.video_id) ? `<span class="sum-mark" title="Summarised: open it to read the summary instead of watching"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7l3 3v8H3z M10 2.5v3h3 M5.5 8h5 M5.5 10.5h5"/></svg>summarised</span>` : '']
+    isSummarised(v.video_id) ? `<span class="sum-mark" title="Summarised: open it to read the summary instead of watching"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7l3 3v8H3z M10 2.5v3h3 M5.5 8h5 M5.5 10.5h5"/></svg>summarised</span>` : '',
+    hasTranscript(v) ? '<span class="tr-mark" title="Transcript ready: search, rate and summarise use it">transcript</span>' : '',
+    isIndexed(v.video_id) ? '<span class="ix-mark" title="In the meaning index: found by meaning-based search and Ask">indexed</span>' : '']
     .filter(Boolean).join(' · ');
   return `<li class="row ${isDone(v) ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
     <input type="checkbox" class="pick" data-act="pick" data-id="${esc(v.video_id)}" ${S.sel.has(v.video_id) ? 'checked' : ''} aria-label="Select">
@@ -471,6 +478,11 @@ function viewHome() {
   const picks = videos().filter(v => v.status === 'unwatched' && v.rating?.verdict === 'watch')
     .sort((a, b) => b.rating.score - a.rating.score).slice(0, 5);
   const suggestions = videos().filter(v => v.suggestion).length;
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const newFromChannels = videos().filter(v => v.status === 'unwatched'
+    && (v.sources || []).some(s => isChannel(s.id) && !s.removed)
+    && v.added_at && new Date(v.added_at.replace(' ', 'T') + 'Z').getTime() >= weekAgo)
+    .sort((a, b) => new Date(b.added_at.replace(' ', 'T') + 'Z') - new Date(a.added_at.replace(' ', 'T') + 'Z')).slice(0, 5);
   const unrated = videos().filter(v => !v.rating && !isDone(v)).length;   // what Rate would rate
   const failedSync = S.data.job?.recent?.find(j => j.kind === 'sync' && !j.ok && !j.stopped && !j.dismissed);
   const knowledgeStale = Array.isArray(S.knowledge.list) ? S.knowledge.list.filter(c => c.page === 'stale').length : 0;
@@ -502,6 +514,8 @@ function viewHome() {
   <section class="section home-card"><h2 class="h">Continue watching</h2>
     ${inProgress.length ? `<ul class="rows">${inProgress.map(row).join('')}</ul>` : '<p class="note">Nothing in progress.</p>'}
   </section>
+
+  ${newFromChannels.length ? `<section class="section home-card"><h2 class="h">New from followed channels</h2><ul class="rows">${newFromChannels.map(row).join('')}</ul></section>` : ''}
 
   ${(S.data.courses || []).length ? `<section class="section home-card"><h2 class="h">Courses</h2><ul class="rows">${S.data.courses.filter(c => byId(c.video_id)).map(c =>
     `<li><a href="#/course?id=${encodeURIComponent(c.video_id)}">${esc(byId(c.video_id).title)}</a> <span class="faint">· ${c.done} of ${plural(c.parts, 'part')} watched · ${c.per_week} a week</span></li>`).join('')}</ul></section>` : ''}
@@ -558,6 +572,8 @@ async function statusUndo() {
   toast('Undone');
 }
 const isSummarised = id => (S.data.summarised || []).includes(id);
+const isIndexed = id => (S.data.indexed || []).includes(id);
+const hasTranscript = v => (v.details?.sources || []).length > 0;   // transcript_segments saved (captions or local)
 // Bulk Rate/Summarise of a selection: leave out videos that already have one (said in the run's confirm),
 // or ask before redoing them when all of them have one. Returns { ids, note } or null when cancelled.
 function newOnly(ids, has, what, again) {
@@ -697,7 +713,7 @@ const CHANNEL_AUTO = [['summarize', 'Rate and summarise'], ['rate', 'Rate'], ['d
 async function loadChannels() {
   S.channels = 'loading';
   try { S.channels = await api('/api/channels'); } catch (e) { S.channels = { error: e.message, channels: [] }; }
-  if (route() === 'sources') refresh();
+  if (['sources', 'knowledge'].includes(route())) refresh();
   if (S.drawer) renderDrawer();
 }
 const followedTitle = name => Array.isArray(S.channels?.channels) && S.channels.channels.some(c => c.title === name);
@@ -714,7 +730,11 @@ function viewChannels() {
       <td class="r" data-label="Videos">${c.videos}</td>
       <td data-label="New videos">${auto(c.auto, `data-change="channel-auto" data-id="${esc(c.id)}" aria-label="What happens to new videos from ${esc(c.title)}"`)}</td>
       <td class="muted" data-label="Last checked">${c.last_checked ? esc(fmtRelTime(c.last_checked)) : 'Not yet'}</td>
-      <td data-label="Actions"><button class="btn-text" data-act="channel-unfollow" data-id="${esc(c.id)}" data-title="${esc(c.title)}">Unfollow</button></td></tr>`).join('')}</tbody></table></div>`
+      <td data-label="Actions"><span style="display:inline-flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-text" data-act="channel-import" data-id="${esc(c.id)}" data-title="${esc(c.title)}" data-job-btn title="Add all of its past videos and summarise them for its knowledge pages">Import all</button>
+        ${c.videos ? `<a class="btn-text" href="#/knowledge?channel=${encodeURIComponent(c.id)}">Knowledge</a>
+        <button class="btn-text" data-act="channel-ask" data-id="${esc(c.id)}">Ask</button>` : ''}
+        <button class="btn-text" data-act="channel-unfollow" data-id="${esc(c.id)}" data-title="${esc(c.title)}">Unfollow</button></span></td></tr>`).join('')}</tbody></table></div>`
     : `<p class="note">No channels yet. Follow one below, or open a video and click Follow channel.</p>`;
   return `<section class="section card">${head}
     <p class="note">New uploads from these channels are added to your library by themselves${tip('Every few hours while the dashboard runs, YourTube reads the newest uploads of each channel (anonymously) and adds the new ones to a source named after the channel, then fetches their details and rates or summarises them as chosen. The videos already there when you follow are not added. Unfollowing keeps the videos.')}</p>
@@ -1417,11 +1437,24 @@ async function runAsk() {
 }
 
 /* ---------------- knowledge ---------------- */
+// Pages of the whole library, or of one followed channel (#/knowledge?channel=UC…, knowledge.page_key)
+const kScope = (sep = '&') => routeParam('channel') ? `${sep}channel=${encodeURIComponent(routeParam('channel'))}` : '';
+const kChannel = () => routeParam('channel') && (S.channels?.channels || []).find(c => c.id === routeParam('channel'));
 async function buildKnowledge(category) {
   try {
     const lib = S.lib || 1;
-    const res = await api('/api/knowledge/build', { category, library: lib });
+    const res = await api('/api/knowledge/build', { category, library: lib, channel: routeParam('channel') || undefined });
     await queued(res, `Knowledge page: ${category}`);
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+async function buildAllKnowledge() {
+  try {
+    const lib = S.lib || 1;
+    const res = await api('/api/knowledge/build-all', { library: lib, channel: routeParam('channel') || undefined });
+    await queued(res, 'Knowledge pages: build all');
   } catch (e) {
     toast(e.message, true);
   }
@@ -1432,7 +1465,7 @@ async function loadKnowledgeList() {
   S.knowledge.loadingList = true;
   try {
     const lib = S.lib || 1;
-    const res = await api(`/api/knowledge?library=${lib}`);
+    const res = await api(`/api/knowledge?library=${lib}${kScope()}`);
     S.knowledge.list = res.categories || [];
   } catch (e) {
     S.knowledge.list = { error: e.message };
@@ -1447,7 +1480,7 @@ async function loadKnowledgePage(cat) {
   S.knowledge.loadingPage = cat;
   try {
     const lib = S.lib || 1;
-    const res = await api(`/api/knowledge/page?library=${lib}&category=${encodeURIComponent(cat)}`);
+    const res = await api(`/api/knowledge/page?library=${lib}&category=${encodeURIComponent(cat)}${kScope()}`);
     S.knowledge.pages[cat] = res;
   } catch (e) {
     S.knowledge.pages[cat] = { error: e.message };
@@ -1461,12 +1494,18 @@ function viewKnowledgeList() {
   const lib = S.lib || 1;
   const list = S.knowledge.list;
   const ai = S.data.ai;
+  const buildAllCount = Array.isArray(list) ? list.filter(c => c.page === 'stale' || (c.page === 'none' && c.summarised >= 3)).length : 0;
   return `
   <section>
     <div class="eyebrow">Knowledge</div>
-    <h1 class="display">Knowledge base<em>Topic pages from your summaries</em></h1>
+    <h1 class="display">Knowledge base<em>${kChannel() ? `Topic pages from ${esc(kChannel().title)}` : 'Topic pages from your summaries'}</em></h1>
     <p class="lede">Study pages combining notes, minutes, and quotes across your videos, citing every moment.</p>
+    ${buildAllCount ? `<div class="actions"><button class="btn btn-dark" data-act="knowledge-build-all" ${!ai.ready_for.summarize ? 'disabled' : ''}>Build all (${buildAllCount})</button></div>` : ''}
     ${!S.lib ? `<div class="banner"><span>Knowledge pages belong to a single library. Showing pages for <b>${esc(libName(1) || 'Library 1')}</b>. Pick a specific library above to switch.</span></div>` : ''}
+    ${Array.isArray(S.channels?.channels) && S.channels.channels.length ? `<label class="field-label" style="max-width:360px">Pages from
+      <select data-change="knowledge-scope"><option value="">The whole library</option>
+      ${S.channels.channels.map(c => `<option value="${esc(c.id)}" ${routeParam('channel') === c.id ? 'selected' : ''}>Channel: ${esc(c.title)}</option>`).join('')}</select></label>`
+      : S.channels === undefined ? (loadChannels(), '') : ''}
     ${!ai.ready_for.summarize ? `<div class="banner"><span>Set up an AI for summaries in Settings to build knowledge pages.</span><a class="btn btn-sm" href="#/settings/routing">Set up AI</a></div>` : ''}
     <div id="job"></div>
   </section>
@@ -1499,7 +1538,7 @@ function viewKnowledgeList() {
               return `<tr>
                 <td data-label="Topic">
                   ${hasPage
-                    ? `<a href="#/knowledge?category=${encodeURIComponent(c.category)}" style="font-weight:600">${esc(c.category)}</a>`
+                    ? `<a href="#/knowledge?category=${encodeURIComponent(c.category)}${kScope()}" style="font-weight:600">${esc(c.category)}</a>`
                     : `<span style="font-weight:600">${esc(c.category)}</span>`}
                 </td>
                 <td data-label="Summaries" style="font-size:13.5px">${esc(sumText)}</td>
@@ -1507,7 +1546,7 @@ function viewKnowledgeList() {
                 <td class="r" data-label="Actions">
                   <div style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">
                     <button class="btn btn-sm" data-act="knowledge-summarize-five" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize || c.summarised >= c.videos ? 'disabled' : ''}>Summarise 5</button>
-                    ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}">Open</a>` : ''}
+                    ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}${kScope()}">Open</a>` : ''}
                     ${isStale ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Update knowledge page'}">Update</button>`
                       : isReady ? `<button class="btn btn-sm btn-text" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Rebuild knowledge page'}">Rebuild</button>`
                       : c.summarised >= 3 ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize ? 'disabled' : ''} title="Build knowledge page">Build</button>` : ''}
@@ -1527,7 +1566,7 @@ function viewKnowledgeList() {
 
 async function summarizeKnowledgeFive(category) {
   try {
-    const candidates = videos().filter(v => v.category === category && !isDone(v)).sort((a, b) => (a.status === 'unwatched' ? 0 : 1) - (b.status === 'unwatched' ? 0 : 1));
+    const ch = routeParam('channel'), candidates = videos().filter(v => v.category === category && !isDone(v) && (!ch || srcEntry(v, `_channel-${ch}`))).sort((a, b) => (a.status === 'unwatched' ? 0 : 1) - (b.status === 'unwatched' ? 0 : 1));
     const done = new Set(S.data.summarised || []);
     const selected = candidates.filter(v => !done.has(v.video_id)).slice(0, 5).map(v => v.video_id);
     if (!selected.length) { toast('No unsummarised unwatched videos in this category'); return; }
@@ -1539,12 +1578,12 @@ function viewKnowledgePage(cat) {
   const lib = S.lib || 1;
   const data = S.knowledge.pages[cat];
   const ai = S.data.ai;
-  const exportUrl = `/api/export/knowledge?library=${encodeURIComponent(lib)}&category=${encodeURIComponent(cat)}`;
+  const exportUrl = `/api/export/knowledge?library=${encodeURIComponent(lib)}&category=${encodeURIComponent(cat)}${kScope()}`;
 
   if (!data) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="note" style="margin-top:20px"><span class="spin" style="display:inline-block"></span> Loading page…</p>
@@ -1555,7 +1594,7 @@ function viewKnowledgePage(cat) {
   if (data.error) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="note warn-text" style="margin-top:20px">Could not load knowledge page: ${esc(data.error)}</p>
@@ -1566,7 +1605,7 @@ function viewKnowledgePage(cat) {
   if (!data.page) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="lede">Build a study page from this topic’s video summaries.</p>
@@ -1594,7 +1633,7 @@ function viewKnowledgePage(cat) {
   return `
   <section>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-      <a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a>
+      <a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a>
       <div style="display:flex;gap:8px;align-items:center">
         <a class="btn btn-sm" href="${esc(exportUrl)}" download>Export note</a>
         <button class="btn btn-sm ${isStale ? 'btn-dark' : ''}" data-act="knowledge-build" data-cat="${esc(cat)}" ${!ai.ready_for.summarize ? 'disabled' : ''} title="${isStale ? 'Update page with newest summaries' : 'Rebuild page'}">${isStale ? 'Update' : 'Rebuild'}</button>
@@ -1740,7 +1779,7 @@ function viewAI() {
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
-  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local)) + usageCard();
+  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local)) + usageCard() + `<section class="section card"><label class="field">Daily budget (USD)<input type="number" min="0" step="0.5" value="${ai.daily_cap ?? ''}" data-change="daily-cap" aria-label="Daily budget (USD)"></label></section>`;
   const media = ai.media_tasks || {};
   const pickMedia = (t, meta) => `<select id="media-${esc(t)}" data-media-task="${esc(t)}" aria-label="${esc(meta.label)} runs on" style="width:100%">
       ${meta.providers.map(k => { const p = ai.providers[k], ready = k === 'local' || p?.ready;
@@ -2227,6 +2266,7 @@ function renderDrawer() {
         <div class="kv-line">Notes save when you click away.</div></div>
       <div id="d-details">${drawerDetails(v)}</div>
       <div id="d-slides">${drawerSlides(v)}</div>
+      <div id="d-activity">${drawerActivity(v)}</div>
       <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
     </div>
   </aside>`;
@@ -2243,6 +2283,22 @@ function renderDrawer() {
     old.scrollTop = scroll;
   } else box.innerHTML = html;
   loadSummary(v.video_id);
+  loadActivity(v.video_id);
+}
+// What ran on the video (storage.video_activity), reloaded on every redraw so a finished task shows up
+const ACTIVITY_LABEL = { details: 'Details fetched', asr: 'Transcribed', visual: 'Slides read', rate: 'Rated', summarize: 'Summarised', index: 'Added to meaning index' };
+function drawerActivity(v) {
+  const rows = S.activity?.id === v.video_id ? S.activity.rows : null;
+  const cost = c => c == null ? '' : ` · ${c > 0 && c < 0.01 ? '<$0.01' : `$${c.toFixed(2)}`}`;
+  return `<details ${keepOpen('activity')}><summary>Activity${rows ? ` · ${plural(rows.length, 'step')}` : ''}</summary>
+    ${!rows ? '<div class="kv-line">Loading…</div>' : !rows.length ? '<div class="kv-line">Nothing has run on this video yet.</div>'
+      : `<ul class="activity">${rows.map(r => `<li class="${r.ok ? '' : 'failed'}"><time title="${esc(fmtFullDate(r.at))}">${fmtDate(r.at)}</time>
+          <span><b>${esc(ACTIVITY_LABEL[r.kind] || r.kind)}</b>${r.ok ? '' : ' · failed'}${r.model ? ` <span class="faint">· ${esc(r.model)}</span>` : ''}${r.tokens_in != null
+            ? ` <span class="faint">· ${tokens(r.tokens_in)} in, ${tokens(r.tokens_out)} out${cost(r.cost)}</span>` : ''}${r.note ? `<br><span class="faint">${esc(r.note)}</span>` : ''}</span></li>`).join('')}</ul>`}</details>`;
+}
+async function loadActivity(id) {
+  try { S.activity = { id, rows: (await api(`/api/video/activity?id=${encodeURIComponent(id)}`)).activity }; } catch (e) { return; }
+  if (S.drawer === id && $('#d-activity')) $('#d-activity').innerHTML = drawerActivity(byId(id));
 }
 function drawerRating(v) {
   const r = v.rating;
@@ -2592,6 +2648,20 @@ document.addEventListener('click', async e => {
       if (!confirm(`Stop following ${el.dataset.title}? Its videos already in your library stay.`)) break;
       try { await api('/api/channels/unfollow', { id: el.dataset.id }); await loadChannels(); toast(`Unfollowed ${el.dataset.title}`); } catch (err) { toast(err.message, true); }
       break;
+    case 'channel-import': {
+      const old = el.textContent; el.disabled = true; el.textContent = 'Counting videos…';
+      try {
+        const e = await api('/api/channels/estimate', { id: el.dataset.id }), sm = e.summarize;
+        const cost = !e.to_summarize ? 'nothing to summarise' : sm.cost == null ? 'cost unknown for this model' : sm.cost === 0 ? 'free (local model)' : `about $${sm.cost < 0.01 ? '0.01 or less' : sm.cost.toFixed(2)}`;
+        const when = !e.to_summarize ? '' : !sm.ready ? '\nNo AI is set up for summaries yet, so they wait for you.'
+          : e.night ? `\nThat is a big channel, so the summaries wait for the night queue (from ${atTime(e.night_at)}).` : '';
+        if (confirm(`Import all of ${el.dataset.title}?\n\n${plural(e.videos, 'video')} (${e.hours} h), ${e.new} not in your library yet.\n`
+          + `Details and transcripts are fetched for all, then ${plural(e.to_summarize, 'video')} summarised with ${sm.uses}: ${cost}.${when}`))
+          await queued(await api('/api/channels/import', { id: el.dataset.id }), `Importing ${el.dataset.title}`);
+      } catch (err) { toast(err.message, true); }
+      el.disabled = false; el.textContent = old; break;
+    }
+    case 'channel-ask': S.ask.src = `_channel-${el.dataset.id}`; S.ask.cat = ''; S.ask.video = null; S.ask.thread = []; location.hash = '#/ask'; break;
     case 'channel-check':
       try { await queued(await api('/api/channels/check', {}), 'Checking followed channels'); } catch (err) { toast(err.message, true); }
       break;
@@ -2755,6 +2825,7 @@ document.addEventListener('click', async e => {
     case 'summarize-sel': { const r = newOnly([...S.sel], isSummarised, 'summarised', 'Summarise'); if (r) startSummary(r.ids, r.note); break; }
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
+    case 'knowledge-build-all': buildAllKnowledge(); break;
     case 'knowledge-summarize-five': summarizeKnowledgeFive(el.dataset.cat); break;
     case 'details-fetch': case 'details-one': case 'details-these': {
       try {
@@ -3090,6 +3161,15 @@ document.addEventListener('change', async e => {
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
   if (ch === 'channel-auto') {
     try { await api('/api/channels/update', { id: el.dataset.id, auto: el.value }); toast('Saved'); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (ch === 'knowledge-scope') { location.hash = `#/knowledge${el.value ? `?channel=${encodeURIComponent(el.value)}` : ''}`; return; }
+  if (ch === 'daily-cap') {
+    const daily_cap = el.value === '' ? null : +el.value;
+    try {
+      S.data.ai = await saveAi({ daily_cap });
+      toast(daily_cap == null ? 'No daily budget' : `Daily budget: $${daily_cap}`);
+    } catch (err) { toast(err.message, true); }
     return;
   }
   if (ch === 'channel-hours') {

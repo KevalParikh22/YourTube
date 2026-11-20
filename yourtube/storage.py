@@ -12,9 +12,11 @@ Manual category assignments are protected by `videos.category_locked` and surviv
 import sqlite3
 import os
 import json
+import contextlib
+import contextvars
 import functools
 import threading
-from typing import List, Dict, Any, Optional, Callable, Iterable
+from typing import List, Dict, Any, Optional, Callable, Iterable, Set
 
 _DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get("YTKB_DB") or os.path.join(_DATA_DIR, "yt_kb.db")
@@ -339,6 +341,35 @@ def init_db(db_path: str = DB_PATH) -> None:
         cursor.execute("UPDATE ask_history SET thread_id = id WHERE thread_id IS NULL")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_ask_thread ON ask_history(thread_id)")
 
+        # What ran on each video (video_step, set_job, save_details): kind is the task (details, asr, visual, rate,
+        # summarize), note the error or outcome, tokens and cost the cloud AI calls made for it (NULL: unknown).
+        # A new table is filled once from what was saved before it existed.
+        new = not cursor.execute("SELECT 1 FROM sqlite_master WHERE name = 'video_activity'").fetchone()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS video_activity (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                video_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                ok INTEGER NOT NULL DEFAULT 1,
+                model TEXT,
+                note TEXT,
+                tokens_in INTEGER,
+                tokens_out INTEGER,
+                cost REAL
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_activity_video ON video_activity(video_id, at)")
+        if new:
+            cursor.execute("""
+                INSERT INTO video_activity (video_id, kind, at, ok, model, note)
+                SELECT video_id, 'details', fetched_at, status != 'failed', NULL, COALESCE(error, NULLIF(status, 'done'))
+                  FROM video_details WHERE fetched_at IS NOT NULL
+                UNION ALL SELECT video_id, kind, finished_at, status = 'done', NULL, error
+                  FROM media_jobs WHERE status IN ('done', 'failed') AND finished_at IS NOT NULL
+                UNION ALL SELECT video_id, 'rate', created_at, 1, model, NULL FROM video_ratings
+                UNION ALL SELECT video_id, 'summarize', created_at, 1, model, NULL FROM video_summaries""")
+
         if _create_search_tables(cursor):
             _reindex(cursor, [r[0] for r in cursor.execute("SELECT video_id FROM videos")])
         conn.commit()
@@ -572,7 +603,7 @@ def get_playlist(playlist_id: str, db_path: str = DB_PATH) -> Optional[Dict[str,
 
 # Everything YourTube fetched or made for a video; removing a playlist clears these for its own videos
 VIDEO_DATA_TABLES = ("video_details", "transcript_segments", "visual_segments", "media_jobs", "video_ratings",
-                     "video_summaries", "category_suggestions", "courses")
+                     "video_summaries", "category_suggestions", "courses", "video_activity")
 
 def _removal_groups(cursor: sqlite3.Cursor, playlist_id: str) -> Dict[str, List[str]]:
     """The playlist's videos: 'shared' (in another playlist too), 'kept_notes' (only here, with notes), 'removed'."""
@@ -637,6 +668,12 @@ def remove_videos(video_ids: Iterable[str], db_path: str = DB_PATH) -> List[str]
         cursor.execute("DELETE FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs WHERE hash IS NOT NULL)")
         conn.commit()
     return found
+
+def removed_video_ids(db_path: str = DB_PATH) -> Set[str]:
+    """Returns video ids explicitly removed from YourTube."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return {r[0] for r in conn.execute("SELECT video_id FROM removed_videos")}
 
 # Archiving keeps what the user made or reads (row, status, notes, details, rating, summary) and frees the rest
 ARCHIVE_TABLES = ("transcript_segments", "visual_segments", "media_jobs")
@@ -987,7 +1024,8 @@ def videos_needing_details(
 
 def save_details(video_id: str, result: Dict[str, Any], db_path: str = DB_PATH) -> None:
     """Stores one fetch result (see enrich.fetch_details). Failures keep earlier good data and count tries."""
-    init_db(db_path)
+    add_activity(video_id, "details", result['status'] != 'failed', None,
+                 result.get('error') or (None if result['status'] == 'done' else result['status']), db_path=db_path)
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
         prev = cursor.execute("SELECT status, tries FROM video_details WHERE video_id = ?", (video_id,)).fetchone()
@@ -1411,8 +1449,20 @@ def videos_needing_asr(video_ids: Optional[Iterable[str]] = None, max_tries: int
         return out
 
 
-def set_job(video_id: str, kind: str, db_path: str = DB_PATH, **fields: Any) -> None:
-    """Creates or updates a media job (status, error, progress, timings, started/finished)."""
+def set_job(video_id: str, kind: str, db_path: str = DB_PATH, model: Optional[str] = None, **fields: Any) -> None:
+    """
+    Creates or updates a media job (status, error, progress, timings, started/finished). 'downloading' starts a
+    video_activity step on this thread; 'done' or 'failed' saves it (with model, when given).
+    """
+    status = fields.get("status")
+    if status == "downloading":
+        _STEP.set(_new_step())
+    elif status in ("done", "failed"):
+        step = _STEP.get() or _new_step()
+        _STEP.set(None)
+        add_activity(video_id, kind, status == "done", model, fields.get("error"), step, db_path)
+    elif status:
+        _STEP.set(None)
     init_db(db_path)
     with get_connection(db_path) as conn:
         conn.execute("INSERT OR IGNORE INTO media_jobs (video_id, kind, status) VALUES (?, ?, 'queued')", (video_id, kind))
@@ -1829,6 +1879,88 @@ def record_usage(task: str, provider: str, model: str, tokens_in: int, tokens_ou
         conn.execute("INSERT INTO ai_usage (task, provider, model, tokens_in, tokens_out, cost, exact) VALUES (?, ?, ?, ?, ?, ?, ?)",
                      (task, provider, model, int(tokens_in), int(tokens_out), cost, int(bool(exact))))
         conn.commit()
+    step = _STEP.get()
+    if step is not None:   # the video being worked on (video_step) gets this call's tokens and cost
+        step["tokens_in"] += int(tokens_in)
+        step["tokens_out"] += int(tokens_out)
+        step["cost"] = None if cost is None and step["cost"] is None else (step["cost"] or 0) + (cost or 0)
+        step["models"].add(model)
+
+# --- Per-video activity (video_activity) ----------------------------------------------------
+
+_STEP: contextvars.ContextVar = contextvars.ContextVar("video_step", default=None)   # cloud AI use of the current video
+
+def _new_step() -> Dict[str, Any]:
+    return {"tokens_in": 0, "tokens_out": 0, "cost": None, "models": set()}
+
+def add_activity(video_id: str, kind: str, ok: bool, model: Optional[str] = None, note: Optional[str] = None,
+                 step: Optional[Dict[str, Any]] = None, db_path: str = DB_PATH) -> None:
+    """Saves one finished step on a video; step: the cloud AI use counted while it ran (video_step)."""
+    used = bool(step and step["models"])
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("INSERT INTO video_activity (video_id, kind, ok, model, note, tokens_in, tokens_out, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                     (video_id, kind, int(bool(ok)), model or (", ".join(sorted(step["models"])) if used else None),
+                      (note or "")[:300] or None, step["tokens_in"] if used else None, step["tokens_out"] if used else None,
+                      step["cost"] if used else None))
+        conn.commit()
+
+@contextlib.contextmanager
+def video_step(video_id: str, kind: str, model: Optional[str] = None, db_path: str = DB_PATH):
+    """Records the block as one step on the video when it ends (failed when it raises), with its cloud AI use."""
+    step = _new_step()
+    token = _STEP.set(step)
+    ok, note = True, None
+    try:
+        yield step
+    except BaseException as e:
+        ok, note = False, str(e) or type(e).__name__
+        raise
+    finally:
+        _STEP.reset(token)
+        add_activity(video_id, kind, ok, model, note, step, db_path)
+
+def get_activity(video_id: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Everything recorded for a video, newest first."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return [dict(r) for r in conn.execute("SELECT kind, at, ok, model, note, tokens_in, tokens_out, cost FROM video_activity "
+                                              "WHERE video_id = ? ORDER BY at DESC, id DESC", (video_id,))]
+
+def indexed_videos(model: str, db_path: str = DB_PATH) -> List[str]:
+    """Video ids that have at least one search piece with a vector for this model and none without."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return [r[0] for r in conn.execute("""
+            SELECT d.video_id FROM search_docs d
+            LEFT JOIN embedding_cache e ON e.model = ? AND e.hash = d.hash
+            WHERE d.hash IS NOT NULL
+            GROUP BY d.video_id
+            HAVING COUNT(e.hash) = COUNT(*)
+            ORDER BY d.video_id
+        """, (model,)).fetchall()]
+
+def record_index_activity(model: str, hashes: List[str], db_path: str = DB_PATH) -> int:
+    """Records an index step for every video whose pieces were embedded. Returns the count of videos recorded."""
+    if not hashes:
+        return 0
+    unique_hashes = [h for h in set(hashes) if h is not None]
+    if not unique_hashes:
+        return 0
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute("""
+            SELECT video_id, COUNT(*) AS n
+            FROM search_docs
+            WHERE hash IN (SELECT value FROM json_each(?))
+            GROUP BY video_id
+            ORDER BY video_id
+        """, (json.dumps(unique_hashes),)).fetchall()
+    for r in rows:
+        vid, n = r["video_id"], r["n"]
+        note = "1 piece" if n == 1 else f"{n} pieces"
+        add_activity(vid, "index", True, model=model, note=note, db_path=db_path)
+    return len(rows)
 
 def usage_summary(since: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     """
@@ -1841,6 +1973,12 @@ def usage_summary(since: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
             SELECT task, provider, model, COUNT(*) AS calls, SUM(tokens_in) AS tokens_in, SUM(tokens_out) AS tokens_out,
                    ROUND(COALESCE(SUM(cost), 0), 4) AS cost, SUM(cost IS NULL) AS unpriced, SUM(exact = 0) AS estimated
             FROM ai_usage WHERE at >= ? GROUP BY task, provider, model ORDER BY SUM(tokens_in + tokens_out) DESC""", (since,))]
+
+def cost_since(since: str, db_path: str = DB_PATH) -> float:
+    """Total known cloud AI cost at or after a UTC time."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return float(conn.execute("SELECT COALESCE(SUM(cost), 0) FROM ai_usage WHERE at >= ?", (since,)).fetchone()[0])
 
 def rating_times(db_path: str = DB_PATH) -> Dict[str, str]:
     """{video_id: when its rating was made (UTC, 'YYYY-MM-DD HH:MM:SS')} for every rated video."""

@@ -1,6 +1,10 @@
+import contextlib
+import io
 import sqlite3
 import unittest
+from unittest import mock
 
+import embedder
 import storage
 from tests.helpers import playlist, temp_db, video
 
@@ -456,3 +460,183 @@ class RemoveVideosTest(unittest.TestCase):
         storage.save_playlist(storage.SINGLE_SOURCE, [video("gone", "Talk to drop")], db_path=self.db, partial=True)
         storage.save_playlist(playlist("A"), self.list_a, db_path=self.db)
         self.assertEqual(self.rows("playlist_items", "gone"), 2)                     # back, and in A again
+
+
+class VideoActivityTest(unittest.TestCase):
+    def setUp(self):
+        self.db = temp_db()
+        storage.save_playlist(playlist("PL1"), [video("a"), video("b")], db_path=self.db)
+
+    def acts(self, vid="a"):
+        return storage.get_activity(vid, db_path=self.db)
+
+    def test_step_records_its_cloud_ai_use_and_failures(self):
+        storage.record_usage("rate", "claude", "m1", 5, 5, 0.5, db_path=self.db)   # outside any step: not on a video
+        with storage.video_step("a", "rate", db_path=self.db):
+            storage.record_usage("rate", "claude", "m1", 100, 20, 0.01, db_path=self.db)
+            storage.record_usage("rate", "claude", "m1", 50, 10, None, db_path=self.db)
+        with self.assertRaises(ValueError):
+            with storage.video_step("a", "summarize", "local-model", db_path=self.db):
+                raise ValueError("bad reply")
+        fail, ok = self.acts()
+        self.assertEqual((ok["kind"], ok["ok"], ok["model"], ok["tokens_in"], ok["tokens_out"], ok["cost"]),
+                         ("rate", 1, "m1", 150, 30, 0.01))
+        self.assertEqual((fail["kind"], fail["ok"], fail["model"], fail["note"], fail["tokens_in"]),
+                         ("summarize", 0, "local-model", "bad reply", None))
+        self.assertEqual(self.acts("b"), [])
+
+    def test_media_jobs_and_details_are_recorded(self):
+        storage.set_job("a", "asr", status="queued", db_path=self.db)
+        storage.set_job("a", "asr", status="downloading", db_path=self.db)
+        storage.record_usage("transcribe", "openai", "whisper-1", 0, 0, 0.02, db_path=self.db)
+        storage.set_job("a", "asr", status="done", model="openai:whisper-1", db_path=self.db)
+        storage.set_job("b", "visual", status="downloading", db_path=self.db)
+        storage.set_job("b", "visual", status="failed", error="no video", db_path=self.db)
+        storage.save_details("a", {"status": "no_captions"}, db_path=self.db)
+        details, asr = self.acts()
+        self.assertEqual((asr["kind"], asr["ok"], asr["model"], asr["cost"]), ("asr", 1, "openai:whisper-1", 0.02))
+        self.assertEqual((details["kind"], details["ok"], details["note"]), ("details", 1, "no_captions"))
+        [vis] = self.acts("b")
+        self.assertEqual((vis["ok"], vis["note"], vis["tokens_in"]), (0, "no video", None))
+
+    def test_existing_work_is_filled_in_once_and_removed_with_the_video(self):
+        conn = sqlite3.connect(self.db)
+        conn.execute("DROP TABLE video_activity")
+        conn.execute("INSERT INTO video_summaries (video_id, model) VALUES ('a', 'm2')")
+        conn.commit()
+        conn.close()
+        storage.init_db(self.db)
+        storage.init_db(self.db)
+        self.assertEqual([(r["kind"], r["model"]) for r in self.acts()], [("summarize", "m2")])
+        storage.remove_videos(["a"], db_path=self.db)
+        self.assertEqual(self.acts(), [])
+
+
+class IndexActivityTest(unittest.TestCase):
+    def setUp(self):
+        self.db = temp_db()
+        storage.save_playlist(playlist("PL1"), [
+            video("v1", "First video"),
+            video("v2", "Second video"),
+            video("v3", "Third video"),
+        ], db_path=self.db)
+        # Give v1 two segments at least 30s apart so it has 3 search_docs rows in total (1 title + 2 transcript blocks)
+        storage.save_details("v1", {
+            "status": "done",
+            "segments": [
+                {"start": 0, "text": "v1 segment one"},
+                {"start": 60, "text": "v1 segment two"}
+            ]
+        }, db_path=self.db)
+        # Clear the details activity recorded during save_details so activity tests start clean
+        with sqlite3.connect(self.db) as c:
+            c.execute("DELETE FROM video_activity")
+
+    def hashes_for(self, vid):
+        with sqlite3.connect(self.db) as c:
+            return [r[0] for r in c.execute("SELECT hash FROM search_docs WHERE video_id = ? AND hash IS NOT NULL ORDER BY id", (vid,))]
+
+    def test_indexed_videos(self):
+        h_v1 = self.hashes_for("v1")
+        self.assertEqual(len(h_v1), 3)
+        h_v2 = self.hashes_for("v2")
+        self.assertEqual(len(h_v2), 1)
+
+        # 1. returns [] when embedding_cache is empty
+        self.assertEqual(storage.indexed_videos("m", db_path=self.db), [])
+
+        # 2. vector for another model: leaves it out
+        storage.save_embeddings("other", [(h_v2[0], b"\0" * 4, 1)], db_path=self.db)
+        self.assertEqual(storage.indexed_videos("m", db_path=self.db), [])
+
+        # 3. one of its rows has no vector: leaves it out (v1 has 3 pieces, save 2)
+        storage.save_embeddings("m", [(h_v1[0], b"\0" * 4, 1), (h_v1[1], b"\0" * 4, 1)], db_path=self.db)
+        self.assertEqual(storage.indexed_videos("m", db_path=self.db), [])
+
+        # 4. returns a video once all its hashed search_docs rows have a vector for "m"
+        storage.save_embeddings("m", [(h_v2[0], b"\0" * 4, 1)], db_path=self.db)
+        self.assertEqual(storage.indexed_videos("m", db_path=self.db), ["v2"])
+
+        # 5. now complete v1 as well
+        storage.save_embeddings("m", [(h_v1[2], b"\0" * 4, 1)], db_path=self.db)
+        self.assertEqual(storage.indexed_videos("m", db_path=self.db), ["v1", "v2"])
+
+        # Edge case: video with NULL hash only is not returned
+        with sqlite3.connect(self.db) as c:
+            c.execute("INSERT INTO search_docs (video_id, kind, t, text, hash) VALUES ('v_null', 'note', 0, 'null hash', NULL)")
+        self.assertNotIn("v_null", storage.indexed_videos("m", db_path=self.db))
+
+    def test_record_index_activity(self):
+        h_v1 = self.hashes_for("v1")
+        h_v2 = self.hashes_for("v2")
+
+        # 1. empty hashes returns 0 and adds no rows
+        self.assertEqual(storage.record_index_activity("m", [], db_path=self.db), 0)
+        self.assertEqual(storage.get_activity("v1", db_path=self.db), [])
+        self.assertEqual(storage.get_activity("v2", db_path=self.db), [])
+
+        # 2. with hashes from two videos it returns 2 and get_activity has kind=="index", ok==1, model=="m", note like "3 pieces" / "1 piece"
+        all_hashes = h_v1 + h_v2
+        recorded = storage.record_index_activity("m", all_hashes, db_path=self.db)
+        self.assertEqual(recorded, 2)
+
+        act1 = storage.get_activity("v1", db_path=self.db)
+        self.assertEqual(len(act1), 1)
+        self.assertEqual((act1[0]["kind"], act1[0]["ok"], act1[0]["model"], act1[0]["note"]),
+                         ("index", 1, "m", "3 pieces"))
+
+        act2 = storage.get_activity("v2", db_path=self.db)
+        self.assertEqual(len(act2), 1)
+        self.assertEqual((act2[0]["kind"], act2[0]["ok"], act2[0]["model"], act2[0]["note"]),
+                         ("index", 1, "m", "1 piece"))
+
+        # Edge case: repeated hashes do not duplicate count or activity
+        storage.record_index_activity("m", [h_v2[0], h_v2[0]], db_path=self.db)
+        act2_again = storage.get_activity("v2", db_path=self.db)
+        self.assertEqual(len(act2_again), 2)
+        self.assertEqual(act2_again[0]["note"], "1 piece")
+
+    def patch_db(self):
+        orig_gc = storage.get_connection
+        orig_db = storage.DB_PATH
+        return mock.patch.object(storage, "get_connection",
+                                 side_effect=lambda p=None: orig_gc(self.db if p is None or p == orig_db else p))
+
+    def test_embedder_run_embed_records_index_activity(self):
+        # acceptance 3: embedder.run_embed(embed_fn=..., settings=...) leaves an "index" activity row on each video whose pieces it embedded
+        fake_embed = lambda texts: [[1.0, 0.0] for _ in texts]
+        with self.patch_db(), contextlib.redirect_stdout(io.StringIO()):
+            embedder.run_embed(embed_fn=fake_embed)
+
+        act1 = storage.get_activity("v1", db_path=self.db)
+        self.assertTrue(any(a["kind"] == "index" and a["ok"] == 1 and a["note"] == "3 pieces" for a in act1))
+
+        act2 = storage.get_activity("v2", db_path=self.db)
+        self.assertTrue(any(a["kind"] == "index" and a["ok"] == 1 and a["note"] == "1 piece" for a in act2))
+
+    def test_embedder_run_embed_stop_request_records_saved_hashes(self):
+        # Stop request calls record_index_activity with hashes saved so far
+        fake_embed = lambda texts: [[1.0, 0.0] for _ in texts]
+        calls = [0]
+        def should_stop():
+            calls[0] += 1
+            return calls[0] > 1
+
+        with sqlite3.connect(self.db) as c:
+            c.execute("DELETE FROM video_activity")
+
+        # Use batch_size=1 so at least one batch completes before stop
+        with self.patch_db(), \
+             mock.patch.object(embedder, "BATCH", 1), \
+             contextlib.redirect_stdout(io.StringIO()):
+            res = embedder.run_embed(should_stop=should_stop, embed_fn=fake_embed)
+            self.assertFalse(res)
+
+        # At least one activity was recorded
+        activities = [storage.get_activity(vid, db_path=self.db) for vid in ("v1", "v2", "v3")]
+        total_index_acts = sum(len(acts) for acts in activities)
+        self.assertGreater(total_index_acts, 0)
+        all_acts = [a for acts in activities for a in acts]
+        for a in all_acts:
+            self.assertEqual(a["kind"], "index")
+            self.assertEqual(a["ok"], 1)

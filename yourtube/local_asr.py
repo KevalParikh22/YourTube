@@ -398,7 +398,7 @@ def run_asr(
                 save_model = f"{worker_engine}:{model}"
 
             storage.save_local_transcript(vid, segments, language=language, model=save_model)
-            storage.set_job(vid, "asr", status="done", progress=1.0, timings=timings)
+            storage.set_job(vid, "asr", status="done", progress=1.0, timings=timings, model=save_model)
             with tally:
                 done += 1
                 counts[worker_engine] += 1

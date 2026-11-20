@@ -187,6 +187,7 @@
   .tri-meta .cat-chip { color: var(--ink-2); }
   .row-meta .gone { color: var(--accent); }
   .sum-mark { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+  .tr-mark, .ix-mark { display: inline-flex; align-items: center; gap: 3px; flex: none; }
   .sum-mark svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.4; stroke-linejoin: round; }
   .row-time { text-align: right; font-variant-numeric: tabular-nums; font-size: 13.5px; white-space: nowrap; }
   .row-time small { display: block; font-size: 11.5px; color: var(--ink-3); }
@@ -338,6 +339,10 @@
   .drawer details summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); font-weight: 500; }
   .desc-text { white-space: pre-wrap; font-size: 13px; color: var(--ink-2); margin: 8px 0 0; max-height: 260px; overflow: auto; overflow-wrap: anywhere; }
   .transcript { max-height: 360px; overflow: auto; margin-top: 8px; }
+  .activity { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; max-height: 300px; overflow: auto; }
+  .activity li { display: grid; grid-template-columns: 9.5em 1fr; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+  .activity time { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .activity li.failed b { color: var(--skim); }
 
   /* ---------- setup guide ---------- */
   .dl-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }

@@ -20,6 +20,8 @@ import contextvars
 import base64
 import urllib.request
 import urllib.error
+import urllib.parse
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 _DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -143,6 +145,7 @@ class QuotaError(LLMError):
 def default_settings() -> Dict[str, Any]:
     return {
         "provider": "none",
+        "daily_cap": None,       # USD per local calendar day for cloud AI; None or 0 = no cap
         "auto_after_sync": False,
         "providers": {k: {"model": p["model"], "base_url": p.get("base_url", ""), "api_key": ""}
                       for k, p in PROVIDERS.items()},
@@ -260,6 +263,7 @@ def public_settings(settings: Dict[str, Any], library: Optional[int] = None) -> 
     helpers = {t: (settings.get("helpers") or {}).get(t) for t in HELPER_TASKS}
     return {
         "provider": settings["provider"], "auto_after_sync": settings["auto_after_sync"],
+        "daily_cap": settings.get("daily_cap"),
         "providers": providers, "presets": settings["presets"],
         "category_notes": settings["category_notes"], "proposal": settings["proposal"],
         "tasks": {t: settings["tasks"].get(t) for t in TASKS}, "task_labels": TASKS, "task_follows": TASK_FOLLOWS,
@@ -531,7 +535,21 @@ def _pace_after(service: str, limited: bool) -> None:
     if limited and p["gap"] != old:
         print(f"   Slowing down to one request every {p['gap']:.0f} s to stay under this AI's rate limit.")
 
+def _today_start() -> str:
+    """Local midnight, expressed as UTC for the usage table."""
+    midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+    return midnight.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+def check_cap(settings: Dict[str, Any]) -> None:
+    cap = settings.get("daily_cap")
+    if isinstance(cap, (int, float)) and not isinstance(cap, bool) and cap > 0:
+        import storage
+        if storage.cost_since(_today_start()) >= cap:
+            raise QuotaError(f"Today's cloud AI budget of ${cap:.2f} is used up. It resets at midnight, or raise it in Settings → Cloud AI.")
+
 def _open(req: urllib.request.Request, timeout: int) -> Dict[str, Any]:
+    if urllib.parse.urlsplit(req.full_url).hostname not in ("localhost", "127.0.0.1", "::1"):
+        check_cap(load_settings())
     service = req.full_url.split("?")[0]
     for attempt in range(RETRIES + 1):
         _wait_turn(service)
@@ -561,6 +579,7 @@ def _open(req: urllib.request.Request, timeout: int) -> Dict[str, Any]:
 # --- providers ---------------------------------------------------------------
 
 def _anthropic(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
+    check_cap(load_settings())
     try:
         import anthropic
     except ImportError:

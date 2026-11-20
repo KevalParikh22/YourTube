@@ -4,14 +4,13 @@ One model call per video returns a TL;DR, meeting-style minutes, key claims and 
 questions, takeaways, and "learn more" (related videos from the library, YouTube searches for gaps).
 Related moments ("also explained in X at 4:20") are found in code with the meaning index, not by the model.
 """
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from exporter import _clock
 from llm import LLMError, parse_json
 from rater import CHAR_BUDGET_REMOTE, fit_transcript, parse_time, transcript_blocks
 
 OUTPUT_TOKENS = 1600          # rough output per summary, for cost estimates
-PART_OUTPUT_TOKENS = 550      # rough output per part summary, for cost estimates
 CANDIDATES = 8                # related videos offered to the model for "learn more"
 MOMENT_MIN_SIM = 0.6          # cosine (0.55 let loosely related news clips through) for "also explained in" (statement vs passage, qwen3-embedding)
 MOMENTS_PER_TOPIC = 2
@@ -79,12 +78,7 @@ def split_parts(duration: int, segments: List[Dict[str, Any]], chapters: List[Di
     return out + [[start, duration]]
 
 
-PART_PROMPT = """Video: {title} ({channel}), part {n} of {total}, {start}–{end}.
-
-Transcript of this part:
-{text}
-
-This part will be one lesson of a course the learner follows over a few weeks. Write, in {language}:
+PART_PROMPT = """This part will be one lesson of a course the learner follows over a few weeks. Write, in {language}:
 - title: what this part is about, at most 8 words.
 - summary: at most 3 sentences on what is said or shown and its conclusion.
 - points: 3 to 6 key points in time order, each with the time it is said and at most 25 words.
@@ -93,7 +87,13 @@ This part will be one lesson of a course the learner follows over a few weeks. W
 Times: copy them exactly as written in the transcript, like "4:05" or "1:02:30".
 
 Reply with JSON in this shape (replace every <...>):
-{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"], "quiz": [{{"q": "<...>", "options": ["<...>"], "answer": <index>, "t": "<time>"}}]}}"""
+{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"], "quiz": [{{"q": "<...>", "options": ["<...>"], "answer": <index>, "t": "<time>"}}]}}
+
+Now the video:
+Video: {title} ({channel}), part {n} of {total}, {start}–{end}.
+
+Transcript of this part:
+{text}"""
 
 
 def _part_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], spans: List[List[int]], n: int,
@@ -193,20 +193,7 @@ def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings
         budget -= len(slide_text)
     text, sampled = (_parts_text(parts), False) if parts else fit_transcript(transcript_blocks(segments), budget)
     cand_text = "\n".join(f"- id {c['video_id']}: {c['title']} ({c['channel']}){': ' + c['about'] if c['about'] else ''}" for c in cands) or "(none)"
-    return f"""Video
-Title: {video.get('title')}
-Channel: {video.get('channel')}
-Length: {round((video.get('duration_seconds') or 0) / 60)} min
-Chapters:
-{chapters or '(none)'}
-
-{'Notes on each part of the video (summarised from its full transcript)' if parts else 'Transcript'}{' (evenly sampled excerpts)' if sampled else ''}:
-{text}
-{f"{chr(10)}On-screen text (slides, code), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}
-Other videos in the learner's library that may relate:
-{cand_text}
-
-Write, in {language}:
+    return f"""Write, in {language}:
 - tldr: at most 3 sentences: what the video covers and its main conclusion.
 - minutes: 3 to 10 topics in time order, like minutes of a meeting. Each has the time it starts, a topic (at most 8 words)
   and 1 to 3 notes (at most 20 words each) saying what is actually said, claimed or shown, never "the video discusses X".
@@ -228,7 +215,21 @@ Reply with JSON in this shape (replace every <...>):
  "quiz": [{{"q": "<...>", "a": "<...>", "t": "<time>"}}],
  "takeaways": ["<...>"],
  "learn_more": {{"related": [{{"video_id": "<id>", "relation": "<prerequisite|deeper|other_view|same_topic>", "why": "<...>"}}],
-                "searches": [{{"query": "<...>", "why": "<...>"}}]}}}}"""
+                "searches": [{{"query": "<...>", "why": "<...>"}}]}}}}
+
+Now the video:
+Video
+Title: {video.get('title')}
+Channel: {video.get('channel')}
+Length: {round((video.get('duration_seconds') or 0) / 60)} min
+Chapters:
+{chapters or '(none)'}
+
+{'Notes on each part of the video (summarised from its full transcript)' if parts else 'Transcript'}{' (evenly sampled excerpts)' if sampled else ''}:
+{text}
+{f"{chr(10)}On-screen text (slides, code), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}
+Other videos in the learner's library that may relate:
+{cand_text}"""
 
 
 def validate(raw: Any, duration: int, candidate_ids: List[str]) -> Dict[str, Any]:
@@ -299,10 +300,11 @@ def _summarize_one(video: Dict[str, Any], complete: Callable[[str, str], str], b
         return None
     made = storage.get_course(video["video_id"])
     parts = made["parts"] if made and not any(p.get("pending") for p in made["parts"]) else None
-    summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget, parts)
-    storage.save_summary(video["video_id"], summary, model=model)
-    if summary.get("parts") and not made:
-        storage.save_parts(video["video_id"], summary["parts"], model=model)
+    with storage.video_step(video["video_id"], "summarize", model):
+        summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget, parts)
+        storage.save_summary(video["video_id"], summary, model=model)
+        if summary.get("parts") and not made:
+            storage.save_parts(video["video_id"], summary["parts"], model=model)
     return summary
 
 
@@ -311,33 +313,59 @@ def _videos(video_ids: List[str]) -> List[Dict[str, Any]]:
     return [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
 
 
+CHARS_PER_SECOND = 15         # speech is about 150 words a minute; for estimates before a transcript is fetched
+PART_OUTPUT_TOKENS = 550   # rough output per part (title, summary, points, actions, quiz)
+
+
+def _parts_cost(video: Dict[str, Any], segments: List[Dict[str, Any]], budget: int) -> Tuple[int, int]:
+    """Approximate transcript and output tokens for the per-part summary calls."""
+    chars = tokens_out = 0
+    for start, end in split_parts(video.get("duration_seconds") or 0, segments, video.get("chapters") or []):
+        part = [x for x in segments if start <= x["start"] < end]
+        text, _ = fit_transcript(transcript_blocks(part), budget)
+        chars += len(PART_PROMPT) + len(text) + len(SYSTEM)
+        tokens_out += PART_OUTPUT_TOKENS
+    return chars, tokens_out
+
+
+def estimate_by_length(seconds: List[int], settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Like estimate, for videos not fetched yet: their transcript size guessed from their length."""
+    import llm
+    settings = settings or llm.load_settings()
+    budget = llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE)
+    chars = tokens_out = 0
+    for s in seconds:
+        s = s or 0
+        if s > 40 * 60 and s * CHARS_PER_SECOND > budget:
+            n = max(2, round(s / 1800))
+            chars += n * (min(1800 * CHARS_PER_SECOND, budget) + len(PART_PROMPT) + len(SYSTEM))
+            tokens_out += n * PART_OUTPUT_TOKENS
+        chars += min(s * CHARS_PER_SECOND, budget) + len(SYSTEM) + 4000   # the whole-video call (from part notes when long)
+    tokens_in, tokens_out = chars // 4, tokens_out + OUTPUT_TOKENS * len(seconds)
+    return {"videos": len(seconds), "tokens_in": tokens_in, "tokens_out": tokens_out,
+            "cost": llm.estimate_cost(settings, "summarize", tokens_in, tokens_out), "uses": llm.describe(settings, "summarize"),
+            "ready": llm.is_configured(settings, "summarize")}
+
+
 def estimate(video_ids: List[str]) -> Dict[str, Any]:
     """What a summary run would send: videos, approximate tokens and price."""
     import llm
     import storage
     settings = llm.load_settings()
     budget = llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE)
-    chars = with_transcript = parts_out = 0
+    chars = with_transcript = in_parts = tokens_out = 0
     videos = _videos(video_ids)
     for v in videos:
         segments = storage.get_segments(v["video_id"])
         with_transcript += bool(segments)
+        chars += len(build_prompt(v, segments, settings, [], budget)) + len(SYSTEM) + 2000
         made = storage.get_course(v["video_id"])
-        saved_parts = (made or {}).get("parts") or []
-        if any(p.get("pending") for p in saved_parts): saved_parts = []
-        if saved_parts or too_long(v, segments, budget):
-            n_parts = len(saved_parts)
-            if not saved_parts:
-                spans = split_parts(v.get("duration_seconds") or 0, segments, v.get("chapters") or [])
-                n_parts = len(spans)
-                parts_out += n_parts
-                for n in range(1, len(spans) + 1):
-                    prompt = _part_prompt(v, segments, spans, n, settings, budget)
-                    chars += len(prompt) + len(SYSTEM)
-            chars += len(build_prompt(v, [], settings, [], budget)) + 600 * n_parts + len(SYSTEM) + 2000
-        else:
-            chars += len(build_prompt(v, segments, settings, [], budget)) + len(SYSTEM) + 2000
-    tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos) + PART_OUTPUT_TOKENS * parts_out
+        if segments and too_long(v, segments, budget) and not (made and made.get("parts") and not any(p.get("pending") for p in made["parts"])):
+            part_chars, part_tokens = _parts_cost(v, segments, budget)
+            chars += part_chars
+            tokens_out += part_tokens
+            in_parts += 1
+    tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos) + tokens_out
     cost = llm.estimate_cost(settings, "summarize", tokens_in, tokens_out)
     uses = llm.describe(settings, "summarize")
     helper = llm.helper_for(settings, "summarize")
@@ -351,7 +379,7 @@ def estimate(video_ids: List[str]) -> Dict[str, Any]:
             cost_note = "less if the local model keeps up"
         elif cloud_cost == 0.0 and cost is not None:
             cost_note = "less if the local model keeps up"
-    out = {"videos": len(videos), "with_transcript": with_transcript, "tokens_in": tokens_in, "tokens_out": tokens_out,
+    out = {"videos": len(videos), "with_transcript": with_transcript, "in_parts": in_parts, "tokens_in": tokens_in, "tokens_out": tokens_out,
            "cost": cost, "uses": uses, "ready": llm.is_configured(settings, "summarize")}
     if cost_note:
         out["cost_note"] = cost_note

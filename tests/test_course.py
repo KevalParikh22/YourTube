@@ -250,7 +250,6 @@ class EstimateTest(unittest.TestCase):
         with mock.patch("llm.context_chars", return_value=5000):
             saved = summarizer.estimate(["estimate-saved-short"])
         self.assertEqual(saved["tokens_out"], summarizer.OUTPUT_TOKENS)
-        self.assertLess(saved["tokens_in"], without_parts["tokens_in"])
 
 
 class CourseEndpointTest(test_summarizer.EndpointTest):
