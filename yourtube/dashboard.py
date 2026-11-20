@@ -34,7 +34,7 @@ import files
 import voice
 import interests_ai
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
-from exporter import videos_to_csv, video_markdown, markdown_zip, safe_filename
+from exporter import videos_to_csv, video_markdown, course_markdown, markdown_zip, safe_filename
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(ROOT_DIR, "web")
@@ -93,7 +93,7 @@ def _same(a, b):
     return hmac.compare_digest(str(a).encode("utf-8"), str(b).encode("utf-8"))
 
 LANES = ("youtube", "local", "cloud")   # reading YouTube, this computer's GPU/CPU, cloud AI: one task each at a time
-_AI_TASK = {"rate": "rate", "knowledge": "rate", "summarize": "summarize", "suggest": "categorize", "discover": "categorize"}
+_AI_TASK = {"rate": "rate", "knowledge": "rate", "summarize": "summarize", "course": "summarize", "suggest": "categorize", "discover": "categorize"}
 _MEDIA_TASK = {"asr": "transcribe", "visual": "slides", "embed": "embed"}
 
 def lane_for(kind, settings):
@@ -437,6 +437,198 @@ def _night_split(ids):
     late = [i for i in ids if length.get(i, 0) > night["minutes"] * 60]
     return [i for i in ids if i not in late], late, _next_time(night["start"])
 
+def _queue_split(kind, action, ids, run):
+    """
+    Queues run(ids) (a task function) now. With Settings → Night queue on, the longer videos go in a second task
+    that waits for the night. Returns (task now, night task, long ids, their start time); a task is None when not queued.
+    """
+    now_ids, late, at = _night_split(ids)
+    night = JOB.start(kind, _label(f"{action} at night", late), run(late), key=["night"] + late, not_before=at) if late else None
+    started = JOB.start(kind, _label(action, now_ids), run(now_ids), key=now_ids) if now_ids or not night else None
+    return started, night, late, at
+
+# --- followed channels ---------------------------------------------------------------------------------------------
+
+CHANNEL_LATEST = 15            # newest uploads read per channel and check
+CHANNEL_HOURS = (1, 3, 6, 12, 24)
+CHANNEL_FIRST_CHECK_MINUTES = 2   # after the dashboard starts
+
+def _channel_hours():
+    hours = llm.load_settings().get("channel_hours")
+    return hours if hours in CHANNEL_HOURS else 6
+
+def _schedule_channel_check(minutes=None):
+    """
+    Queues the next check of the followed channels, in channel_hours (or minutes) from now, unless one is already
+    waiting or nothing is followed. Every check queues the next when it ends, so they keep going while the dashboard runs.
+    """
+    if not storage.get_channels():
+        return None
+    if any(t["kind"] == "channels" and t["not_before"] for t in JOB.snapshot()["queue"]):
+        return None
+    at = (datetime.now() + (timedelta(minutes=minutes) if minutes is not None else timedelta(hours=_channel_hours())))
+    at = at.isoformat(timespec="seconds")
+    return JOB.start("channels", "Check followed channels", _check_channels, key=at, not_before=at)
+
+def _follow_channel(value, library, auto):
+    """Follows the channel of a link, @handle or video. Its current newest uploads are not added; later ones are."""
+    from extractor import read_latest_uploads, resolve_channel
+    try:
+        ch = resolve_channel(value)
+        latest = read_latest_uploads(ch["id"], CHANNEL_LATEST)
+    except ValueError as e:
+        print(f"Error: could not read the channel: {e}")
+        return False
+    storage.follow_channel(ch["id"], ch["title"], [v["video_id"] for v in latest], library, auto)
+    print(f"Following {ch['title']}. Its {len(latest)} newest videos are not added; new uploads are, at the next check "
+          f"(every {_channel_hours()} h while the dashboard runs).")
+    _schedule_channel_check()
+    return True
+
+def _check_channels():
+    """Reads each followed channel's newest uploads, adds the new ones, then fetches details and queues AI per channel."""
+    from classifier import classify_playlist_videos
+    from enrich import run_enrich
+    from extractor import read_latest_uploads
+    try:
+        channels = storage.get_channels()
+        print(f"Checking {len(channels)} followed channel{'' if len(channels) == 1 else 's'} for new videos.")
+        todo = {"details": [], "rate": [], "summarize": []}
+        for ch in channels:
+            if JOB.stop_requested():
+                print("Stopped. The rest are checked next time.")
+                break
+            try:
+                latest = read_latest_uploads(ch["id"], CHANNEL_LATEST)
+            except ValueError as e:
+                print(f"   Warning: {ch['title']}: {e}")
+                storage.set_channel(ch["id"], last_error=str(e)[:300])
+                continue
+            seen = set(ch["seen"])
+            new = [v for v in latest if v["video_id"] not in seen]
+            if new:
+                for v in new:
+                    if v["channel"] == "Unknown Channel":
+                        v["channel"] = ch["title"]
+                classify_playlist_videos(new, load_taxonomy(library=ch["library_id"]))
+                storage.save_playlist({"id": storage.channel_source(ch["id"]), "title": ch["title"], "url": ""},
+                                      new, partial=True, library_id=ch["library_id"])
+                ids = [v["video_id"] for v in new]
+                steps = {"details": ["details"], "rate": ["details", "rate"],
+                         "summarize": ["details", "rate", "summarize"]}.get(ch["auto"], [])
+                for step in steps:
+                    todo[step] += ids
+            latest_ids = [v["video_id"] for v in latest]
+            storage.set_channel(ch["id"], seen=latest_ids + [s for s in ch["seen"] if s not in latest_ids],
+                                last_checked=True, last_error=None)
+            print(f"   {ch['title']}: " + (", ".join(v["title"][:50] for v in new) if new else "nothing new"))
+        if todo["details"]:
+            print()
+            run_enrich(video_ids=todo["details"], should_stop=JOB.stop_requested)
+        settings = llm.load_settings()
+        for kind, action, run in (("rate", "Rate", _rate_task), ("summarize", "Summarise", _summarize_task)):
+            ids = todo[kind]
+            if not ids:
+                continue
+            if not llm.is_configured(settings, kind):
+                print(f"   {action}: no AI is set up for it in Settings → AI, so the new videos wait for you.")
+                continue
+            for i in range(0, len(ids), 50):   # summaries take at most 50 videos per task
+                _queue_split(kind, f"{action} new from channels", ids[i:i + 50], run(_utc_now()))
+            print(f"   {action}: {len(ids)} new video{'' if len(ids) == 1 else 's'} queued.")
+        return True
+    finally:
+        _schedule_channel_check()
+
+CHANNEL_BIG = 500              # a whole-channel import this big summarises at night, whatever the video lengths
+_UPLOADS = {}                  # channel id -> (read at, all uploads): the estimate's read, reused by the import
+
+def _channel_uploads(channel_id):
+    """All of a channel's uploads, newest first; read again after an hour."""
+    import time
+    from extractor import read_latest_uploads
+    hit = _UPLOADS.get(channel_id)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    videos = read_latest_uploads(channel_id, None)
+    _UPLOADS[channel_id] = (time.time(), videos)
+    return videos
+
+def _channel_estimate(channel_id):
+    """What importing a whole channel means: its videos, how many are new, and what summarising them costs."""
+    import summarizer
+    uploads = _channel_uploads(channel_id)
+    # shortcut: videos removed from YourTube count as new and to summarise (the import skips them), fine for an estimate
+    have, done = {v["video_id"] for v in storage.get_all_videos(include_removed=True)}, storage.summary_times()
+    todo = [v for v in uploads if v["video_id"] not in done]
+    settings = llm.load_settings()
+    return {"videos": len(uploads), "new": sum(v["video_id"] not in have for v in uploads), "to_summarize": len(todo),
+            "hours": round(sum(v.get("duration_seconds") or 0 for v in uploads) / 3600, 1),
+            "summarize": summarizer.estimate_by_length([v.get("duration_seconds") or 0 for v in todo], settings),
+            "night": len(todo) >= CHANNEL_BIG, "night_at": _next_time(llm.night_settings(settings)["start"])}
+
+def _import_channel(channel_id):
+    """Adds all of a followed channel's uploads to its source, fetches their details, then queues their summaries."""
+    from classifier import classify_playlist_videos
+    from enrich import run_enrich
+    ch = next((c for c in storage.get_channels() if c["id"] == channel_id), None)
+    if not ch:
+        print("Error: this channel is not followed.")
+        return False
+    try:
+        uploads = _channel_uploads(channel_id)
+    except ValueError as e:
+        print(f"Error: could not read the channel: {e}")
+        return False
+    print(f"Importing {ch['title']}: {len(uploads)} videos.")
+    known = {v["video_id"]: v["category"] for v in storage.get_all_videos(include_removed=True)}
+    for v in uploads:
+        if v["channel"] == "Unknown Channel":
+            v["channel"] = ch["title"]
+    classify_playlist_videos([v for v in uploads if v["video_id"] not in known], load_taxonomy(library=ch["library_id"]))
+    for v in uploads:   # videos already in the library keep their category
+        v["category"] = known.get(v["video_id"], v["category"])
+    # Not partial: the list is the whole channel, and videos the user removed from YourTube stay out
+    counts = storage.save_playlist({"id": storage.channel_source(channel_id), "title": ch["title"], "url": ""},
+                                   uploads, library_id=ch["library_id"])
+    ids = [v["video_id"] for v in uploads]
+    storage.set_channel(channel_id, seen=ids[:storage.CHANNEL_SEEN_KEEP])
+    print(f"   {counts['added']} added, {len(ids) - counts['added']} already there.\n")
+    run_enrich(video_ids=ids, limit=len(ids), should_stop=JOB.stop_requested)
+    if JOB.stop_requested():
+        return True
+    done, settings = storage.summary_times(), llm.load_settings()
+    todo = [v["video_id"] for v in storage.get_all_videos(playlist_id=storage.channel_source(channel_id)) if v["video_id"] not in done]
+    if not todo:
+        print("Every video already has a summary. Build its knowledge pages on the Knowledge page.")
+        return True
+    if not llm.is_configured(settings, "summarize"):
+        print("No AI is set up for summaries in Settings → AI, so the videos wait for you.")
+        return True
+    at = _next_time(llm.night_settings(settings)["start"]) if len(todo) >= CHANNEL_BIG else None
+    for i in range(0, len(todo), 50):   # summaries take at most 50 videos per task
+        chunk, run = todo[i:i + 50], _summarize_task(_utc_now())
+        if at:
+            JOB.start("summarize", _label(f"Summarise {ch['title']} at night", chunk), run(chunk), key=["night"] + chunk, not_before=at)
+        else:
+            _queue_split("summarize", f"Summarise {ch['title']}", chunk, run)
+    print(f"Summarise: {len(todo)} videos queued" + (f", starting {at} (night queue)" if at else "") +
+          ". Then build the channel's knowledge pages on the Knowledge page.")
+    return True
+
+# Task functions for _queue_split: run(since)(ids) -> the task. since: videos done after it are skipped (Retry, overlaps)
+def _rate_task(since):
+    import rater
+    return lambda ids: lambda: rater.run_rate(ids, should_stop=JOB.stop_requested, done_since=since)
+
+def _summarize_task(since):
+    import summarizer
+    return lambda ids: lambda: summarizer.run_summarize(ids, should_stop=JOB.stop_requested, done_since=since)
+
+def _course_task(per_week):
+    import summarizer
+    return lambda ids: lambda: summarizer.run_course(ids, per_week, should_stop=JOB.stop_requested)
+
 def _utc_now():
     """Now in SQLite's CURRENT_TIMESTAMP form, to compare with created_at columns."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -533,6 +725,7 @@ def build_state(library=1):
         "platform": sys.platform,
         "voice": _VOICE_AVAILABLE,
         "summarised": list(storage.summary_times()),   # video ids with a summary (Knowledge: Summarise 5)
+        "courses": storage.list_courses(),
     }
 
 class Handler(BaseHTTPRequestHandler):
@@ -590,13 +783,8 @@ class Handler(BaseHTTPRequestHandler):
         return self._json({"ok": True, "id": started["id"], "position": started["position"], "after": ahead, **extra})
 
     def _queued_split(self, kind, action, ids, run):
-        """
-        Queues run(ids) (a task function) now. With Settings → Night queue on, the longer videos go in a second task
-        that waits for the night; the reply then has night: {videos, at, only (nothing runs now)}.
-        """
-        now_ids, late, at = _night_split(ids)
-        night = JOB.start(kind, _label(f"{action} at night", late), run(late), key=["night"] + late, not_before=at) if late else None
-        started = JOB.start(kind, _label(action, now_ids), run(now_ids), key=now_ids) if now_ids or not night else None
+        """_queue_split, as a reply: with a night task it has night: {videos, at, only (nothing runs now)}."""
+        started, night, late, at = _queue_split(kind, action, ids, run)
         extra = {"night": {"videos": len(late), "at": at, "only": started is None}} if night else {}
         return self._queued(started or night, **extra)
 
@@ -696,6 +884,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, data, ctype, extra_headers=headers)
         if url.path == "/api/files":
             return self._json({**files.usage(), "backups": files.list_backups(), "exports": files.list_exports()})
+        if url.path == "/api/channels":
+            next_check = next((t["not_before"] for t in JOB.snapshot()["queue"] if t["kind"] == "channels" and t["not_before"]), None)
+            return self._json({"channels": [{k: v for k, v in c.items() if k != "seen"} for c in storage.get_channels()],
+                               "hours": _channel_hours(), "hour_choices": list(CHANNEL_HOURS), "next_check": next_check})
         if url.path == "/api/ai/usage":
             midnight = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)   # this computer's day
             utc = lambda t: t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -859,10 +1051,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/api/knowledge", "/api/knowledge/page", "/api/export/knowledge"):
             import knowledge
             lib = _library((qs.get("library") or ["1"])[0]) or 1
+            channel = (qs.get("channel") or [""])[0] or None
             if url.path == "/api/knowledge":
-                return self._json({"library": lib, "categories": knowledge.status(lib)})
+                return self._json({"library": lib, "channel": channel, "categories": knowledge.status(lib, channel)})
             category = (qs.get("category") or [""])[0]
-            found = storage.get_page(lib, category)
+            found = storage.get_page(lib, knowledge.page_key(category, channel))
             if url.path == "/api/knowledge/page":
                 return self._json(found or {"page": None})
             if not found:
@@ -877,6 +1070,21 @@ class Handler(BaseHTTPRequestHandler):
             vid = (qs.get("id") or [""])[0]
             summary = storage.get_summary(vid)   # None: not summarised yet (not an error)
             return self._json({"summary": summary, "moments": summarizer.related_moments(vid, summary) if summary else {}})
+        if url.path == "/api/course":
+            return self._json({"course": storage.get_course((qs.get("id") or [""])[0])})
+        if url.path == "/api/course/markdown":
+            vid = (qs.get("id") or [""])[0]
+            v = next((x for x in storage.get_library() if x["video_id"] == vid), None)
+            course = storage.get_course(vid)
+            if v is None or not course:
+                return self._error("No course for this video", 404)
+            name = safe_filename("Course " + v["title"]) + ".md"
+            data = course_markdown(v, course).encode("utf-8")
+            files.save_export(name, data)
+            return self._send(200, data, "text/markdown; charset=utf-8",
+                              extra_headers={"Content-Disposition": _attachment(name)})
+        if url.path == "/api/video/activity":
+            return self._json({"activity": storage.get_activity((qs.get("id") or [""])[0])})
         if url.path == "/api/video":
             vid = (qs.get("id") or [""])[0]
             details = storage.get_details(vid)
@@ -964,6 +1172,62 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     return self._error("Unknown action")
                 return self._json({"ok": True, "libraries": storage.get_libraries()})
+
+            if path == "/api/channels/follow":
+                value, auto = _clean(body.get("value")), body.get("auto", "summarize")
+                if not isinstance(value, str) or not value or len(value) > 300:
+                    return self._error("Give a channel link, @handle or video link")
+                if auto not in storage.CHANNEL_AUTO:
+                    return self._error(f"auto must be one of {', '.join(storage.CHANNEL_AUTO)}")
+                library = lib or 1
+                from extractor import video_id_from_url
+                vid = video_id_from_url(value) or (value if re.fullmatch(r"[\w-]{11}", value) else None)
+                label = _label("Follow the channel of", [vid]) if vid else f"Follow channel: {value[:60]}"
+                return self._queued(JOB.start("channels", label, lambda: _follow_channel(value, library, auto), key=["follow", value]))
+
+            if path == "/api/channels/update":
+                if "hours" in body:
+                    if body["hours"] not in CHANNEL_HOURS:
+                        return self._error(f"hours must be one of {', '.join(map(str, CHANNEL_HOURS))}")
+                    settings = llm.load_settings()
+                    settings["channel_hours"] = body["hours"]
+                    llm.save_settings(settings)
+                    for t in JOB.snapshot()["queue"]:   # the waiting check moves to the new interval
+                        if t["kind"] == "channels" and t["not_before"]:
+                            JOB.request_stop(t["id"])
+                    _schedule_channel_check()
+                    return self._json({"ok": True, "hours": body["hours"]})
+                if body.get("auto") not in storage.CHANNEL_AUTO:
+                    return self._error(f"auto must be one of {', '.join(storage.CHANNEL_AUTO)}")
+                if not storage.set_channel(_clean(body.get("id")) or "", auto=body["auto"]):
+                    return self._error("Not a followed channel", 404)
+                return self._json({"ok": True})
+
+            if path == "/api/channels/unfollow":
+                if not storage.unfollow_channel(_clean(body.get("id")) or ""):
+                    return self._error("Not a followed channel", 404)
+                if not storage.get_channels():   # the last one: no need for the waiting check
+                    for t in JOB.snapshot()["queue"]:
+                        if t["kind"] == "channels" and t["not_before"]:
+                            JOB.request_stop(t["id"])
+                return self._json({"ok": True})
+
+            if path in ("/api/channels/estimate", "/api/channels/import"):
+                cid = _clean(body.get("id")) or ""
+                if not any(c["id"] == cid for c in storage.get_channels()):
+                    return self._error("Not a followed channel", 404)
+                if path == "/api/channels/import":
+                    title = next(c["title"] for c in storage.get_channels() if c["id"] == cid)
+                    return self._queued(JOB.start("channels", f"Import all of {title}", lambda: _import_channel(cid), key=["import", cid]))
+                try:
+                    return self._json(_channel_estimate(cid))
+                except ValueError as e:
+                    return self._error(f"Could not read the channel: {e}", 502)
+
+            if path == "/api/channels/check":
+                if not storage.get_channels():
+                    return self._error("No channel is followed yet")
+                return self._queued(JOB.start("channels", "Check followed channels now", _check_channels, key="now"))
 
             if path == "/api/videos/remove":
                 ids = body.get("ids")
@@ -1340,22 +1604,21 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(rater.estimate(ids))
                 if not llm.is_configured(llm.load_settings(), "rate"):
                     return self._error("Choose an AI for ratings in Settings → AI first")
-                since = _utc_now()   # Retry, or a batch queued behind an overlapping one, skips videos rated after this
                 if ids is None and llm.night_settings(llm.load_settings())["on"]:   # name them, so long ones can wait
                     ids = [v["video_id"] for v in storage.videos_for_rating()]
-                return self._queued_split("rate", "Rate", ids, lambda part: lambda: rater.run_rate(
-                    part, should_stop=JOB.stop_requested, done_since=since))
+                return self._queued_split("rate", "Rate", ids, _rate_task(_utc_now()))
 
             if path == "/api/knowledge/build":
                 import knowledge
                 category = _clean(body.get("category"))
                 if not isinstance(category, str) or not category:
                     return self._error("category is required")
-                target = lib or 1
+                target, channel = lib or 1, (_clean(body.get("channel")) if isinstance(body.get("channel"), str) else None) or None
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
                 return self._queued(JOB.start("knowledge", f"Knowledge page: {category}",
-                                              lambda: knowledge.run_build(target, category), key=[target, category]))
+                                              lambda: knowledge.run_build(target, category, channel),
+                                              key=[target, category, channel]))
 
             if path in ("/api/summarize", "/api/summarize/estimate"):
                 import summarizer
@@ -1368,9 +1631,26 @@ class Handler(BaseHTTPRequestHandler):
                     return self._json(summarizer.estimate(ids))
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
-                since = _utc_now()   # as for Rate: Retry and overlapping batches skip videos summarised after this
-                return self._queued_split("summarize", "Summarise", ids, lambda part: lambda: summarizer.run_summarize(
-                    part, should_stop=JOB.stop_requested, done_since=since))
+                return self._queued_split("summarize", "Summarise", ids, _summarize_task(_utc_now()))
+
+            if path == "/api/course":
+                vid, per_week = body.get("id"), body.get("per_week")
+                if not isinstance(vid, str) or not vid:
+                    return self._error("id is required")
+                if per_week is not None and (type(per_week) is not int or not 1 <= per_week <= 7):
+                    return self._error("per_week must be 1 to 7, or null to end the course")
+                if storage.set_course_pace(vid, per_week) or per_week is None:   # parts already made: no AI needed
+                    return self._json({"ok": True, "course": storage.get_course(vid)})
+                if not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                return self._queued_split("course", "Course", [vid], _course_task(per_week))
+
+            if path == "/api/course/progress":
+                vid, key = body.get("id"), body.get("key")
+                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+", key):
+                    return self._error("key must be p<part> or a<part>.<action>")
+                progress = storage.set_course_progress(vid if isinstance(vid, str) else "", key, bool(body.get("done")))
+                return self._json({"ok": True, "progress": progress}) if progress is not None else self._error("No course for this video", 404)
 
             if path == "/api/details/settings":
                 settings = llm.load_settings()
@@ -1689,6 +1969,7 @@ def main(argv=None):
 
     clean_media_cache()
     storage.init_db()
+    _schedule_channel_check(minutes=CHANNEL_FIRST_CHECK_MINUTES)   # followed channels: first check soon after a start
     import platform
     applog.get("dashboard").info("Dashboard started: port=%s, python=%s, yt-dlp=%s, platform=%s, db=%s",
                                   args.port, platform.python_version(), _ytdlp_version(), sys.platform,

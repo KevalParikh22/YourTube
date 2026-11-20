@@ -338,6 +338,10 @@
   .drawer details summary { cursor: pointer; font-size: 12.5px; color: var(--ink-2); font-weight: 500; }
   .desc-text { white-space: pre-wrap; font-size: 13px; color: var(--ink-2); margin: 8px 0 0; max-height: 260px; overflow: auto; overflow-wrap: anywhere; }
   .transcript { max-height: 360px; overflow: auto; margin-top: 8px; }
+  .activity { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; max-height: 300px; overflow: auto; }
+  .activity li { display: grid; grid-template-columns: 9.5em 1fr; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+  .activity time { color: var(--ink-3); font-variant-numeric: tabular-nums; }
+  .activity li.failed b { color: var(--skim); }
 
   /* ---------- setup guide ---------- */
   .dl-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 22px; }
@@ -585,3 +589,9 @@
     .check { min-height: 40px; align-items: center; }
     .check input { width: 20px; height: 20px; flex: 0 0 20px; }
   }
+
+/* Weekly course (#/course) */
+.course-parts { list-style: none; padding: 0; margin: 10px 0 0; display: grid; gap: 18px; }
+.course-part.done > :not(.course-head) { opacity: .6; }
+.course-part ul { list-style: none; padding: 0; }
+.course-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }

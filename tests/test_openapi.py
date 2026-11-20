@@ -20,7 +20,7 @@ DASHBOARD_PATH = os.path.join(ROOT_DIR, "yourtube", "dashboard.py")
 
 ALLOWED_TAGS = {
     "Library", "Videos", "Categories", "AI", "Ask", "Search",
-    "Knowledge", "Jobs", "Local AI", "Files", "Tools", "Export"
+    "Knowledge", "Jobs", "Local AI", "Files", "Tools", "Export", "Channels"
 }
 
 

@@ -14,6 +14,7 @@
   "tags": [
     {"name": "Library", "description": "Playlists and video library management"},
     {"name": "Videos", "description": "Video details, metadata, transcripts, and status"},
+    {"name": "Channels", "description": "Followed channels whose new uploads are added and processed by themselves"},
     {"name": "Categories", "description": "Taxonomy management and categorization rules"},
     {"name": "AI", "description": "AI provider configuration, category discovery, rating, and summarization"},
     {"name": "Ask", "description": "Question answering and conversational inquiry over the library"},
@@ -1629,6 +1630,13 @@
         "operationId": "getKnowledgeStatus",
         "parameters": [
           {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "description": "A followed channel's ID (UC…): its own pages, built from its videos only",
+            "schema": {"type": "string"}
+          },
+          {
             "name": "library",
             "in": "query",
             "required": false,
@@ -1684,6 +1692,13 @@
             "schema": {"type": "string"}
           },
           {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "description": "A followed channel's ID (UC…): its own pages, built from its videos only",
+            "schema": {"type": "string"}
+          },
+          {
             "name": "library",
             "in": "query",
             "required": false,
@@ -1727,7 +1742,8 @@
                 "type": "object",
                 "properties": {
                   "category": {"type": "string", "description": "Category name"},
-                  "library": {"type": "integer", "description": "Library ID"}
+                  "library": {"type": "integer", "description": "Library ID"},
+                  "channel": {"type": "string", "description": "A followed channel's ID: build the page from that channel's videos only"}
                 },
                 "required": ["category"]
               }
@@ -1756,6 +1772,13 @@
             "in": "query",
             "required": true,
             "description": "Category name",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "description": "A followed channel's ID (UC…): its own pages, built from its videos only",
             "schema": {"type": "string"}
           },
           {
@@ -1809,6 +1832,153 @@
           },
           "401": {"$ref": "#/components/responses/Error401"},
           "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/video/activity": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "What ran on a video (details, transcription, slides, rating, summary), when, with which model, and its cloud AI tokens and cost",
+        "operationId": "getVideoActivity",
+        "parameters": [
+          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Steps, newest first (empty when nothing ran); tokens and cost are null when unknown or no cloud AI was used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "activity": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {"type": "string", "enum": ["details", "asr", "visual", "rate", "summarize"]},
+                          "at": {"type": "string", "description": "UTC, YYYY-MM-DD HH:MM:SS"},
+                          "ok": {"type": "integer", "enum": [0, 1]},
+                          "model": {"type": ["string", "null"]},
+                          "note": {"type": ["string", "null"], "description": "Error, or the outcome when not a plain success"},
+                          "tokens_in": {"type": ["integer", "null"]},
+                          "tokens_out": {"type": ["integer", "null"]},
+                          "cost": {"type": ["number", "null"], "description": "Approximate USD"}
+                        },
+                        "required": ["kind", "at", "ok"]
+                      }
+                    }
+                  },
+                  "required": ["activity"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/course": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "Get a video's parts and weekly course with its progress",
+        "operationId": "getCourse",
+        "parameters": [
+          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "The course: parts (start, end, title, summary, points, actions), per_week (null: parts only, no course yet) and progress ({\"p<i>\": true} part watched, {\"a<i>.<j>\": true} action done); course is null when the video has no parts",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"course": {"type": ["object", "null"]}}, "required": ["course"]}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      },
+      "post": {
+        "tags": ["AI"],
+        "summary": "Make a video a weekly course, change its pace, or end it",
+        "description": "With parts already made (by a long summary or an earlier course) this only sets the pace and replies with the course. Otherwise it queues a task that splits the video into 20-40 min parts and summarises each one; with the night queue on, a long video waits for the night.",
+        "operationId": "makeCourse",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Video ID"},
+                  "per_week": {"type": ["integer", "null"], "minimum": 1, "maximum": 7, "description": "Parts per week; null ends the course and keeps the parts"}
+                },
+                "required": ["id", "per_week"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The course ({ok, course}) when no AI was needed, else the queued task",
+            "content": {"application/json": {"schema": {"type": "object"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/course/progress": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Mark a course part watched or an action done",
+        "operationId": "setCourseProgress",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Video ID"},
+                  "key": {"type": "string", "pattern": "^(p\\d+|a\\d+\\.\\d+)$", "description": "p<part> or a<part>.<action>, counted from 0"},
+                  "done": {"type": "boolean"}
+                },
+                "required": ["id", "key", "done"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The course's new progress",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}, "progress": {"type": "object"}}}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/course/markdown": {
+      "get": {
+        "tags": ["Export"],
+        "summary": "Export a video's weekly course as Markdown",
+        "operationId": "exportCourseMarkdown",
+        "parameters": [
+          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Markdown: weeks, parts with watch links, key points and actions as checkboxes",
+            "content": {"text/markdown": {"schema": {"type": "string"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
         }
       }
     },
@@ -1936,6 +2106,199 @@
           "403": {"$ref": "#/components/responses/Error403"},
           "500": {"$ref": "#/components/responses/Error500"},
           "503": {"$ref": "#/components/responses/Error503"}
+        }
+      }
+    },
+    "/api/channels": {
+      "get": {
+        "tags": ["Channels"],
+        "summary": "Followed channels, the check interval and when the next check runs",
+        "operationId": "getChannels",
+        "responses": {
+          "200": {
+            "description": "Followed channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {"type": "string", "description": "YouTube channel ID (UC…)"},
+                          "title": {"type": "string"},
+                          "library_id": {"type": "integer"},
+                          "auto": {"type": "string", "enum": ["add", "details", "rate", "summarize"]},
+                          "videos": {"type": "integer", "description": "Videos added from it so far"},
+                          "followed_at": {"type": "string"},
+                          "last_checked": {"type": ["string", "null"]},
+                          "last_error": {"type": ["string", "null"]}
+                        }
+                      }
+                    },
+                    "hours": {"type": "integer"},
+                    "hour_choices": {"type": "array", "items": {"type": "integer"}},
+                    "next_check": {"type": ["string", "null"], "description": "Local time of the waiting check"}
+                  },
+                  "required": ["channels", "hours", "hour_choices", "next_check"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/channels/follow": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Queue following a channel: its current newest uploads are skipped, later uploads are added and processed per auto",
+        "operationId": "followChannel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {"type": "string", "maxLength": 300, "description": "Channel link, @handle, channel ID, or a video link or ID (its channel)"},
+                  "auto": {"type": "string", "enum": ["add", "details", "rate", "summarize"], "default": "summarize"},
+                  "library": {"type": "integer"}
+                },
+                "required": ["value"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Follow task queued", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}},
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/channels/update": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Change what happens to a channel's new videos ({id, auto}), or how often channels are checked ({hours})",
+        "operationId": "updateChannel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string"},
+                  "auto": {"type": "string", "enum": ["add", "details", "rate", "summarize"]},
+                  "hours": {"type": "integer", "enum": [1, 3, 6, 12, 24]}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Saved", "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}, "hours": {"type": "integer"}}, "required": ["ok"]}}}},
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/channels/unfollow": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Stop following a channel; its videos already added stay",
+        "operationId": "unfollowChannel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}}
+        },
+        "responses": {
+          "200": {"description": "Unfollowed", "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}}}},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/channels/estimate": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Read all of a followed channel's uploads and say what importing them means: videos, new ones, hours, summary cost",
+        "operationId": "estimateChannelImport",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string", "description": "Channel ID (UC…)"}}, "required": ["id"]}}}
+        },
+        "responses": {
+          "200": {
+            "description": "Estimate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "videos": {"type": "integer"},
+                    "new": {"type": "integer", "description": "Not in the library yet"},
+                    "to_summarize": {"type": "integer", "description": "Without a summary yet"},
+                    "hours": {"type": "number"},
+                    "summarize": {"type": "object", "description": "videos, tokens_in, tokens_out, cost (USD, null when unknown), uses, ready"},
+                    "night": {"type": "boolean", "description": "500 or more to summarise: the summaries wait for the night queue"},
+                    "night_at": {"type": "string", "description": "When the night queue starts next (local ISO time)"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"},
+          "502": {"$ref": "#/components/responses/Error502"}
+        }
+      }
+    },
+    "/api/channels/import": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Queue importing all of a followed channel's uploads: add them to its source, fetch details, then queue their summaries (at night for 500+)",
+        "operationId": "importChannel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string", "description": "Channel ID (UC…)"}}, "required": ["id"]}}}
+        },
+        "responses": {
+          "200": {"description": "Import queued", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/channels/check": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Queue a check of every followed channel now",
+        "operationId": "checkChannels",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "responses": {
+          "200": {"description": "Check queued", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}},
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
         }
       }
     },

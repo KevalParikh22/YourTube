@@ -50,6 +50,24 @@ def safe_filename(name: str, limit: int = 80) -> str:
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", name or "").strip(" .")
     return (" ".join(name.split())[:limit].rstrip(" .") or "untitled")
 
+def course_markdown(v: Dict[str, Any], course: Dict[str, Any]) -> str:
+    """A video's weekly course (storage.get_course): weeks, parts with watch links, key points, and actions as checkboxes."""
+    vid, done, per_week = v["video_id"], course.get("progress") or {}, course.get("per_week") or 1
+    out = [f"# Course: {_md_text(v.get('title'))}", "",
+           f"[▶ Watch on YouTube](https://www.youtube.com/watch?v={vid}) · {_md_text(v.get('channel'))} · {_length(v.get('duration_seconds'))}"
+           f" · {len(course['parts'])} parts, {per_week} a week", ""]
+    for i, p in enumerate(course["parts"]):
+        if i % per_week == 0:
+            out += [f"## Week {i // per_week + 1}", ""]
+        out += [f"### {'✓ ' if done.get(f'p{i}') else ''}Part {i + 1}: {_md_text(p.get('title'))}", "",
+                f"[Watch {_clock(p['start'])}–{_clock(p['end'])}]({_at(vid, p['start'])})", ""]
+        if p.get("summary"):
+            out += [_md_text(p["summary"]), ""]
+        out += [f"- [{_clock(x['t'])}]({_at(vid, x['t'])}) {_md_text(x['text'])}" for x in p.get("points") or []]
+        out += [f"- [{'x' if done.get(f'a{i}.{j}') else ' '}] {_md_text(a)}" for j, a in enumerate(p.get("actions") or [])]
+        out.append("")
+    return "\n".join(out)
+
 def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None, summary: Dict[str, Any] = None) -> str:
     """One video's note. `v` is a library row (storage.get_library); `details` from storage.get_details."""
     details = details or {}

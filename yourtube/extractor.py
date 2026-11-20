@@ -85,6 +85,39 @@ def extract_video(video_id: str) -> Dict[str, Any]:
             "duration_seconds": int(info.get("duration") or 0), "url": f"https://www.youtube.com/watch?v={info['id']}",
             "position": 0, "category": "Uncategorized", "status": "unwatched"}
 
+def resolve_channel(value: str) -> Dict[str, str]:
+    """
+    {'id': 'UC…', 'title'} of a channel, from a channel link (@handle, /channel/UC…, /c/…), a bare @handle, or a
+    video link or ID (its channel). Read anonymously. Raises ValueError when YouTube returns no channel.
+    """
+    value = (value or "").strip()
+    vid = video_id_from_url(value) or (value if re.fullmatch(r"[\w-]{11}", value) else None)
+    if vid:
+        url = f"https://www.youtube.com/watch?v={vid}"
+    elif "://" in value or value.startswith(("youtube.com", "www.youtube.com")):
+        url = value if "://" in value else "https://" + value
+    elif re.fullmatch(r"UC[\w-]{22}", value):
+        url = f"https://www.youtube.com/channel/{value}"
+    else:
+        url = f"https://www.youtube.com/@{value.lstrip('@')}"
+    opts = {"skip_download": True, "quiet": True, "no_warnings": True, "logger": _QuietLogger(),
+            "extract_flat": True, "playlist_items": "1"}   # the channel's name and ID only, not its videos
+    try:
+        with YT_LOCK, yt_dlp.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as e:
+        raise ValueError(_clean_error(str(e))) from None
+    cid = (info or {}).get("channel_id")
+    if not cid or not re.fullmatch(r"UC[\w-]{22}", cid):
+        raise ValueError("YouTube did not return a channel for this link")
+    return {"id": cid, "title": info.get("channel") or info.get("uploader") or info.get("title") or cid}
+
+def read_latest_uploads(channel_id: str, count: Optional[int] = 15) -> List[Dict[str, Any]]:
+    """The channel's newest uploads (its 'UU…' uploads playlist, newest first; count None: all), read anonymously."""
+    url = f"https://www.youtube.com/playlist?list=UU{channel_id[2:]}"
+    raw = _read_playlist_once(url, {"playlistend": count})   # extra yt-dlp options go in the same dict as cookies
+    return _parse_playlist(raw, url, None)["videos"]
+
 def normalize_playlist_url(playlist_url: str) -> str:
     """Accepts a full URL, a bare playlist ID, or 'WL' / 'watch later'."""
     value = playlist_url.strip()

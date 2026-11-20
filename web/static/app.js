@@ -16,12 +16,14 @@ const JOB_TEXT = {
   details: ['Fetching video details, one video every few seconds…', 'Video details fetched', 'Details run stopped early. See the log.'],
   rate: ['Rating videos…', 'Videos rated', 'Rating stopped early. See the log.'],
   summarize: ['Summarising videos…', 'Video summaries ready', 'Summarising stopped early. See the log.'],
+  course: ['Splitting the video into parts and summarising each…', 'Course ready', 'Making the course stopped early. See the log.'],
   knowledge: ['Building the knowledge page…', 'Knowledge page ready', 'Knowledge page build stopped or failed. See the log.'],
   pull: ['Downloading the model into Ollama…', 'Model downloaded', 'Download stopped. See the log.'],
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
   visual: ['Reading slides: downloading video, picking frames, reading them…', 'Slides read', 'Slide reading stopped or failed. See the log.'],
   embed: ['Updating the meaning index…', 'Meaning index updated', 'Index update stopped or failed. See the log.'],
   remove: ['Removing from YourTube…', 'Removed from YourTube', 'Removing failed. See the log.'],
+  channels: ['Reading followed channels…', 'Followed channels checked', 'Reading the channel failed. See the log.'],
   archive: ['Archiving playlist and freeing storage…', 'Playlist archived', 'Archiving the playlist failed. See the log.'],
   backup: ['Backing up the library…', 'Library backup created', 'Library backup failed. See the log.'],
 };
@@ -43,7 +45,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   statusUndo: [],
-  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, courses: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
@@ -112,6 +114,7 @@ const byId = id => S.data.videos.find(v => v.video_id === id);
 const libPlaylists = () => S.lib ? S.data.playlists.filter(p => p.library_id === S.lib) : S.data.playlists;
 const libName = id => (S.data.libraries.find(l => l.id === id) || {}).name || '';
 const isSingle = id => /^_single(-\d+)?$/.test(id);
+const isChannel = id => /^_channel-UC[\w-]{22}$/.test(id);   // storage.channel_source: a followed channel's videos
 const FALLBACK = () => S.data.fallback_category;
 const playlistName = id => (S.data.playlists.find(p => p.id === id) || {}).title || id;
 const srcEntry = (v, src) => v.sources.find(s => s.id === src);
@@ -257,6 +260,7 @@ function renderView() {
   }
   else if (r === 'knowledge') {
     const cat = routeParam('category');
+    if ((S.knowledge.scope || null) !== routeParam('channel')) S.knowledge = { list: null, pages: {}, loadingList: false, loadingPage: null, scope: routeParam('channel') };
     if (cat) {
       v.innerHTML = viewKnowledgePage(cat);
       if (!S.knowledge.pages[cat] && S.knowledge.loadingPage !== cat) loadKnowledgePage(cat);
@@ -266,6 +270,11 @@ function renderView() {
       if (!S.knowledge.list && !S.knowledge.loadingList) loadKnowledgeList();
     }
     updateJob();
+  }
+  else if (r === 'course') {
+    const id = routeParam('id');
+    v.innerHTML = viewCourse(id);
+    if (S.courses[id] === undefined) loadCourse(id);
   }
   else if (r === 'search') {
     const q = routeParam('q');
@@ -495,6 +504,9 @@ function viewHome() {
     ${inProgress.length ? `<ul class="rows">${inProgress.map(row).join('')}</ul>` : '<p class="note">Nothing in progress.</p>'}
   </section>
 
+  ${(S.data.courses || []).length ? `<section class="section home-card"><h2 class="h">Courses</h2><ul class="rows">${S.data.courses.filter(c => byId(c.video_id)).map(c =>
+    `<li><a href="#/course?id=${encodeURIComponent(c.video_id)}">${esc(byId(c.video_id).title)}</a> <span class="faint">· ${c.done} of ${plural(c.parts, 'part')} watched · ${c.per_week} a week</span></li>`).join('')}</ul></section>` : ''}
+
   <section class="section home-card"><h2 class="h">Top picks</h2>
     ${!rated.length ? `<p class="note">Rate your videos to get picks. <button class="btn-text" data-act="rate-batch">Rate videos</button></p>`
       : picks.length ? `<ul class="rows">${picks.map(row).join('')}</ul><a class="btn-text" href="#/" data-act="home-picks">See all →</a>`
@@ -651,6 +663,7 @@ function viewSources() {
         const synced = isPlaylistSynced(p);
         const syncBtn = isSingle(p.id)
           ? '<span class="faint" style="font-size:12.5px">Videos added by link</span>'
+          : isChannel(p.id) ? '<span class="faint" style="font-size:12.5px">Followed channel: new uploads come in by themselves</span>'
           : synced
           ? `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}" title="Reads the playlist again: adds new videos, flags removed ones. Nothing changes on YouTube.">Check for new videos</button>`
           : `<button class="btn btn-sm" data-act="resync" data-id="${esc(p.id)}">Sync</button>`;
@@ -670,13 +683,56 @@ function viewSources() {
         <td class="r" data-label="Watch time">${fmt(p.duration_seconds)}</td>
         ${syncCell}
         <td class="r" data-label="Actions" style="white-space:nowrap">${syncBtn}
-          ${/^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}
+          ${isChannel(p.id) ? `<a class="btn-text" href="https://www.youtube.com/channel/${encodeURIComponent(p.id.slice(9))}" target="_blank" rel="noopener">YouTube ↗</a>`
+            : /^[\w-]+$/.test(p.id) && !isSingle(p.id) ? `<a class="btn-text" href="https://www.youtube.com/playlist?list=${encodeURIComponent(p.id)}" target="_blank" rel="noopener">YouTube ↗</a>` : ''}
           ${finished && !archived ? `<button class="btn-text" data-act="pl-archive" data-id="${esc(p.id)}" data-job-btn title="Keeps titles, status, notes, ratings and summaries; deletes transcripts, slide pictures and search data to free storage. Nothing changes on YouTube.">Archive</button>` : ''}
           <button class="btn-text" data-act="pl-remove" data-id="${esc(p.id)}" data-job-btn aria-label="${archived ? 'Remove completely' : 'Remove'} ${esc(p.title)} from YourTube">${archived ? 'Remove completely' : 'Remove'}</button></td>
       </tr>`;
       }).join('')}</tbody></table></div>` : `<p class="note">${S.lib && S.data.playlists.length ? `No playlists in ${esc(libName(S.lib))} yet. Add one above, or move one here from another library.` : 'No playlists yet. Add one above.'}</p>`}
   </section>
+  ${viewChannels()}
   ${viewLibraries()}`;
+}
+// Followed channels (dashboard._check_channels): their new uploads come in by themselves and are processed per CHANNEL_AUTO
+const CHANNEL_AUTO = [['summarize', 'Rate and summarise'], ['rate', 'Rate'], ['details', 'Fetch details only'], ['add', 'Just add']];
+async function loadChannels() {
+  S.channels = 'loading';
+  try { S.channels = await api('/api/channels'); } catch (e) { S.channels = { error: e.message, channels: [] }; }
+  if (['sources', 'knowledge'].includes(route())) refresh();
+  if (S.drawer) renderDrawer();
+}
+const followedTitle = name => Array.isArray(S.channels?.channels) && S.channels.channels.some(c => c.title === name);
+function viewChannels() {
+  const C = S.channels;
+  if (C === undefined) loadChannels();
+  const head = `<h2 class="h">Followed channels</h2>`;
+  if (!C || C === 'loading') return `<section class="section card">${head}<p class="note">Loading…</p></section>`;
+  const auto = (value, attrs) => `<select ${attrs} style="width:100%">${CHANNEL_AUTO.map(([k, l]) => `<option value="${k}" ${value === k ? 'selected' : ''}>${l}</option>`).join('')}</select>`;
+  const list = C.channels.length ? `<div class="tbl-wrap"><table class="tbl tbl-cards">
+    <thead><tr><th>Channel</th><th class="r">Videos</th><th>New videos</th><th>Last checked</th><th></th></tr></thead>
+    <tbody>${C.channels.map(c => `<tr><td data-label="Name"><a href="https://www.youtube.com/channel/${encodeURIComponent(c.id)}" target="_blank" rel="noopener">${esc(c.title)} ↗</a>
+        ${c.last_error ? `<div class="faint" style="font-size:12px;color:var(--skip)">Last check failed: ${esc(c.last_error.slice(0, 120))}</div>` : ''}</td>
+      <td class="r" data-label="Videos">${c.videos}</td>
+      <td data-label="New videos">${auto(c.auto, `data-change="channel-auto" data-id="${esc(c.id)}" aria-label="What happens to new videos from ${esc(c.title)}"`)}</td>
+      <td class="muted" data-label="Last checked">${c.last_checked ? esc(fmtRelTime(c.last_checked)) : 'Not yet'}</td>
+      <td data-label="Actions"><span style="display:inline-flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-text" data-act="channel-import" data-id="${esc(c.id)}" data-title="${esc(c.title)}" data-job-btn title="Add all of its past videos and summarise them for its knowledge pages">Import all</button>
+        ${c.videos ? `<a class="btn-text" href="#/knowledge?channel=${encodeURIComponent(c.id)}">Knowledge</a>
+        <button class="btn-text" data-act="channel-ask" data-id="${esc(c.id)}">Ask</button>` : ''}
+        <button class="btn-text" data-act="channel-unfollow" data-id="${esc(c.id)}" data-title="${esc(c.title)}">Unfollow</button></span></td></tr>`).join('')}</tbody></table></div>`
+    : `<p class="note">No channels yet. Follow one below, or open a video and click Follow channel.</p>`;
+  return `<section class="section card">${head}
+    <p class="note">New uploads from these channels are added to your library by themselves${tip('Every few hours while the dashboard runs, YourTube reads the newest uploads of each channel (anonymously) and adds the new ones to a source named after the channel, then fetches their details and rates or summarises them as chosen. The videos already there when you follow are not added. Unfollowing keeps the videos.')}</p>
+    ${list}
+    <div class="route" style="margin-top:14px"><label class="field-label" style="margin:0" for="ch-value">Follow</label>
+      <input type="text" id="ch-value" placeholder="Channel link, @handle or a video link" style="width:100%"></div>
+    <div class="route"><label class="field-label" style="margin:0" for="ch-auto">New videos</label>${auto('summarize', 'id="ch-auto"')}</div>
+    <div class="actions"><button class="btn btn-sm btn-dark" data-act="channel-follow" data-job-btn>Follow</button></div>
+    <div class="route" style="margin-top:14px"><label class="field-label" style="margin:0" for="ch-hours">Check every</label>
+      <select id="ch-hours" data-change="channel-hours" style="width:100%">${C.hour_choices.map(h => `<option value="${h}" ${h === C.hours ? 'selected' : ''}>${h} hour${h === 1 ? '' : 's'}</option>`).join('')}</select></div>
+    <p class="hint">${C.next_check ? `Next check ${esc(atTime(C.next_check))}. ` : ''}Checks run only while the dashboard runs (for example as a background service).
+      ${C.channels.length ? '<button class="btn-text" style="height:auto;padding:0" data-act="channel-check" data-job-btn>Check now</button>' : ''}</p>
+  </section>`;
 }
 function viewLibraries() {
   const libs = S.data.libraries;
@@ -821,7 +877,9 @@ function syncFailureCard(job) {
 function renderJobs() {
   const box = $('#jobs'), job = S.data?.job;
   if (!box || !job) return;
-  const waiting = job.queue?.length || 0, last = job.recent?.[0];
+  // waiting: due as soon as a lane is free; atNight: night-queue tasks (the scheduled channel check is shown on Playlists)
+  const waiting = (job.queue || []).filter(t => !t.not_before).length, last = job.recent?.[0];
+  const atNight = (job.queue || []).filter(t => t.not_before && t.kind !== 'channels').length;
   const active = (job.lanes || []).filter(l => l.running);
   const stopping = !!job.stopping || S.stopPending;
   const flash = !job.running && last && S.flash?.id === last.id && Date.now() < S.flash.until;
@@ -829,9 +887,9 @@ function renderJobs() {
   const pill = active.length
     ? `<button class="jobpill run" data-act="jobs-toggle" aria-expanded="${!!S.jobsOpen}" title="${active.map(l => esc(l.label)).join(', ')}${waiting ? ` (+${waiting} waiting)` : ''}"><span class="spin"></span><span class="jl">${active.length} running</span>${waiting ? `<b>+${waiting}<span class="jw"> waiting</span></b>` : ''}</button>`
     : flash ? `<button class="jobpill ${last.ok && !last.stopped ? 'ok' : 'bad'}" data-act="jobs-toggle"><span class="jl">${last.stopped ? 'Stopped' : last.ok ? 'Finished' : 'Failed'}: ${esc(last.label)}</span></button>`
-    : (job.queue || []).some(t => t.not_before) ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks waiting for the night queue" aria-label="Tasks waiting for the night queue">
+    : atNight ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks waiting for the night queue" aria-label="Tasks waiting for the night queue">
         <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" style="flex:none"><path d="M13 9.8A5.5 5.5 0 0 1 6.2 3 5.5 5.5 0 1 0 13 9.8z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
-        <b>${job.queue.filter(t => t.not_before).length}</b><span class="jw">at night</span></button>`
+        <b>${atNight}</b><span class="jw">at night</span></button>`
     : job.recent?.length ? `<button class="jobpill idle" data-act="jobs-toggle" title="Tasks">Tasks</button>` : '';
   const row = (t, state, action) => `<div class="jobrow"><span class="st st-${state}">${{ run: 'Running', stopping: 'Stopping…', wait: 'Waiting', later: 'Later', ok: 'Finished', bad: 'Failed', stop: 'Stopped' }[state]}</span>
       <span class="jl" title="${esc(t.label)}">${esc(t.label)}</span>${action}</div>`;
@@ -963,12 +1021,14 @@ async function taskFinished(t) {
   const text = JOB_TEXT[t.kind] || JOB_TEXT.sync;
   if (['details', 'sync', 'asr', 'visual', 'remove'].includes(t.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
   if (t.kind === 'summarize' || t.kind === 'remove') S.summaryCache = {};
+  if (['course', 'summarize', 'remove'].includes(t.kind)) S.courses = {};
   if (['summarize', 'knowledge', 'remove'].includes(t.kind)) { S.knowledge.list = null; S.knowledge.pages = {}; }
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
   if (['pull', 'embed', 'sync', 'details', 'asr', 'visual', 'rate', 'summarize', 'remove'].includes(t.kind)) S.indexStatus = undefined;   // searchable text changed
   if (t.kind === 'backup') S.storage = null;
   S.usage = undefined;   // any task may have called a cloud AI
+  if (t.kind === 'channels') S.channels = undefined;
   S.flash = { id: t.id, until: Date.now() + 15000 };
   S.stopPending = false;
   if (!t.stopped) toast(t.ok ? text[1] : text[2], !t.ok);
@@ -1362,10 +1422,13 @@ async function runAsk() {
 }
 
 /* ---------------- knowledge ---------------- */
+// Pages of the whole library, or of one followed channel (#/knowledge?channel=UC…, knowledge.page_key)
+const kScope = (sep = '&') => routeParam('channel') ? `${sep}channel=${encodeURIComponent(routeParam('channel'))}` : '';
+const kChannel = () => routeParam('channel') && (S.channels?.channels || []).find(c => c.id === routeParam('channel'));
 async function buildKnowledge(category) {
   try {
     const lib = S.lib || 1;
-    const res = await api('/api/knowledge/build', { category, library: lib });
+    const res = await api('/api/knowledge/build', { category, library: lib, channel: routeParam('channel') || undefined });
     await queued(res, `Knowledge page: ${category}`);
   } catch (e) {
     toast(e.message, true);
@@ -1377,7 +1440,7 @@ async function loadKnowledgeList() {
   S.knowledge.loadingList = true;
   try {
     const lib = S.lib || 1;
-    const res = await api(`/api/knowledge?library=${lib}`);
+    const res = await api(`/api/knowledge?library=${lib}${kScope()}`);
     S.knowledge.list = res.categories || [];
   } catch (e) {
     S.knowledge.list = { error: e.message };
@@ -1392,7 +1455,7 @@ async function loadKnowledgePage(cat) {
   S.knowledge.loadingPage = cat;
   try {
     const lib = S.lib || 1;
-    const res = await api(`/api/knowledge/page?library=${lib}&category=${encodeURIComponent(cat)}`);
+    const res = await api(`/api/knowledge/page?library=${lib}&category=${encodeURIComponent(cat)}${kScope()}`);
     S.knowledge.pages[cat] = res;
   } catch (e) {
     S.knowledge.pages[cat] = { error: e.message };
@@ -1409,9 +1472,13 @@ function viewKnowledgeList() {
   return `
   <section>
     <div class="eyebrow">Knowledge</div>
-    <h1 class="display">Knowledge base<em>Topic pages from your summaries</em></h1>
+    <h1 class="display">Knowledge base<em>${kChannel() ? `Topic pages from ${esc(kChannel().title)}` : 'Topic pages from your summaries'}</em></h1>
     <p class="lede">Study pages combining notes, minutes, and quotes across your videos, citing every moment.</p>
     ${!S.lib ? `<div class="banner"><span>Knowledge pages belong to a single library. Showing pages for <b>${esc(libName(1) || 'Library 1')}</b>. Pick a specific library above to switch.</span></div>` : ''}
+    ${Array.isArray(S.channels?.channels) && S.channels.channels.length ? `<label class="field-label" style="max-width:360px">Pages from
+      <select data-change="knowledge-scope"><option value="">The whole library</option>
+      ${S.channels.channels.map(c => `<option value="${esc(c.id)}" ${routeParam('channel') === c.id ? 'selected' : ''}>Channel: ${esc(c.title)}</option>`).join('')}</select></label>`
+      : S.channels === undefined ? (loadChannels(), '') : ''}
     ${!ai.ready_for.summarize ? `<div class="banner"><span>Set up an AI for summaries in Settings to build knowledge pages.</span><a class="btn btn-sm" href="#/settings/routing">Set up AI</a></div>` : ''}
     <div id="job"></div>
   </section>
@@ -1444,7 +1511,7 @@ function viewKnowledgeList() {
               return `<tr>
                 <td data-label="Topic">
                   ${hasPage
-                    ? `<a href="#/knowledge?category=${encodeURIComponent(c.category)}" style="font-weight:600">${esc(c.category)}</a>`
+                    ? `<a href="#/knowledge?category=${encodeURIComponent(c.category)}${kScope()}" style="font-weight:600">${esc(c.category)}</a>`
                     : `<span style="font-weight:600">${esc(c.category)}</span>`}
                 </td>
                 <td data-label="Summaries" style="font-size:13.5px">${esc(sumText)}</td>
@@ -1452,7 +1519,7 @@ function viewKnowledgeList() {
                 <td class="r" data-label="Actions">
                   <div style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">
                     <button class="btn btn-sm" data-act="knowledge-summarize-five" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize || c.summarised >= c.videos ? 'disabled' : ''}>Summarise 5</button>
-                    ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}">Open</a>` : ''}
+                    ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}${kScope()}">Open</a>` : ''}
                     ${isStale ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Update knowledge page'}">Update</button>`
                       : isReady ? `<button class="btn btn-sm btn-text" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Rebuild knowledge page'}">Rebuild</button>`
                       : c.summarised >= 3 ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize ? 'disabled' : ''} title="Build knowledge page">Build</button>` : ''}
@@ -1472,7 +1539,7 @@ function viewKnowledgeList() {
 
 async function summarizeKnowledgeFive(category) {
   try {
-    const candidates = videos().filter(v => v.category === category && !isDone(v)).sort((a, b) => (a.status === 'unwatched' ? 0 : 1) - (b.status === 'unwatched' ? 0 : 1));
+    const ch = routeParam('channel'), candidates = videos().filter(v => v.category === category && !isDone(v) && (!ch || srcEntry(v, `_channel-${ch}`))).sort((a, b) => (a.status === 'unwatched' ? 0 : 1) - (b.status === 'unwatched' ? 0 : 1));
     const done = new Set(S.data.summarised || []);
     const selected = candidates.filter(v => !done.has(v.video_id)).slice(0, 5).map(v => v.video_id);
     if (!selected.length) { toast('No unsummarised unwatched videos in this category'); return; }
@@ -1484,12 +1551,12 @@ function viewKnowledgePage(cat) {
   const lib = S.lib || 1;
   const data = S.knowledge.pages[cat];
   const ai = S.data.ai;
-  const exportUrl = `/api/export/knowledge?library=${encodeURIComponent(lib)}&category=${encodeURIComponent(cat)}`;
+  const exportUrl = `/api/export/knowledge?library=${encodeURIComponent(lib)}&category=${encodeURIComponent(cat)}${kScope()}`;
 
   if (!data) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="note" style="margin-top:20px"><span class="spin" style="display:inline-block"></span> Loading page…</p>
@@ -1500,7 +1567,7 @@ function viewKnowledgePage(cat) {
   if (data.error) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="note warn-text" style="margin-top:20px">Could not load knowledge page: ${esc(data.error)}</p>
@@ -1511,7 +1578,7 @@ function viewKnowledgePage(cat) {
   if (!data.page) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="lede">Build a study page from this topic’s video summaries.</p>
@@ -1539,7 +1606,7 @@ function viewKnowledgePage(cat) {
   return `
   <section>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-      <a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a>
+      <a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a>
       <div style="display:flex;gap:8px;align-items:center">
         <a class="btn btn-sm" href="${esc(exportUrl)}" download>Export note</a>
         <button class="btn btn-sm ${isStale ? 'btn-dark' : ''}" data-act="knowledge-build" data-cat="${esc(cat)}" ${!ai.ready_for.summarize ? 'disabled' : ''} title="${isStale ? 'Update page with newest summaries' : 'Rebuild page'}">${isStale ? 'Update' : 'Rebuild'}</button>
@@ -2154,9 +2221,12 @@ function renderDrawer() {
     <div class="drawer-body">
       <div class="embed"><iframe src="https://www.youtube-nocookie.com/embed/${encodeURIComponent(v.video_id)}?rel=0" title="${esc(v.title)}"
         referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen loading="lazy"></iframe></div>
-      <div><h3>${esc(v.title)}</h3><div class="by">${esc(v.channel || 'Unknown channel')}</div></div>
+      <div><h3>${esc(v.title)}</h3><div class="by">${esc(v.channel || 'Unknown channel')}
+        ${S.channels === undefined ? (loadChannels(), '') : followedTitle(v.channel) ? '<span class="faint"> · Following</span>'
+          : ` · <button class="btn-text" style="height:auto;padding:0" data-act="channel-follow" data-value="${esc(v.video_id)}" data-job-btn title="Add this channel's new uploads to your library by themselves">Follow channel</button>`}</div></div>
       <div class="speeds">${d ? SPEEDS.map(s => `<span class="${s === S.speed ? 'on' : ''}">${sx(s)} <b>${fmt(d / s)}</b></span>`).join('') : 'No duration available'}</div>
       <div id="d-summary">${drawerSummary(v)}</div>
+      ${drawerCourse(v)}
       <div id="d-rating">${drawerRating(v)}</div>
       <div><span class="field-label">Status</span>
         <div class="seg" id="d-status">${Object.entries(STATUS_LABEL).map(([k, l]) => `<button data-act="set-status" data-id="${esc(v.video_id)}" data-status="${k}" class="${v.status === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
@@ -2169,6 +2239,7 @@ function renderDrawer() {
         <div class="kv-line">Notes save when you click away.</div></div>
       <div id="d-details">${drawerDetails(v)}</div>
       <div id="d-slides">${drawerSlides(v)}</div>
+      <div id="d-activity">${drawerActivity(v)}</div>
       <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
     </div>
   </aside>`;
@@ -2185,6 +2256,22 @@ function renderDrawer() {
     old.scrollTop = scroll;
   } else box.innerHTML = html;
   loadSummary(v.video_id);
+  loadActivity(v.video_id);
+}
+// What ran on the video (storage.video_activity), reloaded on every redraw so a finished task shows up
+const ACTIVITY_LABEL = { details: 'Details fetched', asr: 'Transcribed', visual: 'Slides read', rate: 'Rated', summarize: 'Summarised' };
+function drawerActivity(v) {
+  const rows = S.activity?.id === v.video_id ? S.activity.rows : null;
+  const cost = c => c == null ? '' : ` · ${c > 0 && c < 0.01 ? '<$0.01' : `$${c.toFixed(2)}`}`;
+  return `<details ${keepOpen('activity')}><summary>Activity${rows ? ` · ${plural(rows.length, 'step')}` : ''}</summary>
+    ${!rows ? '<div class="kv-line">Loading…</div>' : !rows.length ? '<div class="kv-line">Nothing has run on this video yet.</div>'
+      : `<ul class="activity">${rows.map(r => `<li class="${r.ok ? '' : 'failed'}"><time title="${esc(fmtFullDate(r.at))}">${fmtDate(r.at)}</time>
+          <span><b>${esc(ACTIVITY_LABEL[r.kind] || r.kind)}</b>${r.ok ? '' : ' · failed'}${r.model ? ` <span class="faint">· ${esc(r.model)}</span>` : ''}${r.tokens_in != null
+            ? ` <span class="faint">· ${tokens(r.tokens_in)} in, ${tokens(r.tokens_out)} out${cost(r.cost)}</span>` : ''}${r.note ? `<br><span class="faint">${esc(r.note)}</span>` : ''}</span></li>`).join('')}</ul>`}</details>`;
+}
+async function loadActivity(id) {
+  try { S.activity = { id, rows: (await api(`/api/video/activity?id=${encodeURIComponent(id)}`)).activity }; } catch (e) { return; }
+  if (S.drawer === id && $('#d-activity')) $('#d-activity').innerHTML = drawerActivity(byId(id));
 }
 function drawerRating(v) {
   const r = v.rating;
@@ -2214,6 +2301,62 @@ function drawerRating(v) {
     <div class="kv-line">${r.basis === 'metadata' ? 'Rated from title and description only' : 'Rated from the transcript'} · ${esc(r.model || '')}
       · <button class="btn-text" style="padding:0;height:auto;font-size:12.5px" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate again</button></div>
   </div>`;
+}
+// A video longer than one part (40 min) can become a weekly course; parts made by a long summary are reused
+function drawerCourse(v) {
+  const c = (S.data.courses || []).find(x => x.video_id === v.video_id);
+  if (c) return `<div class="kv-line">Course: ${c.done} of ${plural(c.parts, 'part')} watched. <a href="#/course?id=${encodeURIComponent(v.video_id)}" data-act="close">Open course →</a></div>`;
+  if ((v.duration_seconds || 0) <= 40 * 60 || !S.data.ai.ready_for.summarize) return '';
+  return `<div class="kv-line">Too long to watch at once? <select id="d-course-pace" aria-label="Parts per week">${[1, 2, 3, 4].map(n => `<option value="${n}" ${n === 2 ? 'selected' : ''}>${n} part${n > 1 ? 's' : ''} a week</option>`).join('')}</select>
+    <button class="btn-text" style="padding:0;height:auto" data-act="course-make" data-id="${esc(v.video_id)}" data-job-btn>Make a weekly course</button>
+    ${tip('Splits the video into 20–40 minute parts and summarises each with key points and things to do, using your summaries AI. With the night queue on, a long video waits for the night.')}</div>`;
+}
+async function loadCourse(id) {
+  S.courses[id] = 'loading';
+  try { S.courses[id] = (await api(`/api/course?id=${encodeURIComponent(id)}`)).course; }
+  catch (e) { S.courses[id] = { error: e.message }; }
+  if (route() === 'course' && routeParam('id') === id) refresh();
+}
+async function setCourse(id, per_week) {
+  try {
+    const res = await api('/api/course', { id, per_week });
+    if (res.course !== undefined) { S.courses[id] = res.course; await load({ keepEdits: true }); toast(per_week ? 'Course ready' : 'Course ended. The parts are kept.'); }
+    else await queued(res, 'Course');
+  } catch (e) { toast(e.message, true); }
+}
+function viewCourse(id) {
+  const v = byId(id), c = S.courses[id];
+  const back = '<div style="margin-bottom:14px"><a href="#/home" class="btn-text" style="padding-left:0">← Home</a></div>';
+  if (!v) return back + '<p class="note">This video is not in your library.</p>';
+  if (c === undefined || c === 'loading') return back + '<p class="note">Loading course…</p>';
+  if (c?.error) return back + `<p class="note">Could not load the course: ${esc(c.error)}</p>`;
+  if (!c?.per_week) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">No course for this video yet. Open the video and choose <b>Make a weekly course</b>.</p>`;
+  const done = c.progress || {}, n = c.parts.length, weeks = Math.ceil(n / c.per_week);
+  const watched = c.parts.filter((_, i) => done['p' + i]).length;
+  const time = t => `<button class="time-link" data-act="play-at" data-id="${esc(id)}" data-t="${Math.floor(t)}">${clock(Math.floor(t))}</button>`;
+  const box = (key, label, extra = '') => `<label class="keep"><input type="checkbox" data-change="course-progress" data-id="${esc(id)}" data-key="${key}" ${done[key] ? 'checked' : ''}${extra}> ${label}</label>`;
+  const part = (p, i) => `<li class="course-part${done['p' + i] ? ' done' : ''}">
+      <div class="course-head">${box('p' + i, `<b>Part ${i + 1}: ${esc(p.title || 'Untitled')}</b>`)}
+        <button class="btn btn-sm" data-act="play-at" data-id="${esc(id)}" data-t="${p.start}">▶ Watch ${clock(p.start)}–${clock(p.end)}</button></div>
+      ${p.summary ? `<p>${esc(p.summary)}</p>` : ''}
+      ${(p.points || []).length ? `<ul>${p.points.map(x => `<li><div class="chap"><span>${time(x.t)}</span><span>${esc(x.text)}</span></div></li>`).join('')}</ul>` : ''}
+      ${(p.actions || []).length ? `<div class="field-label">Do this week</div>${p.actions.map((a, j) => `<div>${box(`a${i}.${j}`, esc(a))}</div>`).join('')}` : ''}
+    </li>`;
+  return `${back}<section>
+    <div class="eyebrow">Course · ${plural(weeks, 'week')} · ${plural(n, 'part')}</div>
+    <h1 class="display">${esc(v.title)}<em>${watched} of ${n} parts watched</em></h1>
+    <div class="meter"><i style="width:${n ? watched / n * 100 : 0}%"></i></div>
+    <div class="actions" style="margin-top:14px">
+      <select data-change="course-pace" data-id="${esc(id)}" aria-label="Parts per week">${[1, 2, 3, 4, 5, 6, 7].map(k => `<option value="${k}" ${k === c.per_week ? 'selected' : ''}>${k} part${k > 1 ? 's' : ''} a week</option>`).join('')}</select>
+      <a class="btn btn-sm" href="/api/course/markdown?id=${encodeURIComponent(id)}" download>Export Markdown</a>
+      <button class="btn-text" data-act="course-end" data-id="${esc(id)}">End course</button>
+    </div></section>
+    ${Array.from({ length: weeks }, (_, w) => {
+      const ps = c.parts.slice(w * c.per_week, (w + 1) * c.per_week), left = ps.filter((_, k) => !done['p' + (w * c.per_week + k)]).length;
+      return `<section class="section card"><h2 class="h">Week ${w + 1} <span class="faint" style="font-weight:400">· ${left ? `${left} to watch` : 'done ✓'} · ${fmt(ps.reduce((t, p) => t + p.end - p.start, 0) / S.speed)} at ${sx(S.speed)}</span></h2>
+        <ol class="course-parts" start="${w * c.per_week + 1}">${ps.map((p, k) => part(p, w * c.per_week + k)).join('')}</ol></section>`;
+    }).join('')}
+    <p class="kv-line">${esc(c.model || '')}</p>`;
 }
 function drawerSummary(v) {
   const result = S.summaryCache[v.video_id];
@@ -2422,6 +2565,34 @@ document.addEventListener('click', async e => {
   switch (act) {
     case 'storage-refresh': S.storage = null; await loadStorage(); break;
     case 'usage-refresh': await loadUsage(); break;
+    case 'channel-follow': {
+      const value = (el.dataset.value || $('#ch-value')?.value || '').trim();
+      if (!value) { toast('Paste a channel link, @handle or video link first', true); $('#ch-value')?.focus(); break; }
+      try { await queued(await api('/api/channels/follow', { value, auto: $('#ch-auto')?.value || 'summarize' }), 'Following the channel'); if ($('#ch-value')) $('#ch-value').value = ''; }
+      catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'channel-unfollow':
+      if (!confirm(`Stop following ${el.dataset.title}? Its videos already in your library stay.`)) break;
+      try { await api('/api/channels/unfollow', { id: el.dataset.id }); await loadChannels(); toast(`Unfollowed ${el.dataset.title}`); } catch (err) { toast(err.message, true); }
+      break;
+    case 'channel-import': {
+      const old = el.textContent; el.disabled = true; el.textContent = 'Counting videos…';
+      try {
+        const e = await api('/api/channels/estimate', { id: el.dataset.id }), sm = e.summarize;
+        const cost = !e.to_summarize ? 'nothing to summarise' : sm.cost == null ? 'cost unknown for this model' : sm.cost === 0 ? 'free (local model)' : `about $${sm.cost < 0.01 ? '0.01 or less' : sm.cost.toFixed(2)}`;
+        const when = !e.to_summarize ? '' : !sm.ready ? '\nNo AI is set up for summaries yet, so they wait for you.'
+          : e.night ? `\nThat is a big channel, so the summaries wait for the night queue (from ${atTime(e.night_at)}).` : '';
+        if (confirm(`Import all of ${el.dataset.title}?\n\n${plural(e.videos, 'video')} (${e.hours} h), ${e.new} not in your library yet.\n`
+          + `Details and transcripts are fetched for all, then ${plural(e.to_summarize, 'video')} summarised with ${sm.uses}: ${cost}.${when}`))
+          await queued(await api('/api/channels/import', { id: el.dataset.id }), `Importing ${el.dataset.title}`);
+      } catch (err) { toast(err.message, true); }
+      el.disabled = false; el.textContent = old; break;
+    }
+    case 'channel-ask': S.ask.src = `_channel-${el.dataset.id}`; S.ask.cat = ''; S.ask.video = null; S.ask.thread = []; location.hash = '#/ask'; break;
+    case 'channel-check':
+      try { await queued(await api('/api/channels/check', {}), 'Checking followed channels'); } catch (err) { toast(err.message, true); }
+      break;
     case 'storage-backup': {
       try { await queued(await api('/api/files/backup', {}), 'Library backup'); S.storage = null; await loadStorage(); }
       catch (err) { toast(err.message, true); }
@@ -2549,6 +2720,8 @@ document.addEventListener('click', async e => {
     case 'rate-one': startRate([id]); break;
     case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
+    case 'course-make': setCourse(id, +($('#d-course-pace')?.value || 2)); break;
+    case 'course-end': if (confirm('End this course? Its parts and summaries stay, your ticks are kept until the parts are made again.')) { await setCourse(id, null); location.hash = '#/home'; } break;
     case 'remove-sel': {
       const ids = [...S.sel], one = ids.length === 1, notes = ids.filter(x => byId(x)?.notes?.trim()).length;
       if (!confirm(`Remove ${plural(ids.length, 'video')} from YourTube?\n\nThis deletes ${one ? 'its' : 'their'} transcripts, slides, ratings, summaries and search data`
@@ -2884,7 +3057,26 @@ document.addEventListener('change', async e => {
     await load(); if (route() === 'search' && S.search.q) runSearch();
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
   }
+  if (ch === 'course-pace') { await setCourse(el.dataset.id, +el.value); return; }
+  if (ch === 'course-progress') {
+    try { const r = await api('/api/course/progress', { id: el.dataset.id, key: el.dataset.key, done: el.checked }); S.courses[el.dataset.id].progress = r.progress; }
+    catch (err) { el.checked = !el.checked; toast(err.message, true); return; }
+    const row = (S.data.courses || []).find(x => x.video_id === el.dataset.id);   // part counts on Home and the drawer
+    if (row) row.done = Object.keys(S.courses[el.dataset.id].progress).filter(k => k[0] === 'p').length;
+    if (el.dataset.key.startsWith('p')) refresh();
+    return;
+  }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
+  if (ch === 'channel-auto') {
+    try { await api('/api/channels/update', { id: el.dataset.id, auto: el.value }); toast('Saved'); } catch (err) { toast(err.message, true); }
+    return;
+  }
+  if (ch === 'knowledge-scope') { location.hash = `#/knowledge${el.value ? `?channel=${encodeURIComponent(el.value)}` : ''}`; return; }
+  if (ch === 'channel-hours') {
+    try { await api('/api/channels/update', { hours: +el.value }); S.channels = undefined; await refreshJob(); refresh(); toast(`Followed channels are checked every ${el.value} h`); }
+    catch (err) { toast(err.message, true); }
+    return;
+  }
   if (ch === 'night') {
     const night = { on: $('#night-on').checked, minutes: Math.round(+$('#night-min').value), start: $('#night-at').value };
     try { S.data.ai = await saveAi({ night }); toast(night.on ? `Videos over ${night.minutes} min are rated and summarised from ${night.start}` : 'Night queue off: long videos run right away'); }

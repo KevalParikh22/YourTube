@@ -289,7 +289,8 @@ def run_visual(
                 timings["read_s"] = round(time.time() - t, 1)
                 timings["frames"], timings["kept"] = len(frames), len(kept)
                 storage.save_visuals(vid, kept)
-                storage.set_job(vid, "visual", status="done", progress=1.0, timings=timings)
+                storage.set_job(vid, "visual", status="done", progress=1.0, timings=timings,
+                                model=worker_label if provider == "local" else None)   # cloud: the model it used
                 with count_lock:
                     done += 1
                 print(f"   [{n}/{len(queue)}] ✓ {label} · {len(kept)} of {len(frames)} frames had content · "
