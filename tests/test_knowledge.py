@@ -1,3 +1,5 @@
+import contextlib
+import io
 import json
 import unittest
 from unittest import mock
@@ -92,10 +94,32 @@ class BuildAllTest(unittest.TestCase):
                 {"category": "eligible", "page": "none", "summarised": 3},
                 {"category": "ready", "page": "ready", "summarised": 8},
                 {"category": "few", "page": "none", "summarised": 2}]
+        buf = io.StringIO()
         with mock.patch.object(knowledge, "status", return_value=rows), \
-                mock.patch.object(knowledge, "run_build", return_value=True) as build:
+                mock.patch.object(knowledge, "run_build", return_value=True) as build, \
+                contextlib.redirect_stdout(buf):
             self.assertTrue(knowledge.run_build_all(1))
         self.assertEqual([call.args for call in build.call_args_list], [(1, "stale", None), (1, "eligible", None)])
+        self.assertIn("Knowledge pages: 2 to build.", buf.getvalue())
+
+    def test_nothing_to_build_when_all_up_to_date(self):
+        rows = [{"category": "ready", "page": "ready", "summarised": 5},
+                {"category": "few", "page": "none", "summarised": 1}]
+        buf = io.StringIO()
+        with mock.patch.object(knowledge, "status", return_value=rows), \
+                mock.patch.object(knowledge, "run_build") as build, \
+                contextlib.redirect_stdout(buf):
+            self.assertTrue(knowledge.run_build_all(1))
+        self.assertEqual(build.call_count, 0)
+        self.assertIn("Knowledge pages: 0 to build.\nNothing to build: every page is up to date.", buf.getvalue())
+
+    def test_builds_with_channel(self):
+        rows = [{"category": "stale", "page": "stale", "summarised": 1}]
+        with mock.patch.object(knowledge, "status", return_value=rows) as status_mock, \
+                mock.patch.object(knowledge, "run_build", return_value=True) as build:
+            self.assertTrue(knowledge.run_build_all(1, "UCchan"))
+        self.assertEqual(status_mock.call_args.args, (1, "UCchan"))
+        self.assertEqual(build.call_args.args, (1, "stale", "UCchan"))
 
     def test_returns_false_if_any_page_fails(self):
         rows = [{"category": "one", "page": "stale", "summarised": 1},
@@ -145,10 +169,18 @@ class EndpointTest(unittest.TestCase):
     def test_build_all_endpoint(self):
         with mock.patch("llm.is_configured", return_value=True), mock.patch("dashboard.JOB.start", return_value={"id": 4, "position": 0}) as start:
             code, body = self.call("/api/knowledge/build-all", {"library": 1})
-        self.assertEqual(code, 200)
-        self.assertEqual(body["id"], 4)
-        self.assertIn("position", body)
-        self.assertEqual(start.call_args.args[:2], ("knowledge", "Knowledge pages: build all"))
+            self.assertEqual(code, 200)
+            self.assertEqual(body["id"], 4)
+            self.assertIn("position", body)
+            self.assertEqual(start.call_args.args[:2], ("knowledge", "Knowledge pages: build all"))
+            self.assertEqual(start.call_args.kwargs["key"], [1, "all", None])
+
+            storage.follow_channel("UCchan", "Cooking Tips", [], library_id=1)
+            code, body = self.call("/api/knowledge/build-all", {"library": 1, "channel": "UCchan"})
+            self.assertEqual(code, 200)
+            self.assertEqual(start.call_args.args[:2], ("knowledge", "Knowledge pages: build all for Cooking Tips"))
+            self.assertEqual(start.call_args.kwargs["key"], [1, "all", "UCchan"])
+
         with mock.patch("llm.is_configured", return_value=False):
             self.assertEqual(self.call("/api/knowledge/build-all", {"library": 1})[0], 400)
 

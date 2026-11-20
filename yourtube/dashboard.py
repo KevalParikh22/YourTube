@@ -599,6 +599,9 @@ def _import_channel(channel_id):
         return True
     done, settings = storage.summary_times(), llm.load_settings()
     todo = [v["video_id"] for v in storage.get_all_videos(playlist_id=storage.channel_source(channel_id)) if v["video_id"] not in done]
+    if not todo:
+        print("Every video already has a summary. Build its knowledge pages on the Knowledge page.")
+        return True
     if not llm.is_configured(settings, "summarize"):
         print("No AI is set up for summaries in Settings → AI, so the videos wait for you.")
         return True

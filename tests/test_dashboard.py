@@ -340,7 +340,7 @@ class DashboardTest(unittest.TestCase):
                 mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None, not_before=None: started.append((kind, not_before))), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertTrue(dashboard._import_channel(cid))
-        self.assertEqual([(k, at is not None) for k, at in started], [("summarize", True)])
+        self.assertEqual([(k, at is not None) for k, at in started], [("summarize", True), ("knowledge", True)])
         self.assertEqual(self.call("/api/channels/estimate", {"id": "UC" + "z" * 22})[0], 404)
         self.assertEqual(self.call("/api/channels/import", {"id": "nope"})[0], 404)
 
