@@ -113,6 +113,41 @@ class CourseRunTest(unittest.TestCase):
         self.assertIn("&t=0s", md)
 
 
+class EstimateTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        storage.save_playlist(playlist("EST"), [video("estimate-long", "Long estimate", duration=4 * HOUR),
+                                                  video("estimate-short", "Short estimate", duration=30 * 60)])
+        storage.save_details("estimate-long", {"status": "done", "segments": segments(4 * HOUR)})
+        storage.save_details("estimate-short", {"status": "done", "segments": segments(30 * 60)})
+
+    def test_estimate_counts_parts_and_reuses_saved_parts(self):
+        with mock.patch("llm.context_chars", return_value=5000):
+            before = summarizer.estimate(["estimate-long", "estimate-short"])
+        n_parts = len(summarizer.split_parts(4 * HOUR, segments(4 * HOUR), []))
+        self.assertEqual(before["tokens_out"], summarizer.OUTPUT_TOKENS * 2 + n_parts * summarizer.PART_OUTPUT_TOKENS)
+        with mock.patch("llm.context_chars", return_value=5000):
+            long_before = summarizer.estimate(["estimate-long"])
+            short = summarizer.estimate(["estimate-short"])
+        self.assertGreater(long_before["tokens_in"], short["tokens_in"])
+        storage.save_parts("estimate-long", [summarizer.validate_part(PART, start, end)
+                                               for start, end in summarizer.split_parts(4 * HOUR, segments(4 * HOUR), [])])
+        with mock.patch("llm.context_chars", return_value=5000):
+            after = summarizer.estimate(["estimate-long"])
+        self.assertEqual(after["tokens_out"], summarizer.OUTPUT_TOKENS)
+
+    def test_estimate_counts_saved_parts_for_short_video(self):
+        storage.save_playlist(playlist("ESV"), [video("estimate-saved-short", "Saved short", duration=30 * 60)])
+        storage.save_details("estimate-saved-short", {"status": "done", "segments": segments(30 * 60)})
+        with mock.patch("llm.context_chars", return_value=5000):
+            without_parts = summarizer.estimate(["estimate-saved-short"])
+        storage.save_parts("estimate-saved-short", [summarizer.validate_part(PART, 0, 30 * 60)])
+        with mock.patch("llm.context_chars", return_value=5000):
+            saved = summarizer.estimate(["estimate-saved-short"])
+        self.assertEqual(saved["tokens_out"], summarizer.OUTPUT_TOKENS)
+        self.assertLess(saved["tokens_in"], without_parts["tokens_in"])
+
+
 class CourseEndpointTest(test_summarizer.EndpointTest):
     def test_summarize_endpoints(self):   # inherited test belongs to test_summarizer
         pass

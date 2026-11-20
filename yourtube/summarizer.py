@@ -11,6 +11,7 @@ from llm import LLMError, parse_json
 from rater import CHAR_BUDGET_REMOTE, fit_transcript, parse_time, transcript_blocks
 
 OUTPUT_TOKENS = 1600          # rough output per summary, for cost estimates
+PART_OUTPUT_TOKENS = 400      # rough output per part summary, for cost estimates
 CANDIDATES = 8                # related videos offered to the model for "learn more"
 MOMENT_MIN_SIM = 0.6          # cosine (0.55 let loosely related news clips through) for "also explained in" (statement vs passage, qwen3-embedding)
 MOMENTS_PER_TOPIC = 2
@@ -94,6 +95,16 @@ Reply with JSON in this shape (replace every <...>):
 {{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"]}}"""
 
 
+def _part_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], spans: List[List[int]], n: int,
+                 settings: Dict[str, Any], budget: int) -> str:
+    start, end = spans[n - 1]
+    part = [x for x in segments if start <= x["start"] < end]
+    text, _ = fit_transcript(transcript_blocks(part), budget)
+    return PART_PROMPT.format(title=video.get("title"), channel=video.get("channel"), n=n, total=len(spans),
+                              start=_clock(start), end=_clock(end), text=text or "(no words in this part)",
+                              language=settings.get("language") or "English")
+
+
 def validate_part(raw: Any, start: int, end: int) -> Dict[str, Any]:
     """Normalises one part's reply; raises LLMError when it has neither a summary nor points."""
     if not isinstance(raw, dict):
@@ -120,11 +131,7 @@ def summarize_parts(video: Dict[str, Any], segments: List[Dict[str, Any]], setti
     for n, (start, end) in enumerate(spans, 1):
         if should_stop():
             raise LLMError("Stopped")
-        part = [x for x in segments if start <= x["start"] < end]
-        text, _ = fit_transcript(transcript_blocks(part), budget)
-        prompt = PART_PROMPT.format(title=video.get("title"), channel=video.get("channel"), n=n, total=len(spans),
-                                    start=_clock(start), end=_clock(end), text=text or "(no words in this part)",
-                                    language=settings.get("language") or "English")
+        prompt = _part_prompt(video, segments, spans, n, settings, budget)
         out.append(validate_part(parse_json(complete(SYSTEM, prompt)), start, end))
         print(f"      part {n}/{len(spans)} ({_clock(start)}–{_clock(end)}): {out[-1]['title']}")
     return out
@@ -276,13 +283,26 @@ def estimate(video_ids: List[str]) -> Dict[str, Any]:
     import storage
     settings = llm.load_settings()
     budget = llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE)
-    chars = with_transcript = 0
+    chars = with_transcript = parts_out = 0
     videos = _videos(video_ids)
     for v in videos:
         segments = storage.get_segments(v["video_id"])
         with_transcript += bool(segments)
-        chars += len(build_prompt(v, segments, settings, [], budget)) + len(SYSTEM) + 2000
-    tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos)
+        made = storage.get_course(v["video_id"])
+        saved_parts = (made or {}).get("parts") or []
+        if saved_parts or too_long(v, segments, budget):
+            n_parts = len(saved_parts)
+            if not saved_parts:
+                spans = split_parts(v.get("duration_seconds") or 0, segments, v.get("chapters") or [])
+                n_parts = len(spans)
+                parts_out += n_parts
+                for n in range(1, len(spans) + 1):
+                    prompt = _part_prompt(v, segments, spans, n, settings, budget)
+                    chars += len(prompt) + len(SYSTEM)
+            chars += len(build_prompt(v, [], settings, [], budget)) + 600 * n_parts + len(SYSTEM) + 2000
+        else:
+            chars += len(build_prompt(v, segments, settings, [], budget)) + len(SYSTEM) + 2000
+    tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos) + PART_OUTPUT_TOKENS * parts_out
     cost = llm.estimate_cost(settings, "summarize", tokens_in, tokens_out)
     uses = llm.describe(settings, "summarize")
     helper = llm.helper_for(settings, "summarize")
