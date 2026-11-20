@@ -2,11 +2,12 @@
 
 **Problem:** A 3–5 hour video eats a large share of a provider's per-minute or daily limit and blocks the cloud lane for everything else.
 
-**Status (2026-11-19):** steps 1 to 3 are done; step 4 and the daily token cap are open.
+**Status (2026-11-20):** steps 1 to 4 are done; the daily token cap is open.
 - Settings → AI by task → **Night queue** (`settings.night`: on, minutes, start; off by default). With it on, `/api/rate` and `/api/summarize` (`Handler._queued_split`) queue videos longer than the limit as a second task with `not_before` set to the next start time; the shorter ones run now.
 - `Job.start(not_before=)`: the lane worker runs due tasks first and sleeps until the earliest start time or until woken (`_Lane.wake`), so a night task never holds up daytime work. `Job.run_now` / `POST /api/job/run-now` clears the wait; the task panel shows "Later", the start time, **Run now** and **Remove**, and the bar shows "☾ N at night".
 - There is no end time: a night task that starts runs to the end. Tasks waiting in memory are lost when the dashboard stops or restarts.
-- Not done: summarising very long transcripts in parts (step 4), and the optional daily token cap.
+- Step 4: a transcript that would be sampled to fit one call (and is longer than 40 min) is summarised in 20–40 min parts first (`summarizer.summarize_parts`, one call each), and the summary is written from the part notes (`summarize_video`). The parts are saved in the `courses` table, so a course on that video reuses them, and summarising it again reuses them too.
+- Not done: the optional daily token cap. The cost estimate before Summarise still counts one call per video, so it is low for videos summarised in parts.
 
 **Plan**
 1. Setting: "Videos longer than [90] min: run AI tasks [now / at night]" plus a night window (default 01:00–06:00) and an optional daily token cap (from [token-tracking.md](token-tracking.md)).

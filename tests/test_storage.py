@@ -365,6 +365,7 @@ class RemovePlaylistTest(unittest.TestCase):
                                        "segments": [{"start": 0, "text": f"spoken words of {vid}"}]}, db_path=self.db)
             storage.save_rating(vid, {"score": 7, "verdict": "watch", "reason": "good"}, db_path=self.db)
             storage.save_summary(vid, {"tldr": f"summary of {vid}"}, db_path=self.db)
+            storage.save_parts(vid, [{"start": 0, "end": 60, "title": "t"}], db_path=self.db)
         storage.save_embeddings("m", [(h, 1, b"\0\0\0\0") for (h,) in sqlite3.connect(self.db).execute("SELECT hash FROM search_docs")],
                                 db_path=self.db)
 
@@ -428,6 +429,7 @@ class RemoveVideosTest(unittest.TestCase):
             storage.save_details(vid, {"status": "done", "segments": [{"start": 0, "text": f"spoken words of {vid}"}]}, db_path=self.db)
             storage.save_rating(vid, {"score": 7, "verdict": "watch", "reason": "good"}, db_path=self.db)
             storage.save_summary(vid, {"tldr": f"summary of {vid}"}, db_path=self.db)
+            storage.save_parts(vid, [{"start": 0, "end": 60, "title": "t"}], db_path=self.db)
         storage.save_embeddings("m", [(h, 1, b"\0\0\0\0") for (h,) in sqlite3.connect(self.db).execute("SELECT hash FROM search_docs")],
                                 db_path=self.db)
 

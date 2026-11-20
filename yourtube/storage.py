@@ -318,6 +318,18 @@ def init_db(db_path: str = DB_PATH) -> None:
                 last_error TEXT
             )
         """)
+        # Long videos in 20–40 min parts (summarizer.summarize_parts); per_week set = a weekly course the user follows.
+        # progress: {"p<i>": true} part i watched, {"a<i>.<j>": true} action j of part i done
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS courses (
+                video_id TEXT PRIMARY KEY,
+                parts TEXT NOT NULL DEFAULT '[]',
+                per_week INTEGER,
+                progress TEXT NOT NULL DEFAULT '{}',
+                model TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # Videos the user removed from YourTube: a playlist sync skips them (see remove_videos)
         cursor.execute("CREATE TABLE IF NOT EXISTS removed_videos (video_id TEXT PRIMARY KEY, removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         asks = _columns(cursor, "ask_history")
@@ -560,7 +572,7 @@ def get_playlist(playlist_id: str, db_path: str = DB_PATH) -> Optional[Dict[str,
 
 # Everything YourTube fetched or made for a video; removing a playlist clears these for its own videos
 VIDEO_DATA_TABLES = ("video_details", "transcript_segments", "visual_segments", "media_jobs", "video_ratings",
-                     "video_summaries", "category_suggestions")
+                     "video_summaries", "category_suggestions", "courses")
 
 def _removal_groups(cursor: sqlite3.Cursor, playlist_id: str) -> Dict[str, List[str]]:
     """The playlist's videos: 'shared' (in another playlist too), 'kept_notes' (only here, with notes), 'removed'."""
@@ -1841,6 +1853,57 @@ def summary_times(db_path: str = DB_PATH) -> Dict[str, str]:
     init_db(db_path)
     with get_connection(db_path) as conn:
         return dict(conn.execute("SELECT video_id, created_at FROM video_summaries").fetchall())
+
+# --- Courses (a long video in parts, followed week by week) ----------------------------------
+
+def save_parts(video_id: str, parts: List[Dict[str, Any]], model: str = "", db_path: str = DB_PATH) -> None:
+    """Saves a video's parts; a course on it keeps its weekly pace, its progress starts again (the parts changed)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("""INSERT INTO courses (video_id, parts, model) VALUES (?, ?, ?)
+                        ON CONFLICT(video_id) DO UPDATE SET parts = excluded.parts, model = excluded.model, progress = '{}',
+                                                            created_at = CURRENT_TIMESTAMP""",
+                     (video_id, json.dumps(parts, ensure_ascii=False), model))
+        conn.commit()
+
+def get_course(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    """{'video_id', 'parts', 'per_week' (None: parts only, no course yet), 'progress', 'model', 'created_at'} or None."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        r = conn.execute("SELECT * FROM courses WHERE video_id = ?", (video_id,)).fetchone()
+    return r and {**dict(r), "parts": json.loads(r["parts"]), "progress": json.loads(r["progress"])}
+
+def set_course_pace(video_id: str, per_week: Optional[int], db_path: str = DB_PATH) -> bool:
+    """Parts per week (None ends the course, the parts stay). False when the video has no parts yet."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        n = conn.execute("UPDATE courses SET per_week = ? WHERE video_id = ?", (per_week, video_id)).rowcount
+        conn.commit()
+    return n > 0
+
+def set_course_progress(video_id: str, key: str, done: bool, db_path: str = DB_PATH) -> Optional[Dict[str, bool]]:
+    """Marks a part ('p<i>') or action ('a<i>.<j>') done or not. The new progress, or None without a course."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        r = conn.execute("SELECT progress FROM courses WHERE video_id = ?", (video_id,)).fetchone()
+        if not r:
+            return None
+        progress = json.loads(r["progress"])
+        if done:
+            progress[key] = True
+        else:
+            progress.pop(key, None)
+        conn.execute("UPDATE courses SET progress = ? WHERE video_id = ?", (json.dumps(progress), video_id))
+        conn.commit()
+    return progress
+
+def list_courses(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """Courses being followed: [{'video_id', 'per_week', 'parts', 'done'}] (parts and parts watched, as counts)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute("SELECT video_id, per_week, parts, progress FROM courses WHERE per_week IS NOT NULL ORDER BY created_at DESC").fetchall()
+    return [{"video_id": r["video_id"], "per_week": r["per_week"], "parts": len(json.loads(r["parts"])),
+             "done": sum(k.startswith("p") for k in json.loads(r["progress"]))} for r in rows]
 
 # --- Knowledge pages (Phase 3) -------------------------------------------------------------
 

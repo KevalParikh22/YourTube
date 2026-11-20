@@ -16,6 +16,7 @@ MOMENT_MIN_SIM = 0.6          # cosine (0.55 let loosely related news clips thro
 MOMENTS_PER_TOPIC = 2
 CLAIM_KINDS = ("claim", "quote", "number", "step")
 RELATIONS = ("prerequisite", "deeper", "other_view", "same_topic")
+PART_MIN, PART_TARGET, PART_MAX = 20 * 60, 30 * 60, 40 * 60   # seconds: course parts, and chunks of transcripts too long for one call
 LIMITS = {"minutes": 10, "claims": 10, "quiz": 5, "takeaways": 5, "related": 4, "searches": 3}
 
 SYSTEM = ("You write study notes for a busy learner from a YouTube video's transcript, so they can learn from it "
@@ -55,8 +56,92 @@ def candidates(video_id: str, video: Dict[str, Any], segments: List[Dict[str, An
     return out
 
 
+def split_parts(duration: int, segments: List[Dict[str, Any]], chapters: List[Dict[str, Any]]) -> List[List[int]]:
+    """
+    [[start, end]] seconds of 20–40 min parts covering the video. Cuts at the chapter start nearest each 30 min mark when
+    the video has chapters, else at the longest pause between caption lines (a likely topic change). A video of
+    at most 40 min is one part.
+    """
+    duration = max(duration or 0, int(segments[-1]["start"]) + 1 if segments else 0)
+    if len(chapters or []) > 1:
+        cuts = {int(c["start"]): 0 for c in chapters if c.get("start")}
+    else:   # value: the pause before that line
+        cuts = {int(b["start"]): b["start"] - a["start"] for a, b in zip(segments, segments[1:])}
+    out, start = [], 0
+    while duration - start > PART_MAX:
+        lo, hi = start + PART_MIN, min(start + PART_MAX, duration - PART_MIN)
+        near = [t for t in cuts if lo <= t <= hi]
+        target = start + PART_TARGET
+        cut = max(near, key=lambda t: (cuts[t], -abs(t - target))) if near else target
+        out.append([start, cut])
+        start = cut
+    return out + [[start, duration]]
+
+
+PART_PROMPT = """Video: {title} ({channel}), part {n} of {total}, {start}–{end}.
+
+Transcript of this part:
+{text}
+
+This part will be one lesson of a course the learner follows over a few weeks. Write, in {language}:
+- title: what this part is about, at most 8 words.
+- summary: at most 3 sentences on what is said or shown and its conclusion.
+- points: 3 to 6 key points in time order, each with the time it is said and at most 25 words.
+- actions: 1 to 3 concrete things to do after watching (an exercise, a thing to try, a decision to make), at most 25 words each.
+Times: copy them exactly as written in the transcript, like "4:05" or "1:02:30".
+
+Reply with JSON in this shape (replace every <...>):
+{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"]}}"""
+
+
+def validate_part(raw: Any, start: int, end: int) -> Dict[str, Any]:
+    """Normalises one part's reply; raises LLMError when it has neither a summary nor points."""
+    if not isinstance(raw, dict):
+        raise LLMError("The part summary was not a JSON object")
+    points = []
+    for p in raw.get("points") or []:
+        t = parse_time(p.get("t")) if isinstance(p, dict) else None
+        if t is not None and start - 60 <= t <= end + 60 and _text(p.get("text"), 300):
+            points.append({"t": t, "text": _text(p.get("text"), 300)})
+    summary = _text(raw.get("summary"), 600)
+    if not summary and not points:
+        raise LLMError("The part summary had no summary or points")
+    return {"start": start, "end": end, "title": _text(raw.get("title"), 80), "summary": summary,
+            "points": sorted(points, key=lambda p: p["t"])[:6],
+            "actions": [_text(a, 200) for a in raw.get("actions") or [] if isinstance(a, str) and a.strip()][:3]}
+
+
+def summarize_parts(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
+                    complete: Callable[[str, str], str], budget: int,
+                    should_stop: Callable[[], bool] = lambda: False) -> List[Dict[str, Any]]:
+    """One model call per 20–40 min part: [{'start', 'end', 'title', 'summary', 'points', 'actions'}]."""
+    spans = split_parts(video.get("duration_seconds") or 0, segments, video.get("chapters") or [])
+    out = []
+    for n, (start, end) in enumerate(spans, 1):
+        if should_stop():
+            raise LLMError("Stopped")
+        part = [x for x in segments if start <= x["start"] < end]
+        text, _ = fit_transcript(transcript_blocks(part), budget)
+        prompt = PART_PROMPT.format(title=video.get("title"), channel=video.get("channel"), n=n, total=len(spans),
+                                    start=_clock(start), end=_clock(end), text=text or "(no words in this part)",
+                                    language=settings.get("language") or "English")
+        out.append(validate_part(parse_json(complete(SYSTEM, prompt)), start, end))
+        print(f"      part {n}/{len(spans)} ({_clock(start)}–{_clock(end)}): {out[-1]['title']}")
+    return out
+
+
+def _parts_text(parts: List[Dict[str, Any]]) -> str:
+    """Part summaries as transcript-like '[m:ss] ...' lines, for the whole-video summary of a long transcript."""
+    lines = []
+    for n, p in enumerate(parts, 1):
+        lines.append(f"[{_clock(p['start'])}] Part {n}: {p['title']}. {p['summary']}")
+        lines += [f"[{_clock(x['t'])}] {x['text']}" for x in p["points"]]
+    return "\n".join(lines)
+
+
 def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
-                 cands: List[Dict[str, Any]], budget: int = CHAR_BUDGET_REMOTE) -> str:
+                 cands: List[Dict[str, Any]], budget: int = CHAR_BUDGET_REMOTE,
+                 parts: Optional[List[Dict[str, Any]]] = None) -> str:
     language = settings.get("language") or "English"
     chapters = "\n".join(f"[{_clock(c.get('start'))}] {c.get('title')}" for c in video.get("chapters") or [])
     slides = video.get("slides") or []
@@ -65,7 +150,7 @@ def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings
         blocks = [{"start": x["t"], "text": " · ".join(y for y in (_text(x.get("text"), 600), x.get("visual") or "") if y)} for x in slides]
         slide_text, _ = fit_transcript(blocks, budget // 5)
         budget -= len(slide_text)
-    text, sampled = fit_transcript(transcript_blocks(segments), budget)
+    text, sampled = (_parts_text(parts), False) if parts else fit_transcript(transcript_blocks(segments), budget)
     cand_text = "\n".join(f"- id {c['video_id']}: {c['title']} ({c['channel']}){': ' + c['about'] if c['about'] else ''}" for c in cands) or "(none)"
     return f"""Video
 Title: {video.get('title')}
@@ -74,7 +159,7 @@ Length: {round((video.get('duration_seconds') or 0) / 60)} min
 Chapters:
 {chapters or '(none)'}
 
-Transcript{' (evenly sampled excerpts)' if sampled else ''}:
+{'Notes on each part of the video (summarised from its full transcript)' if parts else 'Transcript'}{' (evenly sampled excerpts)' if sampled else ''}:
 {text}
 {f"{chr(10)}On-screen text (slides, code), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}
 Other videos in the learner's library that may relate:
@@ -146,11 +231,23 @@ def validate(raw: Any, duration: int, candidate_ids: List[str]) -> Dict[str, Any
             "learn_more": {"related": related[:LIMITS["related"]], "searches": searches[:LIMITS["searches"]]}}
 
 
+def too_long(video: Dict[str, Any], segments: List[Dict[str, Any]], budget: int) -> bool:
+    """True when the transcript would be sampled in one call and the video is long enough to summarise in parts."""
+    return len(split_parts(video.get("duration_seconds") or 0, segments, [])) > 1 and fit_transcript(transcript_blocks(segments), budget)[1]
+
+
 def summarize_video(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
-                    complete: Callable[[str, str], str], cands: List[Dict[str, Any]], budget: int) -> Dict[str, Any]:
-    prompt = build_prompt(video, segments, settings, cands, budget)
+                    complete: Callable[[str, str], str], cands: List[Dict[str, Any]], budget: int,
+                    parts: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """
+    A transcript too long for one call is summarised in parts first (or uses `parts` already made, from a course);
+    the summary then has 'parts' and is written from them instead of from sampled excerpts.
+    """
+    if not parts and too_long(video, segments, budget):
+        parts = summarize_parts(video, segments, settings, complete, budget)
+    prompt = build_prompt(video, segments, settings, cands, budget, parts)
     summary = validate(parse_json(complete(SYSTEM, prompt)), video.get("duration_seconds") or 0, [c["video_id"] for c in cands])
-    return {**summary, "language": settings.get("language") or "English"}
+    return {**summary, "language": settings.get("language") or "English", **({"parts": parts} if parts else {})}
 
 
 def _summarize_one(video: Dict[str, Any], complete: Callable[[str, str], str], budget: int, model: str, settings: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -159,8 +256,12 @@ def _summarize_one(video: Dict[str, Any], complete: Callable[[str, str], str], b
     segments = storage.get_segments(video["video_id"])
     if not segments:
         return None
-    summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget)
+    made = storage.get_course(video["video_id"])
+    parts = made["parts"] if made else None
+    summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget, parts)
     storage.save_summary(video["video_id"], summary, model=model)
+    if summary.get("parts") and not made:
+        storage.save_parts(video["video_id"], summary["parts"], model=model)
     return summary
 
 
@@ -363,3 +464,38 @@ def related_moments(video_id: str, summary: Dict[str, Any], settings: Optional[D
         if picked:
             out[i] = picked
     return out
+
+
+def run_course(video_ids: List[str], per_week: int, should_stop: Callable[[], bool] = lambda: False) -> bool:
+    """
+    Makes each video a weekly course of `per_week` parts a week. Parts already made (by a long summary or an earlier
+    course) are reused without an AI call. Prints progress for the job log.
+    """
+    import llm
+    import storage
+    settings = llm.load_settings()
+    complete = None
+    ok = True
+    for v in _videos(video_ids):
+        if should_stop():
+            print("Stopped. Courses so far are saved.")
+            return False
+        if not storage.get_course(v["video_id"]):
+            segments = storage.get_segments(v["video_id"])
+            if not segments:
+                print(f"   Skipped (no transcript yet: fetch details or transcribe it first): {v['title'][:60]}")
+                ok = False
+                continue
+            print(f"   Splitting into parts: {v['title'][:60]}")
+            try:
+                complete = complete or llm.make_completer(settings, "summarize")
+                parts = summarize_parts(v, segments, settings, complete,
+                                        llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE), should_stop)
+            except LLMError as e:
+                print(f"Error: {e}")
+                return False
+            storage.save_parts(v["video_id"], parts, model=llm.model_for(settings, "summarize"))
+        storage.set_course_pace(v["video_id"], per_week)
+        n = len(storage.get_course(v["video_id"])["parts"])
+        print(f"   Course ready: {n} parts, {-(-n // per_week)} weeks at {per_week} a week: {v['title'][:60]}")
+    return ok
