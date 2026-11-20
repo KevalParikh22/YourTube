@@ -14,7 +14,7 @@ import os
 import json
 import functools
 import threading
-from typing import List, Dict, Any, Optional, Callable, Iterable
+from typing import List, Dict, Any, Optional, Callable, Iterable, Set
 
 _DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get("YTKB_DB") or os.path.join(_DATA_DIR, "yt_kb.db")
@@ -625,6 +625,12 @@ def remove_videos(video_ids: Iterable[str], db_path: str = DB_PATH) -> List[str]
         cursor.execute("DELETE FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs WHERE hash IS NOT NULL)")
         conn.commit()
     return found
+
+def removed_video_ids(db_path: str = DB_PATH) -> Set[str]:
+    """Returns video ids explicitly removed from YourTube."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return {r[0] for r in conn.execute("SELECT video_id FROM removed_videos")}
 
 # Archiving keeps what the user made or reads (row, status, notes, details, rating, summary) and frees the rest
 ARCHIVE_TABLES = ("transcript_segments", "visual_segments", "media_jobs")
