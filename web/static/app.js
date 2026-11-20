@@ -2216,6 +2216,7 @@ function renderDrawer() {
         <div class="kv-line">Notes save when you click away.</div></div>
       <div id="d-details">${drawerDetails(v)}</div>
       <div id="d-slides">${drawerSlides(v)}</div>
+      <div id="d-activity">${drawerActivity(v)}</div>
       <div class="kv-line">In: ${v.sources.map(s => `${esc(playlistName(s.id))}${s.removed ? ' (removed on YouTube)' : ''}`).join(' · ') || 'no playlist'}</div>
     </div>
   </aside>`;
@@ -2232,6 +2233,22 @@ function renderDrawer() {
     old.scrollTop = scroll;
   } else box.innerHTML = html;
   loadSummary(v.video_id);
+  loadActivity(v.video_id);
+}
+// What ran on the video (storage.video_activity), reloaded on every redraw so a finished task shows up
+const ACTIVITY_LABEL = { details: 'Details fetched', asr: 'Transcribed', visual: 'Slides read', rate: 'Rated', summarize: 'Summarised' };
+function drawerActivity(v) {
+  const rows = S.activity?.id === v.video_id ? S.activity.rows : null;
+  const cost = c => c == null ? '' : ` · ${c > 0 && c < 0.01 ? '<$0.01' : `$${c.toFixed(2)}`}`;
+  return `<details ${keepOpen('activity')}><summary>Activity${rows ? ` · ${plural(rows.length, 'step')}` : ''}</summary>
+    ${!rows ? '<div class="kv-line">Loading…</div>' : !rows.length ? '<div class="kv-line">Nothing has run on this video yet.</div>'
+      : `<ul class="activity">${rows.map(r => `<li class="${r.ok ? '' : 'failed'}"><time title="${esc(fmtFullDate(r.at))}">${fmtDate(r.at)}</time>
+          <span><b>${esc(ACTIVITY_LABEL[r.kind] || r.kind)}</b>${r.ok ? '' : ' · failed'}${r.model ? ` <span class="faint">· ${esc(r.model)}</span>` : ''}${r.tokens_in != null
+            ? ` <span class="faint">· ${tokens(r.tokens_in)} in, ${tokens(r.tokens_out)} out${cost(r.cost)}</span>` : ''}${r.note ? `<br><span class="faint">${esc(r.note)}</span>` : ''}</span></li>`).join('')}</ul>`}</details>`;
+}
+async function loadActivity(id) {
+  try { S.activity = { id, rows: (await api(`/api/video/activity?id=${encodeURIComponent(id)}`)).activity }; } catch (e) { return; }
+  if (S.drawer === id && $('#d-activity')) $('#d-activity').innerHTML = drawerActivity(byId(id));
 }
 function drawerRating(v) {
   const r = v.rating;

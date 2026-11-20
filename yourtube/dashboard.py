@@ -988,6 +988,8 @@ class Handler(BaseHTTPRequestHandler):
             vid = (qs.get("id") or [""])[0]
             summary = storage.get_summary(vid)   # None: not summarised yet (not an error)
             return self._json({"summary": summary, "moments": summarizer.related_moments(vid, summary) if summary else {}})
+        if url.path == "/api/video/activity":
+            return self._json({"activity": storage.get_activity((qs.get("id") or [""])[0])})
         if url.path == "/api/video":
             vid = (qs.get("id") or [""])[0]
             details = storage.get_details(vid)

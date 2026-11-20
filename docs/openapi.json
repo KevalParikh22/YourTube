@@ -1813,6 +1813,50 @@
         }
       }
     },
+    "/api/video/activity": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "What ran on a video (details, transcription, slides, rating, summary), when, with which model, and its cloud AI tokens and cost",
+        "operationId": "getVideoActivity",
+        "parameters": [
+          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Steps, newest first (empty when nothing ran); tokens and cost are null when unknown or no cloud AI was used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "activity": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {"type": "string", "enum": ["details", "asr", "visual", "rate", "summarize"]},
+                          "at": {"type": "string", "description": "UTC, YYYY-MM-DD HH:MM:SS"},
+                          "ok": {"type": "integer", "enum": [0, 1]},
+                          "model": {"type": ["string", "null"]},
+                          "note": {"type": ["string", "null"], "description": "Error, or the outcome when not a plain success"},
+                          "tokens_in": {"type": ["integer", "null"]},
+                          "tokens_out": {"type": ["integer", "null"]},
+                          "cost": {"type": ["number", "null"], "description": "Approximate USD"}
+                        },
+                        "required": ["kind", "at", "ok"]
+                      }
+                    }
+                  },
+                  "required": ["activity"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
     "/api/video": {
       "get": {
         "tags": ["Videos"],
