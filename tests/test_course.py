@@ -17,6 +17,12 @@ HOUR = 3600
 PART = {"title": "Setting up", "summary": "Installs the tools.", "points": [{"t": "1:00", "text": "Install Python"}, {"t": "9:59:00", "text": "Out of range"}],
         "actions": ["Install it yourself", "", 3]}
 
+PART_WITH_QUIZ = {**PART, "quiz": [
+    {"q": "What do you install?", "options": ["Python", "Java", "Ruby"], "answer": 0, "t": "1:00"},
+    {"q": "Out of range time?", "options": ["Yes", "No"], "answer": 1, "t": "9:59:00"},  # t far outside -> None
+    {"q": "Good question?", "options": ["A", "B", "C"], "answer": 2, "t": "0:30"},
+]}
+
 
 def segments(seconds, step=10, pause_at=()):
     """One caption line every `step` s, with a 20 s pause before each time in pause_at."""
@@ -53,9 +59,61 @@ class PartsTest(unittest.TestCase):
         self.assertEqual((p["start"], p["end"], p["title"]), (0, 1800, "Setting up"))
         self.assertEqual(p["points"], [{"t": 60, "text": "Install Python"}])
         self.assertEqual(p["actions"], ["Install it yourself"])
+        self.assertEqual(p["quiz"], [])   # PART has no quiz key
         for bad in ([], {"title": "x"}):
             with self.assertRaises(LLMError):
                 summarizer.validate_part(bad, 0, 1800)
+
+    def test_validate_part_keeps_good_quiz_items(self):
+        # start=0, end=1800; "1:00" = 60 s is in range; "9:59:00" = 35940 s is far outside → t=None
+        p = summarizer.validate_part(PART_WITH_QUIZ, 0, 1800)
+        self.assertEqual(len(p["quiz"]), 3)   # at most 3 kept
+        q0 = p["quiz"][0]
+        self.assertEqual(q0["q"], "What do you install?")
+        self.assertEqual(q0["options"], ["Python", "Java", "Ruby"])
+        self.assertEqual(q0["answer"], 0)
+        self.assertEqual(q0["t"], 60)   # "1:00" is within [0-60, 1800+60]
+        q1 = p["quiz"][1]
+        self.assertIsNone(q1["t"])   # "9:59:00" is far outside the part → t stripped to None
+        q2 = p["quiz"][2]
+        self.assertEqual(q2["t"], 30)   # "0:30" within range
+
+    def test_validate_part_drops_bad_quiz_items(self):
+        bad_quiz = [
+            # answer out of range
+            {"q": "Q1", "options": ["A", "B"], "answer": 5, "t": "0:30"},
+            # answer is True (bool, not int)
+            {"q": "Q2", "options": ["A", "B"], "answer": True, "t": "0:30"},
+            # only 1 option
+            {"q": "Q3", "options": ["A"], "answer": 0, "t": "0:30"},
+            # empty q
+            {"q": "", "options": ["A", "B"], "answer": 0, "t": "0:30"},
+            # good item
+            {"q": "What is it?", "options": ["A", "B", "C"], "answer": 1, "t": "0:30"},
+        ]
+        p = summarizer.validate_part({**PART, "quiz": bad_quiz}, 0, 1800)
+        self.assertEqual(len(p["quiz"]), 1)
+        self.assertEqual(p["quiz"][0]["q"], "What is it?")
+
+    def test_validate_part_missing_quiz_gives_empty_list(self):
+        p = summarizer.validate_part(PART, 0, 1800)
+        self.assertEqual(p["quiz"], [])
+
+    def test_validate_part_bad_quiz_key_is_not_error(self):
+        # entirely missing quiz key → [] (not an error)
+        raw = {**PART}
+        raw.pop("quiz", None)
+        p = summarizer.validate_part(raw, 0, 1800)
+        self.assertEqual(p["quiz"], [])
+
+    def test_validate_part_skips_bad_quiz_containers(self):
+        # "quiz" is not a list → empty quiz, not a TypeError
+        p = summarizer.validate_part({**PART, "quiz": 5}, 0, 1800)
+        self.assertEqual(p["quiz"], [])
+        # an item whose "options" is not a list is dropped, not a TypeError
+        raw = {**PART, "quiz": [{"q": "What is it?", "options": 3, "answer": 0, "t": "0:30"}]}
+        p = summarizer.validate_part(raw, 0, 1800)
+        self.assertEqual(p["quiz"], [])
 
     def test_long_transcript_is_summarised_in_parts(self):
         v = {"video_id": "x", "title": "Long", "channel": "c", "duration_seconds": 2 * HOUR}
@@ -167,12 +225,25 @@ class CourseEndpointTest(test_summarizer.EndpointTest):
         self.assertEqual(self.call("/api/course/progress", {"id": "e1", "key": "x1", "done": True})[0], 400)
         self.assertEqual(self.call("/api/course/progress", {"id": "e2", "key": "p0", "done": True})[0], 404)
         self.assertEqual(self.call("/api/course/progress", {"id": "e1", "key": "p1", "done": True}), (200, {"ok": True, "progress": {"p1": True}}))
-        self.assertEqual(self.call("/api/course?id=e1")[1]["course"]["progress"], {"p1": True})
+        # q<part>.<question> key is accepted
+        self.assertEqual(self.call("/api/course/progress", {"id": "e1", "key": "q0.1", "done": True})[0], 200)
+        self.assertEqual(self.call("/api/course?id=e1")[1]["course"]["progress"], {"p1": True, "q0.1": True})
         import urllib.request
         with urllib.request.urlopen(self.base + "/api/course/markdown?id=e1") as r:
             self.assertIn("## Week 2", r.read().decode())
         code, r = self.call("/api/course", {"id": "e1", "per_week": None})       # end the course, keep the parts
         self.assertEqual((code, r["course"]["per_week"], len(r["course"]["parts"])), (200, None, 2))
+
+    def test_course_markdown_quiz(self):
+        """course_markdown shows Check yourself and right option when quiz present."""
+        from exporter import course_markdown
+        part_with_quiz = summarizer.validate_part(PART_WITH_QUIZ, 0, 1800)
+        fake_v = {"video_id": "qv_md_only", "title": "Quiz Video", "channel": "ch", "duration_seconds": HOUR}
+        fake_course = {"parts": [part_with_quiz], "per_week": 1, "progress": {}}
+        md = course_markdown(fake_v, fake_course)
+        self.assertIn("Check yourself:", md)
+        self.assertIn("What do you install?", md)
+        self.assertIn("→ Python", md)   # right option for answer=0
 
 
 if __name__ == "__main__":

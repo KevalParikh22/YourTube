@@ -591,3 +591,11 @@
 .course-part.done > :not(.course-head) { opacity: .6; }
 .course-part ul { list-style: none; padding: 0; }
 .course-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.quiz-item { margin: 6px 0; }
+.quiz-q { margin-bottom: 6px; font-size: 14px; }
+.quiz-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.quiz-opt { all: unset; cursor: pointer; font-size: 13px; padding: 3px 10px; border-radius: 5px; border: 1px solid var(--line-strong); background: var(--raised); color: var(--ink); }
+.quiz-opt:not([disabled]):hover { border-color: var(--ink-3); }
+.quiz-opt.right { background: var(--watch-bg); color: var(--watch); border-color: var(--watch); }
+.quiz-opt.wrong { background: var(--skip-bg); color: var(--skip); border-color: var(--skip); }
+.quiz-result { font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }

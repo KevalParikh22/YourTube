@@ -11,7 +11,7 @@ from llm import LLMError, parse_json
 from rater import CHAR_BUDGET_REMOTE, fit_transcript, parse_time, transcript_blocks
 
 OUTPUT_TOKENS = 1600          # rough output per summary, for cost estimates
-PART_OUTPUT_TOKENS = 400      # rough output per part summary, for cost estimates
+PART_OUTPUT_TOKENS = 550      # rough output per part summary, for cost estimates
 CANDIDATES = 8                # related videos offered to the model for "learn more"
 MOMENT_MIN_SIM = 0.6          # cosine (0.55 let loosely related news clips through) for "also explained in" (statement vs passage, qwen3-embedding)
 MOMENTS_PER_TOPIC = 2
@@ -89,10 +89,11 @@ This part will be one lesson of a course the learner follows over a few weeks. W
 - summary: at most 3 sentences on what is said or shown and its conclusion.
 - points: 3 to 6 key points in time order, each with the time it is said and at most 25 words.
 - actions: 1 to 3 concrete things to do after watching (an exercise, a thing to try, a decision to make), at most 25 words each.
+- quiz: 2 to 3 multiple-choice questions that check this part's key ideas, each with 3 or 4 short options (at most 12 words each), the 0-based index of the right option, and the time the answer is explained (copied from the transcript).
 Times: copy them exactly as written in the transcript, like "4:05" or "1:02:30".
 
 Reply with JSON in this shape (replace every <...>):
-{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"]}}"""
+{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"], "quiz": [{{"q": "<...>", "options": ["<...>"], "answer": <index>, "t": "<time>"}}]}}"""
 
 
 def _part_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], spans: List[List[int]], n: int,
@@ -117,9 +118,34 @@ def validate_part(raw: Any, start: int, end: int) -> Dict[str, Any]:
     summary = _text(raw.get("summary"), 600)
     if not summary and not points:
         raise LLMError("The part summary had no summary or points")
+    quiz = []
+    raw_quiz = raw.get("quiz")
+    for item in raw_quiz if isinstance(raw_quiz, list) else []:
+        if not isinstance(item, dict):
+            continue
+        q = _text(item.get("q"), 200)
+        if not q:
+            continue
+        raw_options = item.get("options")
+        if not isinstance(raw_options, list):
+            continue
+        options = [_text(o, 120) for o in raw_options if isinstance(o, str) and _text(o, 120)]
+        if len(options) < 2 or len(options) > 4:
+            continue
+        answer = item.get("answer")
+        if isinstance(answer, bool) or not isinstance(answer, int) or not (0 <= answer < len(options)):
+            continue
+        t_raw = item.get("t")
+        t = parse_time(t_raw)
+        if t is not None and not (start - 60 <= t <= end + 60):
+            t = None
+        quiz.append({"q": q, "options": options, "answer": answer, "t": t})
+        if len(quiz) == 3:
+            break
     return {"start": start, "end": end, "title": _text(raw.get("title"), 80), "summary": summary,
             "points": sorted(points, key=lambda p: p["t"])[:6],
-            "actions": [_text(a, 200) for a in raw.get("actions") or [] if isinstance(a, str) and a.strip()][:3]}
+            "actions": [_text(a, 200) for a in raw.get("actions") or [] if isinstance(a, str) and a.strip()][:3],
+            "quiz": quiz}
 
 
 def summarize_parts(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],

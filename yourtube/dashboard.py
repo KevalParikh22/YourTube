@@ -1555,8 +1555,8 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/course/progress":
                 vid, key = body.get("id"), body.get("key")
-                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+", key):
-                    return self._error("key must be p<part> or a<part>.<action>")
+                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+|q\d+\.\d+", key):
+                    return self._error("key must be p<part>, a<part>.<action>, or q<part>.<question>")
                 progress = storage.set_course_progress(vid if isinstance(vid, str) else "", key, bool(body.get("done")))
                 return self._json({"ok": True, "progress": progress}) if progress is not None else self._error("No course for this video", 404)
 

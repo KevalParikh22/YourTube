@@ -45,7 +45,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   statusUndo: [],
-  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, courses: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, courses: {}, courseWrong: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
@@ -2306,13 +2306,33 @@ function viewCourse(id) {
   const watched = c.parts.filter((_, i) => done['p' + i]).length;
   const time = t => `<button class="time-link" data-act="play-at" data-id="${esc(id)}" data-t="${Math.floor(t)}">${clock(Math.floor(t))}</button>`;
   const box = (key, label, extra = '') => `<label class="keep"><input type="checkbox" data-change="course-progress" data-id="${esc(id)}" data-key="${key}" ${done[key] ? 'checked' : ''}${extra}> ${label}</label>`;
-  const part = (p, i) => `<li class="course-part${done['p' + i] ? ' done' : ''}">
+  const part = (p, i) => {
+    const quizHtml = (p.quiz || []).length ? `<div class="field-label">Check yourself</div><div class="quiz-opts-list">${(p.quiz || []).map((q, qi) => {
+      const pkey = `${id}:q${i}.${qi}`;
+      const answered = done[`q${i}.${qi}`];
+      const wrong = S.courseWrong[pkey];
+      let html = `<div class="quiz-item"><div class="quiz-q">${esc(q.q)}</div>`;
+      if (answered) {
+        html += `<div class="quiz-opts">${q.options.map((o, oi) => `<button class="quiz-opt${oi === q.answer ? ' right' : ''}" disabled>${esc(o)}</button>`).join('')}</div><div class="quiz-result">✓ ${esc(q.options[q.answer])}</div>`;
+      } else {
+        html += `<div class="quiz-opts">${q.options.map((o, oi) => `<button class="quiz-opt${oi === wrong ? ' wrong' : ''}" data-act="course-answer" data-id="${esc(id)}" data-part="${i}" data-q="${qi}" data-opt="${oi}">${esc(o)}</button>`).join('')}</div>`;
+      }
+      if (!answered && wrong !== undefined) {
+        const replayT = q.t != null ? q.t : p.start;
+        html += `<div class="quiz-result">Not quite</div><button class="btn btn-sm" data-act="play-at" data-id="${esc(id)}" data-t="${replayT}">▶ Replay the moment ${clock(replayT)}</button>`;
+      }
+      html += `</div>`;
+      return html;
+    }).join('')}</div>` : '';
+    return `<li class="course-part${done['p' + i] ? ' done' : ''}">
       <div class="course-head">${box('p' + i, `<b>Part ${i + 1}: ${esc(p.title || 'Untitled')}</b>`)}
         <button class="btn btn-sm" data-act="play-at" data-id="${esc(id)}" data-t="${p.start}">▶ Watch ${clock(p.start)}–${clock(p.end)}</button></div>
       ${p.summary ? `<p>${esc(p.summary)}</p>` : ''}
       ${(p.points || []).length ? `<ul>${p.points.map(x => `<li><div class="chap"><span>${time(x.t)}</span><span>${esc(x.text)}</span></div></li>`).join('')}</ul>` : ''}
       ${(p.actions || []).length ? `<div class="field-label">Do this week</div>${p.actions.map((a, j) => `<div>${box(`a${i}.${j}`, esc(a))}</div>`).join('')}` : ''}
+      ${quizHtml}
     </li>`;
+  };
   return `${back}<section>
     <div class="eyebrow">Course · ${plural(weeks, 'week')} · ${plural(n, 'part')}</div>
     <h1 class="display">${esc(v.title)}<em>${watched} of ${n} parts watched</em></h1>
@@ -2679,6 +2699,24 @@ document.addEventListener('click', async e => {
     case 'summarize-one': startSummary([id]); break;
     case 'course-make': setCourse(id, +($('#d-course-pace')?.value || 2)); break;
     case 'course-end': if (confirm('End this course? Its parts and summaries stay, your ticks are kept until the parts are made again.')) { await setCourse(id, null); location.hash = '#/home'; } break;
+    case 'course-answer': {
+      const part = el.dataset.part, q = el.dataset.q, opt = +el.dataset.opt;
+      const course = S.courses[id];
+      if (!course) break;
+      const qobj = (course.parts[+part]?.quiz || [])[+q];
+      if (!qobj) break;
+      if (opt === qobj.answer) {
+        try {
+          const r = await api('/api/course/progress', { id, key: `q${part}.${q}`, done: true });
+          S.courses[id].progress = r.progress;
+          delete S.courseWrong[`${id}:q${part}.${q}`];
+        } catch (err) { toast(err.message, true); break; }
+      } else {
+        S.courseWrong[`${id}:q${part}.${q}`] = opt;
+      }
+      refresh();
+      break;
+    }
     case 'remove-sel': {
       const ids = [...S.sel], one = ids.length === 1, notes = ids.filter(x => byId(x)?.notes?.trim()).length;
       if (!confirm(`Remove ${plural(ids.length, 'video')} from YourTube?\n\nThis deletes ${one ? 'its' : 'their'} transcripts, slides, ratings, summaries and search data`

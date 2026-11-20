@@ -1866,7 +1866,7 @@
     "/api/course/progress": {
       "post": {
         "tags": ["Videos"],
-        "summary": "Mark a course part watched or an action done",
+        "summary": "Mark a course part watched, an action done, or a question answered right",
         "operationId": "setCourseProgress",
         "security": [{"cookieAuth": [], "headerAuth": []}],
         "requestBody": {
@@ -1877,7 +1877,7 @@
                 "type": "object",
                 "properties": {
                   "id": {"type": "string", "description": "Video ID"},
-                  "key": {"type": "string", "pattern": "^(p\\d+|a\\d+\\.\\d+)$", "description": "p<part> or a<part>.<action>, counted from 0"},
+                  "key": {"type": "string", "pattern": "^(p\\d+|a\\d+\\.\\d+|q\\d+\\.\\d+)$", "description": "p<part>, a<part>.<action>, or q<part>.<question>, counted from 0"},
                   "done": {"type": "boolean"}
                 },
                 "required": ["id", "key", "done"]

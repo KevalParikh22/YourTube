@@ -65,6 +65,13 @@ def course_markdown(v: Dict[str, Any], course: Dict[str, Any]) -> str:
             out += [_md_text(p["summary"]), ""]
         out += [f"- [{_clock(x['t'])}]({_at(vid, x['t'])}) {_md_text(x['text'])}" for x in p.get("points") or []]
         out += [f"- [{'x' if done.get(f'a{i}.{j}') else ' '}] {_md_text(a)}" for j, a in enumerate(p.get("actions") or [])]
+        if p.get("quiz"):
+            out += ["Check yourself:"]
+            for item in p["quiz"]:
+                right = item["options"][item["answer"]]
+                t = item.get("t")
+                link = f" ([{_clock(t)}]({_at(vid, t)}))" if t is not None else ""
+                out += [f"- {_md_text(item['q'])} → {_md_text(right)}{link}"]
         out.append("")
     return "\n".join(out)
 
