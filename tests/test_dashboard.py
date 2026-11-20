@@ -49,6 +49,23 @@ class DashboardTest(unittest.TestCase):
         self.assertTrue({"a", "b"} <= {v["video_id"] for v in state["videos"]})   # other tests share this DB
         self.assertIn("ai", state)
         self.assertFalse(state["ai"]["ready"])
+        self.assertIn("indexed", state)
+        self.assertIsInstance(state["indexed"], list)
+
+    def test_state_indexed_fallback_when_model_name_raises(self):
+        import embedder
+        with mock.patch.object(embedder, "model_name", side_effect=Exception("model lookup failed")):
+            code, state = self.call("/api/state")
+            self.assertEqual(code, 200)
+            self.assertEqual(state["indexed"], [])
+
+    def test_video_activity(self):
+        storage.add_activity("a", "index", True, "model-x", "2 pieces")
+        code, body = self.call("/api/video/activity?id=a")
+        self.assertEqual(code, 200)
+        self.assertIn("activity", body)
+        self.assertIsInstance(body["activity"], list)
+        self.assertTrue(any(act.get("kind") == "index" and act.get("note") == "2 pieces" for act in body["activity"]))
 
     def test_csrf_and_host_checks(self):
         self.assertEqual(self.call("/api/reclassify", {}, {"X-YTKB": "0"})[0], 403)

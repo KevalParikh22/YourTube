@@ -736,6 +736,11 @@ def build_state(library=1):
     global _VOICE_AVAILABLE
     if not _VOICE_AVAILABLE:   # only "yes" is kept: installing faster-whisper later must not need a restart
         _VOICE_AVAILABLE = voice.available()
+    try:
+        import embedder
+        indexed = storage.indexed_videos(embedder.model_name(settings))
+    except Exception:
+        indexed = []
     return {
         "library": library or 0,
         "libraries": storage.get_libraries(),
@@ -754,6 +759,7 @@ def build_state(library=1):
         "voice": _VOICE_AVAILABLE,
         "summarised": list(storage.summary_times()),   # video ids with a summary (Knowledge: Summarise 5)
         "courses": storage.list_courses(),
+        "indexed": indexed,
     }
 
 class Handler(BaseHTTPRequestHandler):
