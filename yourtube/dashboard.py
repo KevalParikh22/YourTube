@@ -540,6 +540,82 @@ def _check_channels():
     finally:
         _schedule_channel_check()
 
+CHANNEL_BIG = 500              # a whole-channel import this big summarises at night, whatever the video lengths
+_UPLOADS = {}                  # channel id -> (read at, all uploads): the estimate's read, reused by the import
+
+def _channel_uploads(channel_id):
+    """All of a channel's uploads, newest first; read again after an hour."""
+    import time
+    from extractor import read_latest_uploads
+    hit = _UPLOADS.get(channel_id)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    videos = read_latest_uploads(channel_id, None)
+    _UPLOADS[channel_id] = (time.time(), videos)
+    return videos
+
+def _channel_estimate(channel_id):
+    """What importing a whole channel means: its videos, how many are new, and what summarising them costs."""
+    import summarizer
+    uploads = _channel_uploads(channel_id)
+    # shortcut: videos removed from YourTube count as new and to summarise (the import skips them), fine for an estimate
+    have, done = {v["video_id"] for v in storage.get_all_videos(include_removed=True)}, storage.summary_times()
+    todo = [v for v in uploads if v["video_id"] not in done]
+    settings = llm.load_settings()
+    return {"videos": len(uploads), "new": sum(v["video_id"] not in have for v in uploads), "to_summarize": len(todo),
+            "hours": round(sum(v.get("duration_seconds") or 0 for v in uploads) / 3600, 1),
+            "summarize": summarizer.estimate_by_length([v.get("duration_seconds") or 0 for v in todo], settings),
+            "night": len(todo) >= CHANNEL_BIG, "night_at": _next_time(llm.night_settings(settings)["start"])}
+
+def _import_channel(channel_id):
+    """Adds all of a followed channel's uploads to its source, fetches their details, then queues their summaries."""
+    from classifier import classify_playlist_videos
+    from enrich import run_enrich
+    ch = next((c for c in storage.get_channels() if c["id"] == channel_id), None)
+    if not ch:
+        print("Error: this channel is not followed.")
+        return False
+    try:
+        uploads = _channel_uploads(channel_id)
+    except ValueError as e:
+        print(f"Error: could not read the channel: {e}")
+        return False
+    print(f"Importing {ch['title']}: {len(uploads)} videos.")
+    known = {v["video_id"]: v["category"] for v in storage.get_all_videos(include_removed=True)}
+    for v in uploads:
+        if v["channel"] == "Unknown Channel":
+            v["channel"] = ch["title"]
+    classify_playlist_videos([v for v in uploads if v["video_id"] not in known], load_taxonomy(library=ch["library_id"]))
+    for v in uploads:   # videos already in the library keep their category
+        v["category"] = known.get(v["video_id"], v["category"])
+    # Not partial: the list is the whole channel, and videos the user removed from YourTube stay out
+    counts = storage.save_playlist({"id": storage.channel_source(channel_id), "title": ch["title"], "url": ""},
+                                   uploads, library_id=ch["library_id"])
+    ids = [v["video_id"] for v in uploads]
+    storage.set_channel(channel_id, seen=ids[:storage.CHANNEL_SEEN_KEEP])
+    print(f"   {counts['added']} added, {len(ids) - counts['added']} already there.\n")
+    run_enrich(video_ids=ids, limit=len(ids), should_stop=JOB.stop_requested)
+    if JOB.stop_requested():
+        return True
+    done, settings = storage.summary_times(), llm.load_settings()
+    todo = [v["video_id"] for v in storage.get_all_videos(playlist_id=storage.channel_source(channel_id)) if v["video_id"] not in done]
+    if not todo:
+        print("Every video already has a summary. Build its knowledge pages on the Knowledge page.")
+        return True
+    if not llm.is_configured(settings, "summarize"):
+        print("No AI is set up for summaries in Settings → AI, so the videos wait for you.")
+        return True
+    at = _next_time(llm.night_settings(settings)["start"]) if len(todo) >= CHANNEL_BIG else None
+    for i in range(0, len(todo), 50):   # summaries take at most 50 videos per task
+        chunk, run = todo[i:i + 50], _summarize_task(_utc_now())
+        if at:
+            JOB.start("summarize", _label(f"Summarise {ch['title']} at night", chunk), run(chunk), key=["night"] + chunk, not_before=at)
+        else:
+            _queue_split("summarize", f"Summarise {ch['title']}", chunk, run)
+    print(f"Summarise: {len(todo)} videos queued" + (f", starting {at} (night queue)" if at else "") +
+          ". Then build the channel's knowledge pages on the Knowledge page.")
+    return True
+
 # Task functions for _queue_split: run(since)(ids) -> the task. since: videos done after it are skipped (Retry, overlaps)
 def _rate_task(since):
     import rater
@@ -970,10 +1046,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/api/knowledge", "/api/knowledge/page", "/api/export/knowledge"):
             import knowledge
             lib = _library((qs.get("library") or ["1"])[0]) or 1
+            channel = (qs.get("channel") or [""])[0] or None
             if url.path == "/api/knowledge":
-                return self._json({"library": lib, "categories": knowledge.status(lib)})
+                return self._json({"library": lib, "channel": channel, "categories": knowledge.status(lib, channel)})
             category = (qs.get("category") or [""])[0]
-            found = storage.get_page(lib, category)
+            found = storage.get_page(lib, knowledge.page_key(category, channel))
             if url.path == "/api/knowledge/page":
                 return self._json(found or {"page": None})
             if not found:
@@ -1114,6 +1191,18 @@ class Handler(BaseHTTPRequestHandler):
                         if t["kind"] == "channels" and t["not_before"]:
                             JOB.request_stop(t["id"])
                 return self._json({"ok": True})
+
+            if path in ("/api/channels/estimate", "/api/channels/import"):
+                cid = _clean(body.get("id")) or ""
+                if not any(c["id"] == cid for c in storage.get_channels()):
+                    return self._error("Not a followed channel", 404)
+                if path == "/api/channels/import":
+                    title = next(c["title"] for c in storage.get_channels() if c["id"] == cid)
+                    return self._queued(JOB.start("channels", f"Import all of {title}", lambda: _import_channel(cid), key=["import", cid]))
+                try:
+                    return self._json(_channel_estimate(cid))
+                except ValueError as e:
+                    return self._error(f"Could not read the channel: {e}", 502)
 
             if path == "/api/channels/check":
                 if not storage.get_channels():
@@ -1504,11 +1593,12 @@ class Handler(BaseHTTPRequestHandler):
                 category = _clean(body.get("category"))
                 if not isinstance(category, str) or not category:
                     return self._error("category is required")
-                target = lib or 1
+                target, channel = lib or 1, (_clean(body.get("channel")) if isinstance(body.get("channel"), str) else None) or None
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
                 return self._queued(JOB.start("knowledge", f"Knowledge page: {category}",
-                                              lambda: knowledge.run_build(target, category), key=[target, category]))
+                                              lambda: knowledge.run_build(target, category, channel),
+                                              key=[target, category, channel]))
 
             if path in ("/api/summarize", "/api/summarize/estimate"):
                 import summarizer

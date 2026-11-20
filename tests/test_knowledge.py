@@ -68,6 +68,19 @@ class PageTest(unittest.TestCase):
         self.assertIn("- LoRA trains adapters. [\\[1\\]](https://www.youtube.com/watch?v=", md)
         self.assertIn("## Sources", md)
 
+    def test_channel_scope_has_its_own_pages(self):
+        cid = "UC" + "k" * 22
+        storage.save_playlist({"id": storage.channel_source(cid), "title": "Teacher", "url": ""}, [video("k1", "LoRA talk", category=CAT)],
+                              partial=True)
+        reply = json.dumps({"sections": [{"heading": "Only LoRA", "points": [{"text": "LoRA trains adapters.", "cites": [1]}]}]})
+        page = knowledge.build_page(1, CAT, complete=lambda s, p: reply, channel=cid)
+        found = storage.get_page(1, knowledge.page_key(CAT, cid))
+        self.assertEqual({i["video_id"] for i in found["sources"]}, {"k1"})        # only the channel's video
+        self.assertEqual(page["sections"][0]["heading"], "Only LoRA")
+        [row] = knowledge.status(1, cid)
+        self.assertEqual((row["category"], row["videos"], row["summarised"], row["page"]), (CAT, 1, 1, "ready"))
+        self.assertNotIn(knowledge.page_key(CAT, cid), [c["category"] for c in knowledge.status(1)])   # not among the library's
+
     def test_nothing_summarised(self):
         with self.assertRaises(LLMError):
             knowledge.build_page(1, "NoSuchCategory", complete=lambda s, p: "{}")

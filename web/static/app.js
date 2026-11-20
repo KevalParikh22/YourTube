@@ -259,6 +259,7 @@ function renderView() {
   }
   else if (r === 'knowledge') {
     const cat = routeParam('category');
+    if ((S.knowledge.scope || null) !== routeParam('channel')) S.knowledge = { list: null, pages: {}, loadingList: false, loadingPage: null, scope: routeParam('channel') };
     if (cat) {
       v.innerHTML = viewKnowledgePage(cat);
       if (!S.knowledge.pages[cat] && S.knowledge.loadingPage !== cat) loadKnowledgePage(cat);
@@ -688,7 +689,7 @@ const CHANNEL_AUTO = [['summarize', 'Rate and summarise'], ['rate', 'Rate'], ['d
 async function loadChannels() {
   S.channels = 'loading';
   try { S.channels = await api('/api/channels'); } catch (e) { S.channels = { error: e.message, channels: [] }; }
-  if (route() === 'sources') refresh();
+  if (['sources', 'knowledge'].includes(route())) refresh();
   if (S.drawer) renderDrawer();
 }
 const followedTitle = name => Array.isArray(S.channels?.channels) && S.channels.channels.some(c => c.title === name);
@@ -705,7 +706,11 @@ function viewChannels() {
       <td class="r" data-label="Videos">${c.videos}</td>
       <td data-label="New videos">${auto(c.auto, `data-change="channel-auto" data-id="${esc(c.id)}" aria-label="What happens to new videos from ${esc(c.title)}"`)}</td>
       <td class="muted" data-label="Last checked">${c.last_checked ? esc(fmtRelTime(c.last_checked)) : 'Not yet'}</td>
-      <td data-label="Actions"><button class="btn-text" data-act="channel-unfollow" data-id="${esc(c.id)}" data-title="${esc(c.title)}">Unfollow</button></td></tr>`).join('')}</tbody></table></div>`
+      <td data-label="Actions"><span style="display:inline-flex;gap:10px;flex-wrap:wrap">
+        <button class="btn-text" data-act="channel-import" data-id="${esc(c.id)}" data-title="${esc(c.title)}" data-job-btn title="Add all of its past videos and summarise them for its knowledge pages">Import all</button>
+        ${c.videos ? `<a class="btn-text" href="#/knowledge?channel=${encodeURIComponent(c.id)}">Knowledge</a>
+        <button class="btn-text" data-act="channel-ask" data-id="${esc(c.id)}">Ask</button>` : ''}
+        <button class="btn-text" data-act="channel-unfollow" data-id="${esc(c.id)}" data-title="${esc(c.title)}">Unfollow</button></span></td></tr>`).join('')}</tbody></table></div>`
     : `<p class="note">No channels yet. Follow one below, or open a video and click Follow channel.</p>`;
   return `<section class="section card">${head}
     <p class="note">New uploads from these channels are added to your library by themselves${tip('Every few hours while the dashboard runs, YourTube reads the newest uploads of each channel (anonymously) and adds the new ones to a source named after the channel, then fetches their details and rates or summarises them as chosen. The videos already there when you follow are not added. Unfollowing keeps the videos.')}</p>
@@ -1407,10 +1412,13 @@ async function runAsk() {
 }
 
 /* ---------------- knowledge ---------------- */
+// Pages of the whole library, or of one followed channel (#/knowledge?channel=UC…, knowledge.page_key)
+const kScope = (sep = '&') => routeParam('channel') ? `${sep}channel=${encodeURIComponent(routeParam('channel'))}` : '';
+const kChannel = () => routeParam('channel') && (S.channels?.channels || []).find(c => c.id === routeParam('channel'));
 async function buildKnowledge(category) {
   try {
     const lib = S.lib || 1;
-    const res = await api('/api/knowledge/build', { category, library: lib });
+    const res = await api('/api/knowledge/build', { category, library: lib, channel: routeParam('channel') || undefined });
     await queued(res, `Knowledge page: ${category}`);
   } catch (e) {
     toast(e.message, true);
@@ -1422,7 +1430,7 @@ async function loadKnowledgeList() {
   S.knowledge.loadingList = true;
   try {
     const lib = S.lib || 1;
-    const res = await api(`/api/knowledge?library=${lib}`);
+    const res = await api(`/api/knowledge?library=${lib}${kScope()}`);
     S.knowledge.list = res.categories || [];
   } catch (e) {
     S.knowledge.list = { error: e.message };
@@ -1437,7 +1445,7 @@ async function loadKnowledgePage(cat) {
   S.knowledge.loadingPage = cat;
   try {
     const lib = S.lib || 1;
-    const res = await api(`/api/knowledge/page?library=${lib}&category=${encodeURIComponent(cat)}`);
+    const res = await api(`/api/knowledge/page?library=${lib}&category=${encodeURIComponent(cat)}${kScope()}`);
     S.knowledge.pages[cat] = res;
   } catch (e) {
     S.knowledge.pages[cat] = { error: e.message };
@@ -1454,9 +1462,13 @@ function viewKnowledgeList() {
   return `
   <section>
     <div class="eyebrow">Knowledge</div>
-    <h1 class="display">Knowledge base<em>Topic pages from your summaries</em></h1>
+    <h1 class="display">Knowledge base<em>${kChannel() ? `Topic pages from ${esc(kChannel().title)}` : 'Topic pages from your summaries'}</em></h1>
     <p class="lede">Study pages combining notes, minutes, and quotes across your videos, citing every moment.</p>
     ${!S.lib ? `<div class="banner"><span>Knowledge pages belong to a single library. Showing pages for <b>${esc(libName(1) || 'Library 1')}</b>. Pick a specific library above to switch.</span></div>` : ''}
+    ${Array.isArray(S.channels?.channels) && S.channels.channels.length ? `<label class="field-label" style="max-width:360px">Pages from
+      <select data-change="knowledge-scope"><option value="">The whole library</option>
+      ${S.channels.channels.map(c => `<option value="${esc(c.id)}" ${routeParam('channel') === c.id ? 'selected' : ''}>Channel: ${esc(c.title)}</option>`).join('')}</select></label>`
+      : S.channels === undefined ? (loadChannels(), '') : ''}
     ${!ai.ready_for.summarize ? `<div class="banner"><span>Set up an AI for summaries in Settings to build knowledge pages.</span><a class="btn btn-sm" href="#/settings/routing">Set up AI</a></div>` : ''}
     <div id="job"></div>
   </section>
@@ -1489,7 +1501,7 @@ function viewKnowledgeList() {
               return `<tr>
                 <td data-label="Topic">
                   ${hasPage
-                    ? `<a href="#/knowledge?category=${encodeURIComponent(c.category)}" style="font-weight:600">${esc(c.category)}</a>`
+                    ? `<a href="#/knowledge?category=${encodeURIComponent(c.category)}${kScope()}" style="font-weight:600">${esc(c.category)}</a>`
                     : `<span style="font-weight:600">${esc(c.category)}</span>`}
                 </td>
                 <td data-label="Summaries" style="font-size:13.5px">${esc(sumText)}</td>
@@ -1497,7 +1509,7 @@ function viewKnowledgeList() {
                 <td class="r" data-label="Actions">
                   <div style="display:inline-flex;gap:6px;align-items:center;justify-content:flex-end">
                     <button class="btn btn-sm" data-act="knowledge-summarize-five" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize || c.summarised >= c.videos ? 'disabled' : ''}>Summarise 5</button>
-                    ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}">Open</a>` : ''}
+                    ${hasPage ? `<a class="btn btn-sm" href="#/knowledge?category=${encodeURIComponent(c.category)}${kScope()}">Open</a>` : ''}
                     ${isStale ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Update knowledge page'}">Update</button>`
                       : isReady ? `<button class="btn btn-sm btn-text" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!c.summarised || !ai.ready_for.summarize ? 'disabled' : ''} title="${!c.summarised ? 'Summarise at least one video in this category first' : !ai.ready_for.summarize ? 'Set up an AI for summaries first' : 'Rebuild knowledge page'}">Rebuild</button>`
                       : c.summarised >= 3 ? `<button class="btn btn-sm btn-dark" data-act="knowledge-build" data-cat="${esc(c.category)}" ${!ai.ready_for.summarize ? 'disabled' : ''} title="Build knowledge page">Build</button>` : ''}
@@ -1517,7 +1529,7 @@ function viewKnowledgeList() {
 
 async function summarizeKnowledgeFive(category) {
   try {
-    const candidates = videos().filter(v => v.category === category && !isDone(v)).sort((a, b) => (a.status === 'unwatched' ? 0 : 1) - (b.status === 'unwatched' ? 0 : 1));
+    const ch = routeParam('channel'), candidates = videos().filter(v => v.category === category && !isDone(v) && (!ch || srcEntry(v, `_channel-${ch}`))).sort((a, b) => (a.status === 'unwatched' ? 0 : 1) - (b.status === 'unwatched' ? 0 : 1));
     const done = new Set(S.data.summarised || []);
     const selected = candidates.filter(v => !done.has(v.video_id)).slice(0, 5).map(v => v.video_id);
     if (!selected.length) { toast('No unsummarised unwatched videos in this category'); return; }
@@ -1529,12 +1541,12 @@ function viewKnowledgePage(cat) {
   const lib = S.lib || 1;
   const data = S.knowledge.pages[cat];
   const ai = S.data.ai;
-  const exportUrl = `/api/export/knowledge?library=${encodeURIComponent(lib)}&category=${encodeURIComponent(cat)}`;
+  const exportUrl = `/api/export/knowledge?library=${encodeURIComponent(lib)}&category=${encodeURIComponent(cat)}${kScope()}`;
 
   if (!data) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="note" style="margin-top:20px"><span class="spin" style="display:inline-block"></span> Loading page…</p>
@@ -1545,7 +1557,7 @@ function viewKnowledgePage(cat) {
   if (data.error) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="note warn-text" style="margin-top:20px">Could not load knowledge page: ${esc(data.error)}</p>
@@ -1556,7 +1568,7 @@ function viewKnowledgePage(cat) {
   if (!data.page) {
     return `
     <section>
-      <div style="margin-bottom:14px"><a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a></div>
+      <div style="margin-bottom:14px"><a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a></div>
       <div class="eyebrow">Knowledge page</div>
       <h1 class="display">${esc(cat)}</h1>
       <p class="lede">Build a study page from this topic’s video summaries.</p>
@@ -1584,7 +1596,7 @@ function viewKnowledgePage(cat) {
   return `
   <section>
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-      <a href="#/knowledge" class="btn-text" style="padding-left:0">← Back</a>
+      <a href="#/knowledge${kScope('?')}" class="btn-text" style="padding-left:0">← Back</a>
       <div style="display:flex;gap:8px;align-items:center">
         <a class="btn btn-sm" href="${esc(exportUrl)}" download>Export note</a>
         <button class="btn btn-sm ${isStale ? 'btn-dark' : ''}" data-act="knowledge-build" data-cat="${esc(cat)}" ${!ai.ready_for.summarize ? 'disabled' : ''} title="${isStale ? 'Update page with newest summaries' : 'Rebuild page'}">${isStale ? 'Update' : 'Rebuild'}</button>
@@ -2480,6 +2492,20 @@ document.addEventListener('click', async e => {
       if (!confirm(`Stop following ${el.dataset.title}? Its videos already in your library stay.`)) break;
       try { await api('/api/channels/unfollow', { id: el.dataset.id }); await loadChannels(); toast(`Unfollowed ${el.dataset.title}`); } catch (err) { toast(err.message, true); }
       break;
+    case 'channel-import': {
+      const old = el.textContent; el.disabled = true; el.textContent = 'Counting videos…';
+      try {
+        const e = await api('/api/channels/estimate', { id: el.dataset.id }), sm = e.summarize;
+        const cost = !e.to_summarize ? 'nothing to summarise' : sm.cost == null ? 'cost unknown for this model' : sm.cost === 0 ? 'free (local model)' : `about $${sm.cost < 0.01 ? '0.01 or less' : sm.cost.toFixed(2)}`;
+        const when = !e.to_summarize ? '' : !sm.ready ? '\nNo AI is set up for summaries yet, so they wait for you.'
+          : e.night ? `\nThat is a big channel, so the summaries wait for the night queue (from ${atTime(e.night_at)}).` : '';
+        if (confirm(`Import all of ${el.dataset.title}?\n\n${plural(e.videos, 'video')} (${e.hours} h), ${e.new} not in your library yet.\n`
+          + `Details and transcripts are fetched for all, then ${plural(e.to_summarize, 'video')} summarised with ${sm.uses}: ${cost}.${when}`))
+          await queued(await api('/api/channels/import', { id: el.dataset.id }), `Importing ${el.dataset.title}`);
+      } catch (err) { toast(err.message, true); }
+      el.disabled = false; el.textContent = old; break;
+    }
+    case 'channel-ask': S.ask.src = `_channel-${el.dataset.id}`; S.ask.cat = ''; S.ask.video = null; S.ask.thread = []; location.hash = '#/ask'; break;
     case 'channel-check':
       try { await queued(await api('/api/channels/check', {}), 'Checking followed channels'); } catch (err) { toast(err.message, true); }
       break;
@@ -2950,6 +2976,7 @@ document.addEventListener('change', async e => {
     try { await api('/api/channels/update', { id: el.dataset.id, auto: el.value }); toast('Saved'); } catch (err) { toast(err.message, true); }
     return;
   }
+  if (ch === 'knowledge-scope') { location.hash = `#/knowledge${el.value ? `?channel=${encodeURIComponent(el.value)}` : ''}`; return; }
   if (ch === 'channel-hours') {
     try { await api('/api/channels/update', { hours: +el.value }); S.channels = undefined; await refreshJob(); refresh(); toast(`Followed channels are checked every ${el.value} h`); }
     catch (err) { toast(err.message, true); }

@@ -294,6 +294,44 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual((ch["seen"][:3], ch["videos"], ch["last_error"]), (["new1", "old1", "old2"], 1, None))
         self.assertIsNotNone(ch["last_checked"])
 
+    def test_whole_channel_import_estimates_then_adds_all_and_queues_summaries(self):
+        self._no_channels()
+        self.addCleanup(self._no_channels)
+        dashboard._UPLOADS.clear()
+        cid = "UC" + "i" * 22
+        storage.follow_channel(cid, "Teacher", [], library_id=1, auto="add")
+        storage.save_playlist(playlist("PLimp"), [video("imp_have", "Mine", category="Kept")])
+        storage.save_summary("imp_have", {"tldr": "done"})
+        storage.save_playlist(playlist("PLimp2"), [video("imp_gone", "Removed")])
+        storage.remove_videos(["imp_gone"])
+        uploads = [video("imp_new", "Lesson", duration=3600), video("imp_have", "Mine"), video("imp_gone", "Removed")]
+        with mock.patch("extractor.read_latest_uploads", return_value=uploads) as read, \
+                mock.patch("llm.is_configured", return_value=True):
+            est = dashboard._channel_estimate(cid)
+            self.assertEqual((est["videos"], est["new"], est["to_summarize"], est["night"]), (3, 2, 2, False))
+            self.assertGreater(est["summarize"]["tokens_in"], 3600 * 15 // 4)        # an hour of speech
+            queued, nights = [], []
+            with mock.patch("enrich.run_enrich") as enrich, \
+                    mock.patch.object(dashboard, "_queue_split", side_effect=lambda kind, action, ids, run: queued.append((kind, ids))), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(dashboard._import_channel(cid))
+            self.assertEqual(read.call_count, 1)                                     # the estimate's read is reused
+        items = {v["video_id"]: v for v in storage.get_all_videos(storage.channel_source(cid))}
+        self.assertEqual(set(items), {"imp_new", "imp_have"})                        # a removed video stays out
+        self.assertEqual(items["imp_have"]["category"], "Kept")                       # and a known one keeps its category
+        self.assertEqual(enrich.call_args.kwargs["video_ids"], ["imp_new", "imp_have", "imp_gone"])
+        self.assertEqual(queued, [("summarize", ["imp_new"])])                        # summarised ones aren't redone
+        # A big channel's summaries all wait for the night
+        started = []
+        with mock.patch.object(dashboard, "CHANNEL_BIG", 1), mock.patch("enrich.run_enrich"), \
+                mock.patch("llm.is_configured", return_value=True), \
+                mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None, not_before=None: started.append((kind, not_before))), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(dashboard._import_channel(cid))
+        self.assertEqual([(k, at is not None) for k, at in started], [("summarize", True)])
+        self.assertEqual(self.call("/api/channels/estimate", {"id": "UC" + "z" * 22})[0], 404)
+        self.assertEqual(self.call("/api/channels/import", {"id": "nope"})[0], 404)
+
     def test_channel_that_cannot_be_read_keeps_its_error_and_the_rest_go_on(self):
         self._no_channels()
         self.addCleanup(self._no_channels)

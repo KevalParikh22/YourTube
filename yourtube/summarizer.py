@@ -169,6 +169,21 @@ def _videos(video_ids: List[str]) -> List[Dict[str, Any]]:
     return [{**v, "slides": storage.get_visuals(v["video_id"])} for v in storage.videos_for_rating(video_ids)]
 
 
+CHARS_PER_SECOND = 15         # speech is about 150 words a minute; for estimates before a transcript is fetched
+
+
+def estimate_by_length(seconds: List[int], settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Like estimate, for videos not fetched yet: their transcript size guessed from their length."""
+    import llm
+    settings = settings or llm.load_settings()
+    budget = llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE)
+    chars = sum(min((s or 0) * CHARS_PER_SECOND, budget) + len(SYSTEM) + 4000 for s in seconds)
+    tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(seconds)
+    return {"videos": len(seconds), "tokens_in": tokens_in, "tokens_out": tokens_out,
+            "cost": llm.estimate_cost(settings, "summarize", tokens_in, tokens_out), "uses": llm.describe(settings, "summarize"),
+            "ready": llm.is_configured(settings, "summarize")}
+
+
 def estimate(video_ids: List[str]) -> Dict[str, Any]:
     """What a summary run would send: videos, approximate tokens and price."""
     import llm

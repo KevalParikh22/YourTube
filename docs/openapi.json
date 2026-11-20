@@ -1630,6 +1630,13 @@
         "operationId": "getKnowledgeStatus",
         "parameters": [
           {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "description": "A followed channel's ID (UC…): its own pages, built from its videos only",
+            "schema": {"type": "string"}
+          },
+          {
             "name": "library",
             "in": "query",
             "required": false,
@@ -1685,6 +1692,13 @@
             "schema": {"type": "string"}
           },
           {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "description": "A followed channel's ID (UC…): its own pages, built from its videos only",
+            "schema": {"type": "string"}
+          },
+          {
             "name": "library",
             "in": "query",
             "required": false,
@@ -1728,7 +1742,8 @@
                 "type": "object",
                 "properties": {
                   "category": {"type": "string", "description": "Category name"},
-                  "library": {"type": "integer", "description": "Library ID"}
+                  "library": {"type": "integer", "description": "Library ID"},
+                  "channel": {"type": "string", "description": "A followed channel's ID: build the page from that channel's videos only"}
                 },
                 "required": ["category"]
               }
@@ -1757,6 +1772,13 @@
             "in": "query",
             "required": true,
             "description": "Category name",
+            "schema": {"type": "string"}
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "description": "A followed channel's ID (UC…): its own pages, built from its videos only",
             "schema": {"type": "string"}
           },
           {
@@ -2059,6 +2081,62 @@
           "401": {"$ref": "#/components/responses/Error401"},
           "403": {"$ref": "#/components/responses/Error403"},
           "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/channels/estimate": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Read all of a followed channel's uploads and say what importing them means: videos, new ones, hours, summary cost",
+        "operationId": "estimateChannelImport",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string", "description": "Channel ID (UC…)"}}, "required": ["id"]}}}
+        },
+        "responses": {
+          "200": {
+            "description": "Estimate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "videos": {"type": "integer"},
+                    "new": {"type": "integer", "description": "Not in the library yet"},
+                    "to_summarize": {"type": "integer", "description": "Without a summary yet"},
+                    "hours": {"type": "number"},
+                    "summarize": {"type": "object", "description": "videos, tokens_in, tokens_out, cost (USD, null when unknown), uses, ready"},
+                    "night": {"type": "boolean", "description": "500 or more to summarise: the summaries wait for the night queue"},
+                    "night_at": {"type": "string", "description": "When the night queue starts next (local ISO time)"}
+                  }
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"},
+          "502": {"$ref": "#/components/responses/Error502"}
+        }
+      }
+    },
+    "/api/channels/import": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Queue importing all of a followed channel's uploads: add them to its source, fetch details, then queue their summaries (at night for 500+)",
+        "operationId": "importChannel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string", "description": "Channel ID (UC…)"}}, "required": ["id"]}}}
+        },
+        "responses": {
+          "200": {"description": "Import queued", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"},
+          "409": {"$ref": "#/components/responses/Error409"}
         }
       }
     },
