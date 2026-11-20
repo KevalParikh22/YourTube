@@ -86,6 +86,25 @@ class PageTest(unittest.TestCase):
             knowledge.build_page(1, "NoSuchCategory", complete=lambda s, p: "{}")
 
 
+class BuildAllTest(unittest.TestCase):
+    def test_builds_stale_and_eligible_unbuilt_pages(self):
+        rows = [{"category": "stale", "page": "stale", "summarised": 0},
+                {"category": "eligible", "page": "none", "summarised": 3},
+                {"category": "ready", "page": "ready", "summarised": 8},
+                {"category": "few", "page": "none", "summarised": 2}]
+        with mock.patch.object(knowledge, "status", return_value=rows), \
+                mock.patch.object(knowledge, "run_build", return_value=True) as build:
+            self.assertTrue(knowledge.run_build_all(1))
+        self.assertEqual([call.args for call in build.call_args_list], [(1, "stale", None), (1, "eligible", None)])
+
+    def test_returns_false_if_any_page_fails(self):
+        rows = [{"category": "one", "page": "stale", "summarised": 1},
+                {"category": "two", "page": "stale", "summarised": 1}]
+        with mock.patch.object(knowledge, "status", return_value=rows), \
+                mock.patch.object(knowledge, "run_build", side_effect=[True, False]):
+            self.assertFalse(knowledge.run_build_all(1))
+
+
 class EndpointTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -122,6 +141,16 @@ class EndpointTest(unittest.TestCase):
         with mock.patch("llm.is_configured", return_value=True), mock.patch("dashboard.JOB.start", return_value={"id": 3, "position": 0}) as start:
             self.assertEqual(self.call("/api/knowledge/build", {"category": CAT, "library": 1})[0], 200)
         self.assertEqual(start.call_args[0][0], "knowledge")
+
+    def test_build_all_endpoint(self):
+        with mock.patch("llm.is_configured", return_value=True), mock.patch("dashboard.JOB.start", return_value={"id": 4, "position": 0}) as start:
+            code, body = self.call("/api/knowledge/build-all", {"library": 1})
+        self.assertEqual(code, 200)
+        self.assertEqual(body["id"], 4)
+        self.assertIn("position", body)
+        self.assertEqual(start.call_args.args[:2], ("knowledge", "Knowledge pages: build all"))
+        with mock.patch("llm.is_configured", return_value=False):
+            self.assertEqual(self.call("/api/knowledge/build-all", {"library": 1})[0], 400)
 
 
 if __name__ == "__main__":

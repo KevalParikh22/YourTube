@@ -599,9 +599,6 @@ def _import_channel(channel_id):
         return True
     done, settings = storage.summary_times(), llm.load_settings()
     todo = [v["video_id"] for v in storage.get_all_videos(playlist_id=storage.channel_source(channel_id)) if v["video_id"] not in done]
-    if not todo:
-        print("Every video already has a summary. Build its knowledge pages on the Knowledge page.")
-        return True
     if not llm.is_configured(settings, "summarize"):
         print("No AI is set up for summaries in Settings → AI, so the videos wait for you.")
         return True
@@ -612,8 +609,12 @@ def _import_channel(channel_id):
             JOB.start("summarize", _label(f"Summarise {ch['title']} at night", chunk), run(chunk), key=["night"] + chunk, not_before=at)
         else:
             _queue_split("summarize", f"Summarise {ch['title']}", chunk, run)
+    import knowledge
+    JOB.start("knowledge", f"Knowledge pages: {ch['title']}",
+              lambda: knowledge.run_build_all(ch["library_id"], channel_id),
+              key=[ch["library_id"], "all", channel_id], not_before=at)
     print(f"Summarise: {len(todo)} videos queued" + (f", starting {at} (night queue)" if at else "") +
-          ". Then build the channel's knowledge pages on the Knowledge page.")
+          ". Knowledge pages will be built after the summaries.")
     return True
 
 # Task functions for _queue_split: run(since)(ids) -> the task. since: videos done after it are skipped (Retry, overlaps)
@@ -1619,6 +1620,17 @@ class Handler(BaseHTTPRequestHandler):
                 return self._queued(JOB.start("knowledge", f"Knowledge page: {category}",
                                               lambda: knowledge.run_build(target, category, channel),
                                               key=[target, category, channel]))
+
+            if path == "/api/knowledge/build-all":
+                import knowledge
+                target, channel = lib or 1, (_clean(body.get("channel")) if isinstance(body.get("channel"), str) else None) or None
+                if not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                channel_title = next((c["title"] for c in storage.get_channels() if c["id"] == channel), channel)
+                label = "Knowledge pages: build all" + (f" for {channel_title}" if channel else "")
+                return self._queued(JOB.start("knowledge", label,
+                                              lambda: knowledge.run_build_all(target, channel),
+                                              key=[target, "all", channel]))
 
             if path in ("/api/summarize", "/api/summarize/estimate"):
                 import summarizer
