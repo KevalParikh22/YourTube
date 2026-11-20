@@ -186,6 +186,22 @@ def run_build(library: int, category: str, channel: Optional[str] = None) -> boo
     return True
 
 
+def run_build_all(library: int, channel: Optional[str] = None) -> bool:
+    """Build every stale page and every unbuilt topic with enough summaries."""
+    rows = status(library, channel)
+    categories = [row["category"] for row in rows
+                  if row["page"] == "stale" or (row["page"] == "none" and row["summarised"] >= 3)]
+    print(f"Knowledge pages: {len(categories)} to build.")
+    if not categories:
+        print("Nothing to build: every page is up to date.")
+        return True
+    ok = True
+    for category in categories:
+        if not run_build(library, category, channel):
+            ok = False
+    return ok
+
+
 def page_markdown(category: str, page: Dict[str, Any], items: List[Dict[str, Any]]) -> str:
     """The page as an Obsidian-friendly note; citations link to the cited moments."""
     from exporter import _at, _md_text, _yaml
