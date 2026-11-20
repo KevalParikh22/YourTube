@@ -547,14 +547,15 @@ _UPLOADS = {}                  # channel id -> (read at, all uploads): the estim
 def _build_channel_pages(channel_id, library):
     """Build channel knowledge pages once its queued summaries have finished."""
     import knowledge
+    title = next((c["title"] for c in storage.get_channels() if c["id"] == channel_id), channel_id)
     snapshot = JOB.snapshot()
     summarizing = (any(lane["running"] and lane["kind"] == "summarize" for lane in snapshot["lanes"]) or
                    any(task["kind"] == "summarize" for task in snapshot["queue"]))
     if summarizing:
         at = (datetime.now() + timedelta(minutes=CHANNEL_PAGES_RETRY_MINUTES)).isoformat(timespec="seconds")
-        JOB.start("knowledge", f"Knowledge pages: {channel_id}", lambda: _build_channel_pages(channel_id, library),
-                  key=["channel-pages", channel_id], not_before=at)
-        print(f"Knowledge pages wait for channel {channel_id}'s summaries; trying again at {at}.")
+        JOB.start("knowledge", f"Knowledge pages: {title}", lambda: _build_channel_pages(channel_id, library),
+                  key=["channel-pages", channel_id, at], not_before=at)
+        print(f"Knowledge pages wait for {title}'s summaries; trying again at {at}.")
         return True
     built = 0
     for row in knowledge.status(library, channel_id):
@@ -562,7 +563,7 @@ def _build_channel_pages(channel_id, library):
             break
         if row["summarised"] >= 3 and row["page"] != "ready":
             built += bool(knowledge.run_build(library, row["category"], channel_id))
-    print(f"Built {built} knowledge page{'' if built == 1 else 's'} for channel {channel_id}.")
+    print(f"Built {built} knowledge page{'' if built == 1 else 's'} for {title}.")
     return True
 
 def _channel_uploads(channel_id):

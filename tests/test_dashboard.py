@@ -341,9 +341,37 @@ class DashboardTest(unittest.TestCase):
                 mock.patch("knowledge.status") as status, contextlib.redirect_stdout(io.StringIO()):
             self.assertTrue(dashboard._build_channel_pages(cid, 1))
         self.assertEqual(start.call_args.args[:2], ("knowledge", f"Knowledge pages: {cid}"))
-        self.assertEqual(start.call_args.kwargs["key"], ["channel-pages", cid])
+        at = start.call_args.kwargs["not_before"]
+        self.assertEqual(start.call_args.kwargs["key"], ["channel-pages", cid, at])
         self.assertIsNotNone(start.call_args.kwargs["not_before"])
         status.assert_not_called()
+
+    def test_channel_pages_retry_is_not_dropped_while_running(self):
+        cid = "UC" + "r" * 22
+        job = dashboard.Job()
+        at = (dashboard.datetime.now() + dashboard.timedelta(hours=1)).isoformat(timespec="seconds")
+        summarize = job.start("summarize", "summarize", lambda: None, key="waiting", not_before=at)
+        pages = job.start("knowledge", "pages", lambda: None, key=["channel-pages", cid], not_before=at)
+        self.assertIsNotNone(summarize)
+        self.assertIsNotNone(pages)
+        try:
+            lane = next(l for l in job.lanes.values() if any(t["id"] == pages["id"] for t in l.pending))
+            with job.lock:
+                task = next(t for t in lane.pending if t["id"] == pages["id"])
+                lane.pending.remove(task)
+                lane.state.update({"running": True, "id": task["id"], "kind": "knowledge", "key": task["key"]})
+            with mock.patch.object(dashboard, "JOB", job), contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(dashboard._build_channel_pages(cid, 1))
+            waiting = [t for t in job.snapshot()["queue"] if t["kind"] == "knowledge"]
+            self.assertEqual(len(waiting), 1)
+            self.assertNotEqual(waiting[0]["id"], pages["id"])
+        finally:
+            with job.lock:
+                for lane in job.lanes.values():
+                    if lane.state.get("id") == (pages or {}).get("id"):
+                        lane.state.update({"running": False, "id": None, "kind": None, "key": None})
+            for task in job.snapshot()["queue"]:
+                job.request_stop(task["id"])
 
     def test_channel_pages_build_only_eligible_topics(self):
         rows = [{"category": "Ready", "summarised": 5, "page": "ready"},
