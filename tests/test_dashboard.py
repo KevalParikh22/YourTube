@@ -784,10 +784,13 @@ class AccessTokenTest(unittest.TestCase):
         self.assertIsNone(self.get("/?t=wrong")[1])                              # a wrong token sets nothing
         status, cookie, location, _ = self.get("/?t=s3cret-token")
         self.assertEqual((status, location), (303, "/"))
-        self.assertIn("ytkb_token=s3cret-token", cookie)
+        self.assertIn(f"{dashboard.TOKEN_COOKIE}_{self.server.server_port}=s3cret-token", cookie)
         self.assertIn("HttpOnly", cookie)
         self.assertIn("SameSite=Strict", cookie)
         status, _, _, body = self.get("/api/state", cookie="ytkb_token=s3cret-token")
+        self.assertEqual(status, 200)
+        status, _, _, body = self.get(
+            "/api/state", cookie=f"{dashboard.TOKEN_COOKIE}_{self.server.server_port}=s3cret-token")
         self.assertEqual(status, 200)
         self.assertNotIn(b"s3cret-token", body)                                  # never sent back to the page
         self.assertEqual(self.get("/api/state", cookie="ytkb_token=nope")[0], 401)
