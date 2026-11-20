@@ -1688,16 +1688,24 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("id is required")
                 if per_week is not None and (type(per_week) is not int or not 1 <= per_week <= 7):
                     return self._error("per_week must be 1 to 7, or null to end the course")
-                if storage.set_course_pace(vid, per_week) or per_week is None:   # parts already made: no AI needed
-                    return self._json({"ok": True, "course": storage.get_course(vid)})
+                course = storage.get_course(vid)
+                if course:
+                    pending = any(p.get("pending") for p in course["parts"])
+                    if per_week is not None and pending:
+                        if not llm.is_configured(llm.load_settings(), "summarize"):
+                            return self._error("Choose an AI for summaries in Settings → AI first")
+                        storage.set_course_pace(vid, per_week)
+                    else:
+                        storage.set_course_pace(vid, per_week)
+                        return self._json({"ok": True, "course": storage.get_course(vid)})
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
                 return self._queued_split("course", "Course", [vid], _course_task(per_week))
 
             if path == "/api/course/progress":
                 vid, key = body.get("id"), body.get("key")
-                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+", key):
-                    return self._error("key must be p<part> or a<part>.<action>")
+                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+|q\d+\.\d+", key):
+                    return self._error("key must be p<part>, a<part>.<action>, or q<part>.<question>")
                 progress = storage.set_course_progress(vid if isinstance(vid, str) else "", key, bool(body.get("done")))
                 return self._json({"ok": True, "progress": progress}) if progress is not None else self._error("No course for this video", 404)
 
