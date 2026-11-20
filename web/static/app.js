@@ -2,8 +2,8 @@
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
 const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched', skipped: 'Skipped' };
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
-const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['transcript', 'Transcript pending'], ['gone', 'Not in a playlist']];
-const OPTIONAL_VIEWS = ['skipped', 'suggested', 'transcript', 'gone'];  // only shown when they have videos
+const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['transcript', 'Transcript pending'], ['has_transcript', 'Has transcript'], ['unsummarised', 'Not summarised'], ['summarised', 'Summarised'], ['gone', 'Not in a playlist']];
+const OPTIONAL_VIEWS = ['skipped', 'suggested', 'transcript', 'has_transcript', 'unsummarised', 'summarised', 'gone'];  // only shown when they have videos
 const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories']];
 const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
 const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
@@ -297,6 +297,9 @@ function statusFilter(v, status, src) {
     case 'gone': return isGone(v, src);
     case 'suggested': return !!v.suggestion;
     case 'transcript': return needsDetails(v);
+    case 'has_transcript': return !!v.details?.transcript;
+    case 'summarised': return isSummarised(v.video_id);
+    case 'unsummarised': return !!v.details?.transcript && !isSummarised(v.video_id);
     default: return true;
   }
 }
@@ -393,6 +396,7 @@ function row(v) {
   const d = v.duration_seconds || 0;
   const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : `<span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span>`,
     isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '',
+    v.details?.transcript ? '<span class="tr-mark" title="Transcript ready: search, rate and summarise use it">transcript</span>' : '',
     isSummarised(v.video_id) ? `<span class="sum-mark" title="Summarised: open it to read the summary instead of watching"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7l3 3v8H3z M10 2.5v3h3 M5.5 8h5 M5.5 10.5h5"/></svg>summarised</span>` : '']
     .filter(Boolean).join(' · ');
   return `<li class="row ${isDone(v) ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
