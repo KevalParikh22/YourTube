@@ -70,6 +70,7 @@ class UsageTest(unittest.TestCase):
     def setUp(self):
         import storage
         self.storage = storage
+        storage.init_db()
         with storage.get_connection() as conn:
             conn.execute("DELETE FROM ai_usage")
             conn.commit()
@@ -82,6 +83,27 @@ class UsageTest(unittest.TestCase):
 
     def rows(self):
         return self.storage.usage_summary("2000-01-01 00:00:00")
+
+    def test_daily_cap_and_cost_since(self):
+        self.assertIsNone(llm.default_settings()["daily_cap"])
+        self.storage.record_usage("rate", "openai", "m", 1, 1, 1.2)
+        self.assertAlmostEqual(self.storage.cost_since("2000-01-01 00:00:00"), 1.2)
+        self.assertEqual(self.storage.cost_since("2999-01-01 00:00:00"), 0)
+        with mock.patch.object(llm, "_today_start", return_value="2000-01-01 00:00:00"):
+            with self.assertRaises(llm.QuotaError):
+                llm.check_cap({"daily_cap": 1.0})
+            with mock.patch.object(self.storage, "cost_since", return_value=0.5):
+                self.assertIsNone(llm.check_cap({"daily_cap": 1.0}))
+            self.assertIsNone(llm.check_cap({"daily_cap": None}))
+
+    def test_open_checks_only_cloud_hosts(self):
+        ok = mock.MagicMock()
+        ok.__enter__.return_value.read.return_value = b'{}'
+        with mock.patch.object(llm, "check_cap") as check, mock.patch("urllib.request.urlopen", return_value=ok):
+            llm._get_json("http://127.0.0.1:11434/api/chat", {})
+            check.assert_not_called()
+            llm._get_json("https://api.example/v1/chat", {})
+            check.assert_called_once()
 
     def test_cloud_call_is_saved_with_the_reported_tokens_and_price(self):
         reply = {"candidates": [{"content": {"parts": [{"text": "{}"}]}}],

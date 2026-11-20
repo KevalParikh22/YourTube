@@ -1933,6 +1933,12 @@ def usage_summary(since: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
                    ROUND(COALESCE(SUM(cost), 0), 4) AS cost, SUM(cost IS NULL) AS unpriced, SUM(exact = 0) AS estimated
             FROM ai_usage WHERE at >= ? GROUP BY task, provider, model ORDER BY SUM(tokens_in + tokens_out) DESC""", (since,))]
 
+def cost_since(since: str, db_path: str = DB_PATH) -> float:
+    """Total known cloud AI cost at or after a UTC time."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return float(conn.execute("SELECT COALESCE(SUM(cost), 0) FROM ai_usage WHERE at >= ?", (since,)).fetchone()[0])
+
 def rating_times(db_path: str = DB_PATH) -> Dict[str, str]:
     """{video_id: when its rating was made (UTC, 'YYYY-MM-DD HH:MM:SS')} for every rated video."""
     init_db(db_path)
