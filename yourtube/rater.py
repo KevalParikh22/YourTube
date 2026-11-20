@@ -100,24 +100,7 @@ def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings
         basis = "metadata"
         source = "No transcript is available. Judge from the title, channel, description and chapters, and be conservative."
 
-    prompt = f"""Today is {today.isoformat()}.
-
-The learner's interests: {interests}
-Their library's categories: {cats}
-
-Video
-Title: {video.get('title')}
-Channel: {video.get('channel')}
-Category in their library: {video.get('category')}
-Length: {minutes} min
-Uploaded: {_date(video.get('upload_date'), today)}
-Description: {desc or '(none)'}
-Chapters:
-{chapters or '(none)'}
-
-{source}
-{f"{chr(10)}On-screen text (slides, code, whiteboard), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}
-Score four factors from 0 to 10, each with a short reason (at most 18 words) that names something specific in this video:
+    prompt = f"""Score four factors from 0 to 10, each with a short reason (at most 18 words) that names something specific in this video:
 - depth: real substance and accuracy, versus hype, clickbait or padding. 8 or more only for expert-level, detailed content;
   generic tips or listicles are 3 to 5.
 - fit: how well it matches the learner's stated interests. 9 or 10 only when the topic is named in their interests;
@@ -145,7 +128,26 @@ Reply with JSON in this shape (replace every <...>):
  "verdict": "<watch|skim|skip>", "reason": "<...>", "tldr": "<...>",
  "minutes": [{{"t": "<time>", "topic": "<...>", "notes": ["<...>"]}}],
  "takeaways": ["<...>"],
- "worth_watching": [{{"start": "<time>", "end": "<time>", "why": "<what this part teaches>"}}]}}"""
+ "worth_watching": [{{"start": "<time>", "end": "<time>", "why": "<what this part teaches>"}}]}}
+
+Today is {today.isoformat()}.
+
+The learner's interests: {interests}
+Their library's categories: {cats}
+
+Now the video to rate:
+Video
+Title: {video.get('title')}
+Channel: {video.get('channel')}
+Category in their library: {video.get('category')}
+Length: {minutes} min
+Uploaded: {_date(video.get('upload_date'), today)}
+Description: {desc or '(none)'}
+Chapters:
+{chapters or '(none)'}
+
+{source}
+{f"{chr(10)}On-screen text (slides, code, whiteboard), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}"""
     return prompt, basis
 
 

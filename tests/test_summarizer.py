@@ -48,6 +48,14 @@ class ValidateTest(unittest.TestCase):
             summarizer.validate([], 600, [])
 
 
+class PromptTest(unittest.TestCase):
+    def test_video_specific_content_follows_fixed_instructions(self):
+        first = summarizer.build_prompt(video("one", "First"), [], {"language": "English"}, [])
+        second = summarizer.build_prompt(video("two", "Second"), [], {"language": "English"}, [])
+        self.assertGreaterEqual(len(first), 1500)
+        self.assertEqual(first[:1500], second[:1500])
+
+
 class StorageAndRunTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

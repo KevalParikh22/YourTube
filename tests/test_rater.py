@@ -18,6 +18,13 @@ SEGS = [{"start": float(i * 10), "text": f"line {i}"} for i in range(12)]
 
 
 class PromptTest(unittest.TestCase):
+    def test_video_specific_content_follows_fixed_instructions(self):
+        first, _ = rater.build_prompt(VIDEO, SEGS, {"language": "English"})
+        second, _ = rater.build_prompt({**VIDEO, "title": "Different", "channel": "Other"},
+                                      [{"start": 1, "text": "different transcript"}], {"language": "English"})
+        self.assertGreaterEqual(len(first), 1500)
+        self.assertEqual(first[:1500], second[:1500])
+
     def test_rating_prompt_caps_and_samples_long_transcripts(self):
         self.assertEqual(rater.RATE_CHAR_BUDGET, 48_000)
         segments = [{"start": i * 10, "text": "x" * 1000} for i in range(200)]
