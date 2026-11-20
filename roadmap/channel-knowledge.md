@@ -10,8 +10,8 @@
 - Videos already in the library keep their category; videos removed from YourTube stay out.
 - Knowledge: `knowledge.py` takes a `channel` scope next to the library (pages saved as `_channel-<id>/<category>`);
   Knowledge page → **Pages from** picks a followed channel (`#/knowledge?channel=UC…`), or Channels card → **Knowledge**;
-  **Build all** builds all stale or ready topic pages (`POST /api/knowledge/build-all`). Channel imports automatically queue
-  a build-all task to run after the summaries finish.
+  **Build all** builds every out-of-date page and every unbuilt topic with 3+ summaries (`POST /api/knowledge/build-all`).
+  A channel import queues it after the summaries (same lane only when the Ratings and Summaries AI are both cloud or both local).
 - Ask: retrieval already filters by source, so **Ask** on a channel opens Ask limited to the channel's source.
 - Not done: the estimate counts videos removed from YourTube as new.
 
