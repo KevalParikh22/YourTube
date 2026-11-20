@@ -313,6 +313,7 @@ class DashboardTest(unittest.TestCase):
             queued, nights = [], []
             with mock.patch("enrich.run_enrich") as enrich, \
                     mock.patch.object(dashboard, "_queue_split", side_effect=lambda kind, action, ids, run: queued.append((kind, ids))), \
+                    mock.patch.object(dashboard.JOB, "start", return_value={"id": 10}), \
                     contextlib.redirect_stdout(io.StringIO()):
                 self.assertTrue(dashboard._import_channel(cid))
             self.assertEqual(read.call_count, 1)                                     # the estimate's read is reused
@@ -328,9 +329,61 @@ class DashboardTest(unittest.TestCase):
                 mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None, not_before=None: started.append((kind, not_before))), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertTrue(dashboard._import_channel(cid))
-        self.assertEqual([(k, at is not None) for k, at in started], [("summarize", True)])
+        self.assertEqual([(k, at is not None) for k, at in started], [("summarize", True), ("knowledge", True)])
         self.assertEqual(self.call("/api/channels/estimate", {"id": "UC" + "z" * 22})[0], 404)
         self.assertEqual(self.call("/api/channels/import", {"id": "nope"})[0], 404)
+
+    def test_channel_pages_wait_for_queued_summaries(self):
+        cid = "UC" + "w" * 22
+        snapshot = {"lanes": [], "queue": [{"kind": "summarize"}]}
+        with mock.patch.object(dashboard.JOB, "snapshot", return_value=snapshot), \
+                mock.patch.object(dashboard.JOB, "start", return_value={"id": 1}) as start, \
+                mock.patch("knowledge.status") as status, contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(dashboard._build_channel_pages(cid, 1))
+        self.assertEqual(start.call_args.args[:2], ("knowledge", f"Knowledge pages: {cid}"))
+        at = start.call_args.kwargs["not_before"]
+        self.assertEqual(start.call_args.kwargs["key"], ["channel-pages", cid, at])
+        self.assertIsNotNone(start.call_args.kwargs["not_before"])
+        status.assert_not_called()
+
+    def test_channel_pages_retry_is_not_dropped_while_running(self):
+        cid = "UC" + "r" * 22
+        job = dashboard.Job()
+        at = (dashboard.datetime.now() + dashboard.timedelta(hours=1)).isoformat(timespec="seconds")
+        summarize = job.start("summarize", "summarize", lambda: None, key="waiting", not_before=at)
+        pages = job.start("knowledge", "pages", lambda: None, key=["channel-pages", cid], not_before=at)
+        self.assertIsNotNone(summarize)
+        self.assertIsNotNone(pages)
+        try:
+            lane = next(l for l in job.lanes.values() if any(t["id"] == pages["id"] for t in l.pending))
+            with job.lock:
+                task = next(t for t in lane.pending if t["id"] == pages["id"])
+                lane.pending.remove(task)
+                lane.state.update({"running": True, "id": task["id"], "kind": "knowledge", "key": task["key"]})
+            with mock.patch.object(dashboard, "JOB", job), contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(dashboard._build_channel_pages(cid, 1))
+            waiting = [t for t in job.snapshot()["queue"] if t["kind"] == "knowledge"]
+            self.assertEqual(len(waiting), 1)
+            self.assertNotEqual(waiting[0]["id"], pages["id"])
+        finally:
+            with job.lock:
+                for lane in job.lanes.values():
+                    if lane.state.get("id") == (pages or {}).get("id"):
+                        lane.state.update({"running": False, "id": None, "kind": None, "key": None})
+            for task in job.snapshot()["queue"]:
+                job.request_stop(task["id"])
+
+    def test_channel_pages_build_only_eligible_topics(self):
+        rows = [{"category": "Ready", "summarised": 5, "page": "ready"},
+                {"category": "Few", "summarised": 2, "page": "none"},
+                {"category": "Build", "summarised": 3, "page": "stale"},
+                {"category": "Empty", "summarised": 0, "page": "none"}]
+        with mock.patch.object(dashboard.JOB, "snapshot", return_value={"lanes": [], "queue": []}), \
+                mock.patch.object(dashboard.JOB, "stop_requested", return_value=False), \
+                mock.patch("knowledge.status", return_value=rows), \
+                mock.patch("knowledge.run_build", return_value=True) as build, contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(dashboard._build_channel_pages("UC" + "p" * 22, 4))
+        build.assert_called_once_with(4, "Build", "UC" + "p" * 22)
 
     def test_channel_that_cannot_be_read_keeps_its_error_and_the_rest_go_on(self):
         self._no_channels()

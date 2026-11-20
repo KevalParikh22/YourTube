@@ -541,7 +541,30 @@ def _check_channels():
         _schedule_channel_check()
 
 CHANNEL_BIG = 500              # a whole-channel import this big summarises at night, whatever the video lengths
+CHANNEL_PAGES_RETRY_MINUTES = 30
 _UPLOADS = {}                  # channel id -> (read at, all uploads): the estimate's read, reused by the import
+
+def _build_channel_pages(channel_id, library):
+    """Build channel knowledge pages once its queued summaries have finished."""
+    import knowledge
+    title = next((c["title"] for c in storage.get_channels() if c["id"] == channel_id), channel_id)
+    snapshot = JOB.snapshot()
+    summarizing = (any(lane["running"] and lane["kind"] == "summarize" for lane in snapshot["lanes"]) or
+                   any(task["kind"] == "summarize" for task in snapshot["queue"]))
+    if summarizing:
+        at = (datetime.now() + timedelta(minutes=CHANNEL_PAGES_RETRY_MINUTES)).isoformat(timespec="seconds")
+        JOB.start("knowledge", f"Knowledge pages: {title}", lambda: _build_channel_pages(channel_id, library),
+                  key=["channel-pages", channel_id, at], not_before=at)
+        print(f"Knowledge pages wait for {title}'s summaries; trying again at {at}.")
+        return True
+    built = 0
+    for row in knowledge.status(library, channel_id):
+        if JOB.stop_requested():
+            break
+        if row["summarised"] >= 3 and row["page"] != "ready":
+            built += bool(knowledge.run_build(library, row["category"], channel_id))
+    print(f"Built {built} knowledge page{'' if built == 1 else 's'} for {title}.")
+    return True
 
 def _channel_uploads(channel_id):
     """All of a channel's uploads, newest first; read again after an hour."""
@@ -612,8 +635,12 @@ def _import_channel(channel_id):
             JOB.start("summarize", _label(f"Summarise {ch['title']} at night", chunk), run(chunk), key=["night"] + chunk, not_before=at)
         else:
             _queue_split("summarize", f"Summarise {ch['title']}", chunk, run)
+    retry_at = (datetime.now() + timedelta(minutes=CHANNEL_PAGES_RETRY_MINUTES)).isoformat(timespec="seconds")
+    JOB.start("knowledge", f"Knowledge pages: {ch['title']}",
+              lambda: _build_channel_pages(channel_id, ch["library_id"]), key=["channel-pages", channel_id],
+              not_before=at or retry_at)
     print(f"Summarise: {len(todo)} videos queued" + (f", starting {at} (night queue)" if at else "") +
-          ". Then build the channel's knowledge pages on the Knowledge page.")
+          ". The channel's knowledge pages build by themselves after the summaries finish.")
     return True
 
 # Task functions for _queue_split: run(since)(ids) -> the task. since: videos done after it are skipped (Retry, overlaps)
