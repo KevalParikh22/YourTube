@@ -25,7 +25,7 @@ Unclear items, need the reporter's input before planning:
 
 | Feature | File | Size |
 |---------|------|------|
-| Token use tracking and cutting it down (**tracking and daily cap done**) | [token-tracking.md](token-tracking.md) | M |
+| Token use tracking and cutting it down (**tracking, daily cap, 48,000-character rating cap and prompt order done**) | [token-tracking.md](token-tracking.md) | M |
 | One output language for every video | [language-consistency.md](language-consistency.md) | S |
 | Schedule big summaries for the night (**done**) | [off-peak-queue.md](off-peak-queue.md) | M |
 | Follow channels, summarise new videos automatically (**done**, Home list included) | [channel-follow.md](channel-follow.md) | L |
