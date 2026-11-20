@@ -316,8 +316,9 @@ def _contexts(settings: Dict[str, Any]):
 def _rate_one(video: Dict[str, Any], complete: Callable[[str, str], str], budget: int, model: str, context: Dict[str, Any]) -> Dict[str, Any]:
     """Rates a single video, saves to DB and returns the rating dict."""
     import storage
-    rating = rate_video(video, storage.get_segments(video['video_id']), context, complete, budget=budget)
-    storage.save_rating(video['video_id'], rating, model=model)
+    with storage.video_step(video['video_id'], "rate", model):
+        rating = rate_video(video, storage.get_segments(video['video_id']), context, complete, budget=budget)
+        storage.save_rating(video['video_id'], rating, model=model)
     return rating
 
 def estimate(video_ids: Optional[List[str]] = None) -> Dict[str, Any]:

@@ -456,3 +456,53 @@ class RemoveVideosTest(unittest.TestCase):
         storage.save_playlist(storage.SINGLE_SOURCE, [video("gone", "Talk to drop")], db_path=self.db, partial=True)
         storage.save_playlist(playlist("A"), self.list_a, db_path=self.db)
         self.assertEqual(self.rows("playlist_items", "gone"), 2)                     # back, and in A again
+
+
+class VideoActivityTest(unittest.TestCase):
+    def setUp(self):
+        self.db = temp_db()
+        storage.save_playlist(playlist("PL1"), [video("a"), video("b")], db_path=self.db)
+
+    def acts(self, vid="a"):
+        return storage.get_activity(vid, db_path=self.db)
+
+    def test_step_records_its_cloud_ai_use_and_failures(self):
+        storage.record_usage("rate", "claude", "m1", 5, 5, 0.5, db_path=self.db)   # outside any step: not on a video
+        with storage.video_step("a", "rate", db_path=self.db):
+            storage.record_usage("rate", "claude", "m1", 100, 20, 0.01, db_path=self.db)
+            storage.record_usage("rate", "claude", "m1", 50, 10, None, db_path=self.db)
+        with self.assertRaises(ValueError):
+            with storage.video_step("a", "summarize", "local-model", db_path=self.db):
+                raise ValueError("bad reply")
+        fail, ok = self.acts()
+        self.assertEqual((ok["kind"], ok["ok"], ok["model"], ok["tokens_in"], ok["tokens_out"], ok["cost"]),
+                         ("rate", 1, "m1", 150, 30, 0.01))
+        self.assertEqual((fail["kind"], fail["ok"], fail["model"], fail["note"], fail["tokens_in"]),
+                         ("summarize", 0, "local-model", "bad reply", None))
+        self.assertEqual(self.acts("b"), [])
+
+    def test_media_jobs_and_details_are_recorded(self):
+        storage.set_job("a", "asr", status="queued", db_path=self.db)
+        storage.set_job("a", "asr", status="downloading", db_path=self.db)
+        storage.record_usage("transcribe", "openai", "whisper-1", 0, 0, 0.02, db_path=self.db)
+        storage.set_job("a", "asr", status="done", model="openai:whisper-1", db_path=self.db)
+        storage.set_job("b", "visual", status="downloading", db_path=self.db)
+        storage.set_job("b", "visual", status="failed", error="no video", db_path=self.db)
+        storage.save_details("a", {"status": "no_captions"}, db_path=self.db)
+        details, asr = self.acts()
+        self.assertEqual((asr["kind"], asr["ok"], asr["model"], asr["cost"]), ("asr", 1, "openai:whisper-1", 0.02))
+        self.assertEqual((details["kind"], details["ok"], details["note"]), ("details", 1, "no_captions"))
+        [vis] = self.acts("b")
+        self.assertEqual((vis["ok"], vis["note"], vis["tokens_in"]), (0, "no video", None))
+
+    def test_existing_work_is_filled_in_once_and_removed_with_the_video(self):
+        conn = sqlite3.connect(self.db)
+        conn.execute("DROP TABLE video_activity")
+        conn.execute("INSERT INTO video_summaries (video_id, model) VALUES ('a', 'm2')")
+        conn.commit()
+        conn.close()
+        storage.init_db(self.db)
+        storage.init_db(self.db)
+        self.assertEqual([(r["kind"], r["model"]) for r in self.acts()], [("summarize", "m2")])
+        storage.remove_videos(["a"], db_path=self.db)
+        self.assertEqual(self.acts(), [])

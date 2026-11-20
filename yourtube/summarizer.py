@@ -258,10 +258,11 @@ def _summarize_one(video: Dict[str, Any], complete: Callable[[str, str], str], b
         return None
     made = storage.get_course(video["video_id"])
     parts = made["parts"] if made else None
-    summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget, parts)
-    storage.save_summary(video["video_id"], summary, model=model)
-    if summary.get("parts") and not made:
-        storage.save_parts(video["video_id"], summary["parts"], model=model)
+    with storage.video_step(video["video_id"], "summarize", model):
+        summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget, parts)
+        storage.save_summary(video["video_id"], summary, model=model)
+        if summary.get("parts") and not made:
+            storage.save_parts(video["video_id"], summary["parts"], model=model)
     return summary
 
 

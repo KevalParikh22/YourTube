@@ -1083,6 +1083,8 @@ class Handler(BaseHTTPRequestHandler):
             files.save_export(name, data)
             return self._send(200, data, "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
+        if url.path == "/api/video/activity":
+            return self._json({"activity": storage.get_activity((qs.get("id") or [""])[0])})
         if url.path == "/api/video":
             vid = (qs.get("id") or [""])[0]
             details = storage.get_details(vid)
