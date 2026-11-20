@@ -1766,6 +1766,11 @@ class Handler(BaseHTTPRequestHandler):
                         or not isinstance(start, str) or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", start)):
                     return self._error("night needs on, minutes (10 to 1440) and start (HH:MM)")
                 settings["night"] = {"on": bool(night.get("on")), "minutes": minutes, "start": start}
+            if "daily_cap" in body:
+                cap = body["daily_cap"]
+                if cap is not None and (not isinstance(cap, (int, float)) or isinstance(cap, bool) or not 0 <= cap <= 1000):
+                    return self._error("daily_cap must be empty or a number from 0 to 1000")
+                settings["daily_cap"] = None if cap in (None, 0) else cap
             if body.get("asr_model") in ("auto", "large-v3-turbo", "small", "medium", "distil-large-v3"):
                 settings["asr_model"] = body["asr_model"]
             if isinstance(body.get("vision_model"), str) and re.fullmatch(r"[\w.\-/:]*", body["vision_model"]):
