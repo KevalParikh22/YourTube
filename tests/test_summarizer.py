@@ -56,6 +56,52 @@ class PromptTest(unittest.TestCase):
         self.assertEqual(first[:1500], second[:1500])
 
 
+class EstimatePartsTest(unittest.TestCase):
+    def _estimate(self, saved_parts=None):
+        import llm
+        long_video = video("estimate-long", "Long video", duration=3 * 3600)
+        segments = [{"start": i * 10, "text": "a" * 40} for i in range(1080)]
+        settings = {"provider": "anthropic", "providers": {"anthropic": {"model": "test", "api_key": "key"}}}
+        with mock.patch("summarizer._videos", return_value=[long_video]), \
+             mock.patch("storage.get_segments", return_value=segments), \
+             mock.patch("storage.get_course", return_value=saved_parts), \
+             mock.patch("llm.load_settings", return_value=settings), \
+             mock.patch("llm.context_chars", return_value=20_000), \
+             mock.patch("llm.estimate_cost", return_value=1.0), \
+             mock.patch("llm.describe", return_value="Cloud"), \
+             mock.patch("llm.helper_for", return_value=None), \
+             mock.patch("llm.is_configured", return_value=True):
+            return summarizer.estimate(["estimate-long"]), long_video, segments
+
+    def test_long_transcript_counts_part_calls(self):
+        estimate, v, segments = self._estimate()
+        self.assertEqual(summarizer.PART_OUTPUT_TOKENS, 500)
+        self.assertEqual(estimate["in_parts"], 1)
+        self.assertEqual(estimate["tokens_out"], summarizer.OUTPUT_TOKENS + len(
+            summarizer.split_parts(v["duration_seconds"], segments, v.get("chapters") or [])) * 500)
+        one_call_chars = len(summarizer.build_prompt(v, segments, {"language": "English"}, [], 20_000)) + len(summarizer.SYSTEM) + 2000
+        self.assertGreater(estimate["tokens_in"], one_call_chars // 4)
+
+    def test_saved_course_parts_are_reused_in_estimate(self):
+        estimate, _, _ = self._estimate({"parts": [{"start": 0, "end": 1}]})
+        self.assertEqual(estimate["in_parts"], 0)
+        self.assertEqual(estimate["tokens_out"], summarizer.OUTPUT_TOKENS)
+
+    def test_length_estimate_counts_part_calls(self):
+        import llm
+        settings = {"provider": "anthropic", "providers": {"anthropic": {"model": "test", "api_key": "key"}}}
+        with mock.patch("llm.context_chars", return_value=20_000), \
+             mock.patch("llm.estimate_cost", return_value=1.0), \
+             mock.patch("llm.describe", return_value="Cloud"), \
+             mock.patch("llm.is_configured", return_value=True):
+            long = summarizer.estimate_by_length([3 * 3600], settings)
+            short = summarizer.estimate_by_length([600], settings)
+        self.assertGreater(long["tokens_out"], summarizer.OUTPUT_TOKENS)
+        plain_diff = (min(3 * 3600 * summarizer.CHARS_PER_SECOND, 20_000) -
+                      min(600 * summarizer.CHARS_PER_SECOND, 20_000)) // 4
+        self.assertGreater(long["tokens_in"] - short["tokens_in"], plain_diff)
+
+
 class StorageAndRunTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
