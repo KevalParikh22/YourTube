@@ -476,6 +476,11 @@ function viewHome() {
   const picks = videos().filter(v => v.status === 'unwatched' && v.rating?.verdict === 'watch')
     .sort((a, b) => b.rating.score - a.rating.score).slice(0, 5);
   const suggestions = videos().filter(v => v.suggestion).length;
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const newFromChannels = videos().filter(v => v.status === 'unwatched'
+    && (v.sources || []).some(s => isChannel(s.id) && !s.removed)
+    && v.added_at && new Date(v.added_at.replace(' ', 'T') + 'Z').getTime() >= weekAgo)
+    .sort((a, b) => new Date(b.added_at.replace(' ', 'T') + 'Z') - new Date(a.added_at.replace(' ', 'T') + 'Z')).slice(0, 5);
   const unrated = videos().filter(v => !v.rating && !isDone(v)).length;   // what Rate would rate
   const failedSync = S.data.job?.recent?.find(j => j.kind === 'sync' && !j.ok && !j.stopped && !j.dismissed);
   const knowledgeStale = Array.isArray(S.knowledge.list) ? S.knowledge.list.filter(c => c.page === 'stale').length : 0;
@@ -507,6 +512,8 @@ function viewHome() {
   <section class="section home-card"><h2 class="h">Continue watching</h2>
     ${inProgress.length ? `<ul class="rows">${inProgress.map(row).join('')}</ul>` : '<p class="note">Nothing in progress.</p>'}
   </section>
+
+  ${newFromChannels.length ? `<section class="section home-card"><h2 class="h">New from followed channels</h2><ul class="rows">${newFromChannels.map(row).join('')}</ul></section>` : ''}
 
   ${(S.data.courses || []).length ? `<section class="section home-card"><h2 class="h">Courses</h2><ul class="rows">${S.data.courses.filter(c => byId(c.video_id)).map(c =>
     `<li><a href="#/course?id=${encodeURIComponent(c.video_id)}">${esc(byId(c.video_id).title)}</a> <span class="faint">· ${c.done} of ${plural(c.parts, 'part')} watched · ${c.per_week} a week</span></li>`).join('')}</ul></section>` : ''}
@@ -1439,6 +1446,16 @@ async function buildKnowledge(category) {
   }
 }
 
+async function buildAllKnowledge() {
+  try {
+    const lib = S.lib || 1;
+    const res = await api('/api/knowledge/build-all', { library: lib, channel: routeParam('channel') || undefined });
+    await queued(res, 'Knowledge pages: build all');
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
 async function loadKnowledgeList() {
   if (S.knowledge.loadingList) return;
   S.knowledge.loadingList = true;
@@ -1473,11 +1490,13 @@ function viewKnowledgeList() {
   const lib = S.lib || 1;
   const list = S.knowledge.list;
   const ai = S.data.ai;
+  const buildAllCount = Array.isArray(list) ? list.filter(c => c.page === 'stale' || (c.page === 'none' && c.summarised >= 3)).length : 0;
   return `
   <section>
     <div class="eyebrow">Knowledge</div>
     <h1 class="display">Knowledge base<em>${kChannel() ? `Topic pages from ${esc(kChannel().title)}` : 'Topic pages from your summaries'}</em></h1>
     <p class="lede">Study pages combining notes, minutes, and quotes across your videos, citing every moment.</p>
+    ${buildAllCount ? `<div class="actions"><button class="btn btn-dark" data-act="knowledge-build-all" ${!ai.ready_for.summarize ? 'disabled' : ''}>Build all (${buildAllCount})</button></div>` : ''}
     ${!S.lib ? `<div class="banner"><span>Knowledge pages belong to a single library. Showing pages for <b>${esc(libName(1) || 'Library 1')}</b>. Pick a specific library above to switch.</span></div>` : ''}
     ${Array.isArray(S.channels?.channels) && S.channels.channels.length ? `<label class="field-label" style="max-width:360px">Pages from
       <select data-change="knowledge-scope"><option value="">The whole library</option>
@@ -1756,7 +1775,7 @@ function viewAI() {
         : `<option value="none" ${value === 'none' ? 'selected' : ''}>Off (keywords only)</option>`}
       ${Object.entries(ai.providers).map(([k, p]) => `<option value="${k}" ${value === k ? 'selected' : ''} ${p.ready ? '' : 'disabled'}>${esc(p.label)}${p.ready ? ` · ${esc(p.model)}` : p.blocked ? ' (blocked: local only)' : ' (not set up)'}</option>`).join('')}
     </select>`;
-  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local)) + usageCard();
+  const cloud = providerCards(Object.entries(ai.providers).filter(([, p]) => !p.local)) + usageCard() + `<section class="section card"><label class="field">Daily budget (USD)<input type="number" min="0" step="0.5" value="${ai.daily_cap ?? ''}" data-change="daily-cap" aria-label="Daily budget (USD)"></label></section>`;
   const media = ai.media_tasks || {};
   const pickMedia = (t, meta) => `<select id="media-${esc(t)}" data-media-task="${esc(t)}" aria-label="${esc(meta.label)} runs on" style="width:100%">
       ${meta.providers.map(k => { const p = ai.providers[k], ready = k === 'local' || p?.ready;
@@ -2738,6 +2757,7 @@ document.addEventListener('click', async e => {
     case 'summarize-sel': { const r = newOnly([...S.sel], isSummarised, 'summarised', 'Summarise'); if (r) startSummary(r.ids, r.note); break; }
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
+    case 'knowledge-build-all': buildAllKnowledge(); break;
     case 'knowledge-summarize-five': summarizeKnowledgeFive(el.dataset.cat); break;
     case 'details-fetch': case 'details-one': case 'details-these': {
       try {
@@ -3076,6 +3096,14 @@ document.addEventListener('change', async e => {
     return;
   }
   if (ch === 'knowledge-scope') { location.hash = `#/knowledge${el.value ? `?channel=${encodeURIComponent(el.value)}` : ''}`; return; }
+  if (ch === 'daily-cap') {
+    const daily_cap = el.value === '' ? null : +el.value;
+    try {
+      S.data.ai = await saveAi({ daily_cap });
+      toast(daily_cap == null ? 'No daily budget' : `Daily budget: $${daily_cap}`);
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
   if (ch === 'channel-hours') {
     try { await api('/api/channels/update', { hours: +el.value }); S.channels = undefined; await refreshJob(); refresh(); toast(`Followed channels are checked every ${el.value} h`); }
     catch (err) { toast(err.message, true); }
