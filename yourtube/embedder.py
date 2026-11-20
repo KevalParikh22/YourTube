@@ -263,17 +263,21 @@ def run_embed(
     print(f"Updating the meaning index: {len(todo)} new or changed pieces with {model}"
           + (f" (removed {pruned} stale)" if pruned else "") + f". About {max(1, round(len(todo) / 12 / 60))} min.")
     done = 0
+    saved_hashes = []
     batch_size = getattr(emb, "batch_size", BATCH) if embed_fn == emb.docs else BATCH
     for i in range(0, len(todo), batch_size):
         if should_stop():
+            storage.record_index_activity(model, saved_hashes)
             print("Stopped. The meaning index is partly updated; it continues next time.")
             return False
         chunk = todo[i:i + batch_size]
         vecs = np.asarray(embed_fn([doc_text(d["kind"], d["text"]) for d in chunk]), dtype=np.float32)
         vecs /= np.linalg.norm(vecs, axis=1, keepdims=True) + 1e-12   # unit length: cosine = dot product
         storage.save_embeddings(model, [(d["hash"], v.tobytes(), v.shape[0]) for d, v in zip(chunk, vecs)])
+        saved_hashes.extend(d["hash"] for d in chunk)
         done += len(chunk)
         if len(todo) > batch_size * 4 and (i // batch_size) % 10 == 0:
             print(f"   {done}/{len(todo)}")
+    storage.record_index_activity(model, saved_hashes)
     print(f"Meaning index updated ({done} pieces).")
     return True
