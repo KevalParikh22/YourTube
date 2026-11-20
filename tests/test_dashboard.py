@@ -64,6 +64,18 @@ class DashboardTest(unittest.TestCase):
         self.assertIsNone(r["ai"]["providers"]["anthropic"]["key_source"])
         self.call("/api/ai/settings", {"provider": "none"})
 
+    def test_daily_cap_validation_and_storage(self):
+        for bad in (-1, True, 1001):
+            code, body = self.call("/api/ai/settings", {"daily_cap": bad})
+            self.assertEqual(code, 400)
+            self.assertEqual(body["error"], "daily_cap must be empty or a number from 0 to 1000")
+        code, body = self.call("/api/ai/settings", {"daily_cap": 2.5})
+        self.assertEqual(code, 200)
+        self.assertEqual(body["ai"]["daily_cap"], 2.5)
+        code, body = self.call("/api/ai/settings", {"daily_cap": 0})
+        self.assertEqual(code, 200)
+        self.assertIsNone(body["ai"]["daily_cap"])
+
     def test_task_routing(self):
         self.call("/api/ai/settings", {"provider": "anthropic", "edit": "anthropic", "config": {"api_key": "sk-x"},
                                        "tasks": {"rate": "ollama", "categorize": None, "bogus": "ollama"}})
@@ -328,7 +340,7 @@ class DashboardTest(unittest.TestCase):
                 mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None, not_before=None: started.append((kind, not_before))), \
                 contextlib.redirect_stdout(io.StringIO()):
             self.assertTrue(dashboard._import_channel(cid))
-        self.assertEqual([(k, at is not None) for k, at in started], [("summarize", True)])
+        self.assertEqual([(k, at is not None) for k, at in started], [("summarize", True), ("knowledge", True)])
         self.assertEqual(self.call("/api/channels/estimate", {"id": "UC" + "z" * 22})[0], 404)
         self.assertEqual(self.call("/api/channels/import", {"id": "nope"})[0], 404)
 

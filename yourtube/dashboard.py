@@ -612,8 +612,12 @@ def _import_channel(channel_id):
             JOB.start("summarize", _label(f"Summarise {ch['title']} at night", chunk), run(chunk), key=["night"] + chunk, not_before=at)
         else:
             _queue_split("summarize", f"Summarise {ch['title']}", chunk, run)
+    import knowledge
+    JOB.start("knowledge", f"Knowledge pages: {ch['title']}",
+              lambda: knowledge.run_build_all(ch["library_id"], channel_id),
+              key=[ch["library_id"], "all", channel_id], not_before=at)
     print(f"Summarise: {len(todo)} videos queued" + (f", starting {at} (night queue)" if at else "") +
-          ". Then build the channel's knowledge pages on the Knowledge page.")
+          ". Knowledge pages will be built after the summaries.")
     return True
 
 # Task functions for _queue_split: run(since)(ids) -> the task. since: videos done after it are skipped (Retry, overlaps)
@@ -1620,6 +1624,17 @@ class Handler(BaseHTTPRequestHandler):
                                               lambda: knowledge.run_build(target, category, channel),
                                               key=[target, category, channel]))
 
+            if path == "/api/knowledge/build-all":
+                import knowledge
+                target, channel = lib or 1, (_clean(body.get("channel")) if isinstance(body.get("channel"), str) else None) or None
+                if not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                channel_title = next((c["title"] for c in storage.get_channels() if c["id"] == channel), channel)
+                label = "Knowledge pages: build all" + (f" for {channel_title}" if channel else "")
+                return self._queued(JOB.start("knowledge", label,
+                                              lambda: knowledge.run_build_all(target, channel),
+                                              key=[target, "all", channel]))
+
             if path in ("/api/summarize", "/api/summarize/estimate"):
                 import summarizer
                 ids = body.get("ids")
@@ -1766,6 +1781,11 @@ class Handler(BaseHTTPRequestHandler):
                         or not isinstance(start, str) or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", start)):
                     return self._error("night needs on, minutes (10 to 1440) and start (HH:MM)")
                 settings["night"] = {"on": bool(night.get("on")), "minutes": minutes, "start": start}
+            if "daily_cap" in body:
+                cap = body["daily_cap"]
+                if cap is not None and (not isinstance(cap, (int, float)) or isinstance(cap, bool) or not 0 <= cap <= 1000):
+                    return self._error("daily_cap must be empty or a number from 0 to 1000")
+                settings["daily_cap"] = None if cap in (None, 0) else cap
             if body.get("asr_model") in ("auto", "large-v3-turbo", "small", "medium", "distil-large-v3"):
                 settings["asr_model"] = body["asr_model"]
             if isinstance(body.get("vision_model"), str) and re.fullmatch(r"[\w.\-/:]*", body["vision_model"]):

@@ -1761,6 +1761,37 @@
         }
       }
     },
+    "/api/knowledge/build-all": {
+      "post": {
+        "tags": ["Knowledge"],
+        "summary": "Queue building all stale or eligible knowledge pages",
+        "operationId": "buildAllKnowledgePages",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "library": {"type": "integer", "description": "Library ID"},
+                  "channel": {"type": "string", "description": "A followed channel's ID: build pages from that channel's videos only"}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Knowledge build task queued",
+            "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
     "/api/export/knowledge": {
       "get": {
         "tags": ["Export"],
