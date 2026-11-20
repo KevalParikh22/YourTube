@@ -4,7 +4,7 @@ One model call per video returns a TL;DR, meeting-style minutes, key claims and 
 questions, takeaways, and "learn more" (related videos from the library, YouTube searches for gaps).
 Related moments ("also explained in X at 4:20") are found in code with the meaning index, not by the model.
 """
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from exporter import _clock
 from llm import LLMError, parse_json
@@ -274,6 +274,18 @@ def _videos(video_ids: List[str]) -> List[Dict[str, Any]]:
 
 
 CHARS_PER_SECOND = 15         # speech is about 150 words a minute; for estimates before a transcript is fetched
+PART_OUTPUT_TOKENS = 500   # rough output per part (title, summary, points, actions)
+
+
+def _parts_cost(video: Dict[str, Any], segments: List[Dict[str, Any]], budget: int) -> Tuple[int, int]:
+    """Approximate transcript and output tokens for the per-part summary calls."""
+    chars = tokens_out = 0
+    for start, end in split_parts(video.get("duration_seconds") or 0, segments, video.get("chapters") or []):
+        part = [x for x in segments if start <= x["start"] < end]
+        text, _ = fit_transcript(transcript_blocks(part), budget)
+        chars += len(PART_PROMPT) + len(text) + len(SYSTEM)
+        tokens_out += PART_OUTPUT_TOKENS
+    return chars, tokens_out
 
 
 def estimate_by_length(seconds: List[int], settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -281,8 +293,16 @@ def estimate_by_length(seconds: List[int], settings: Optional[Dict[str, Any]] = 
     import llm
     settings = settings or llm.load_settings()
     budget = llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE)
-    chars = sum(min((s or 0) * CHARS_PER_SECOND, budget) + len(SYSTEM) + 4000 for s in seconds)
-    tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(seconds)
+    chars = tokens_out = 0
+    for s in seconds:
+        s = s or 0
+        if s > 40 * 60 and s * CHARS_PER_SECOND > budget:
+            n = max(2, round(s / 1800))
+            chars += n * (min(1800 * CHARS_PER_SECOND, budget) + len(PART_PROMPT) + len(SYSTEM))
+            tokens_out += n * PART_OUTPUT_TOKENS
+        else:
+            chars += min(s * CHARS_PER_SECOND, budget) + len(SYSTEM) + 4000
+    tokens_in, tokens_out = chars // 4, tokens_out + OUTPUT_TOKENS * len(seconds)
     return {"videos": len(seconds), "tokens_in": tokens_in, "tokens_out": tokens_out,
             "cost": llm.estimate_cost(settings, "summarize", tokens_in, tokens_out), "uses": llm.describe(settings, "summarize"),
             "ready": llm.is_configured(settings, "summarize")}
@@ -294,13 +314,19 @@ def estimate(video_ids: List[str]) -> Dict[str, Any]:
     import storage
     settings = llm.load_settings()
     budget = llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE)
-    chars = with_transcript = 0
+    chars = with_transcript = in_parts = tokens_out = 0
     videos = _videos(video_ids)
     for v in videos:
         segments = storage.get_segments(v["video_id"])
         with_transcript += bool(segments)
         chars += len(build_prompt(v, segments, settings, [], budget)) + len(SYSTEM) + 2000
-    tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos)
+        made = storage.get_course(v["video_id"])
+        if segments and too_long(v, segments, budget) and not (made and made.get("parts")):
+            part_chars, part_tokens = _parts_cost(v, segments, budget)
+            chars += part_chars
+            tokens_out += part_tokens
+            in_parts += 1
+    tokens_in, tokens_out = chars // 4, OUTPUT_TOKENS * len(videos) + tokens_out
     cost = llm.estimate_cost(settings, "summarize", tokens_in, tokens_out)
     uses = llm.describe(settings, "summarize")
     helper = llm.helper_for(settings, "summarize")
@@ -314,7 +340,7 @@ def estimate(video_ids: List[str]) -> Dict[str, Any]:
             cost_note = "less if the local model keeps up"
         elif cloud_cost == 0.0 and cost is not None:
             cost_note = "less if the local model keeps up"
-    out = {"videos": len(videos), "with_transcript": with_transcript, "tokens_in": tokens_in, "tokens_out": tokens_out,
+    out = {"videos": len(videos), "with_transcript": with_transcript, "in_parts": in_parts, "tokens_in": tokens_in, "tokens_out": tokens_out,
            "cost": cost, "uses": uses, "ready": llm.is_configured(settings, "summarize")}
     if cost_note:
         out["cost_note"] = cost_note
