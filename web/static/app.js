@@ -2,8 +2,8 @@
 const SPEEDS = [1, 1.25, 1.5, 1.75, 2];
 const STATUS_LABEL = { unwatched: 'Unwatched', in_progress: 'In progress', completed: 'Watched', skipped: 'Skipped' };
 const NEXT = { unwatched: 'in_progress', in_progress: 'completed', completed: 'unwatched', skipped: 'unwatched' };
-const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['transcript', 'Transcript pending'], ['gone', 'Not in a playlist']];
-const OPTIONAL_VIEWS = ['skipped', 'suggested', 'transcript', 'gone'];  // only shown when they have videos
+const VIEWS = [['todo', 'To watch'], ['in_progress', 'In progress'], ['completed', 'Watched'], ['skipped', 'Skipped'], ['all', 'Everything'], ['suggested', 'AI suggestions'], ['transcript', 'Transcript pending'], ['unrated', 'Not rated'], ['unsummarised', 'Not summarised'], ['unindexed', 'Not in meaning index'], ['gone', 'Not in a playlist']];
+const OPTIONAL_VIEWS = ['skipped', 'suggested', 'transcript', 'unrated', 'unsummarised', 'unindexed', 'gone'];  // only shown when they have videos
 const TABS = [['home', 'Home'], ['', 'Library'], ['knowledge', 'Knowledge'], ['sources', 'Playlists'], ['categories', 'Categories']];
 const SHORTCUTS = [['/', 'Search'], ['A', 'Ask your library'], ['?', 'Show keyboard shortcuts'], ['G then H', 'Home'], ['G then L', 'Library'], ['G then K', 'Knowledge'], ['G then Y', 'Playlists'], ['G then C', 'Categories'], ['G then S', 'Settings'], ['G then ?', 'Help'], ['Esc', 'Close dialog, Ask panel or video drawer'], ['J / K', 'Next / previous video in drawer']];
 const shortcutTable = () => `<table class="shortcut-table"><thead><tr><th>Key</th><th>Action</th></tr></thead><tbody>${SHORTCUTS.map(([key, action]) => `<tr><td><kbd>${key}</kbd></td><td>${action}</td></tr>`).join('')}</tbody></table>`;
@@ -290,6 +290,9 @@ function statusFilter(v, status, src) {
     case 'gone': return isGone(v, src);
     case 'suggested': return !!v.suggestion;
     case 'transcript': return needsDetails(v);
+    case 'unrated': return !v.rating;
+    case 'unsummarised': return !isSummarised(v.video_id);
+    case 'unindexed': return !isIndexed(v.video_id);
     default: return true;
   }
 }
@@ -386,7 +389,9 @@ function row(v) {
   const d = v.duration_seconds || 0;
   const meta = [esc(v.channel || 'Unknown channel'), S.view.cat ? '' : `<span class="cat-chip" title="${esc(v.category)}">${esc(v.category)}</span>`,
     isGone(v, S.view.src) ? '<span class="gone">no longer in playlist</span>' : '', v.notes ? 'has notes' : '',
-    isSummarised(v.video_id) ? `<span class="sum-mark" title="Summarised: open it to read the summary instead of watching"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7l3 3v8H3z M10 2.5v3h3 M5.5 8h5 M5.5 10.5h5"/></svg>summarised</span>` : '']
+    isSummarised(v.video_id) ? `<span class="sum-mark" title="Summarised: open it to read the summary instead of watching"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h7l3 3v8H3z M10 2.5v3h3 M5.5 8h5 M5.5 10.5h5"/></svg>summarised</span>` : '',
+    hasTranscript(v) ? '<span class="tr-mark" title="Has a transcript">transcript</span>' : '',
+    isIndexed(v.video_id) ? '<span class="ix-mark" title="In the meaning index: found by meaning-based search and Ask">indexed</span>' : '']
     .filter(Boolean).join(' · ');
   return `<li class="row ${isDone(v) ? 'done' : ''} ${S.sel.has(v.video_id) ? 'is-sel' : ''}">
     <input type="checkbox" class="pick" data-act="pick" data-id="${esc(v.video_id)}" ${S.sel.has(v.video_id) ? 'checked' : ''} aria-label="Select">
@@ -549,6 +554,8 @@ async function statusUndo() {
   toast('Undone');
 }
 const isSummarised = id => (S.data.summarised || []).includes(id);
+const isIndexed = id => (S.data.indexed || []).includes(id);
+const hasTranscript = v => v.details?.status === 'done' || (v.details?.sources || []).includes('local-asr');
 // Bulk Rate/Summarise of a selection: leave out videos that already have one (said in the run's confirm),
 // or ask before redoing them when all of them have one. Returns { ids, note } or null when cancelled.
 function newOnly(ids, has, what, again) {
@@ -2236,7 +2243,7 @@ function renderDrawer() {
   loadActivity(v.video_id);
 }
 // What ran on the video (storage.video_activity), reloaded on every redraw so a finished task shows up
-const ACTIVITY_LABEL = { details: 'Details fetched', asr: 'Transcribed', visual: 'Slides read', rate: 'Rated', summarize: 'Summarised' };
+const ACTIVITY_LABEL = { details: 'Details fetched', asr: 'Transcribed', visual: 'Slides read', rate: 'Rated', summarize: 'Summarised', index: 'Added to meaning index' };
 function drawerActivity(v) {
   const rows = S.activity?.id === v.video_id ? S.activity.rows : null;
   const cost = c => c == null ? '' : ` · ${c > 0 && c < 0.01 ? '<$0.01' : `$${c.toFixed(2)}`}`;
