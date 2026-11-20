@@ -579,6 +579,7 @@ def _open(req: urllib.request.Request, timeout: int) -> Dict[str, Any]:
 # --- providers ---------------------------------------------------------------
 
 def _anthropic(cfg: Dict[str, Any], key: str, system: str, prompt: str) -> str:
+    check_cap(load_settings())
     try:
         import anthropic
     except ImportError:

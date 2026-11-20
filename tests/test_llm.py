@@ -105,6 +105,22 @@ class UsageTest(unittest.TestCase):
             llm._get_json("https://api.example/v1/chat", {})
             check.assert_called_once()
 
+    def test_anthropic_checks_daily_budget_before_import_or_call(self):
+        with mock.patch.object(llm, "check_cap", side_effect=llm.QuotaError("cap reached")) as check:
+            with mock.patch.dict("sys.modules", {"anthropic": None}):
+                with self.assertRaises(llm.QuotaError):
+                    llm._anthropic({"model": "m"}, "k", "s", "p")
+            check.assert_called_once()
+
+    def test_anthropic_with_no_cap_proceeds_to_sdk(self):
+        fake_resp = mock.MagicMock(usage=None, stop_reason="end_turn", content=[mock.MagicMock(type="text", text="ok")])
+        fake_client = mock.MagicMock()
+        fake_client.messages.create.return_value = fake_resp
+        with mock.patch("anthropic.Anthropic", return_value=fake_client), \
+                mock.patch.object(llm, "load_settings", return_value={"daily_cap": None}):
+            res = llm._anthropic({"model": "m"}, "k", "s", "p")
+            self.assertEqual(res, "ok")
+
     def test_cloud_call_is_saved_with_the_reported_tokens_and_price(self):
         reply = {"candidates": [{"content": {"parts": [{"text": "{}"}]}}],
                  "usageMetadata": {"promptTokenCount": 1000, "candidatesTokenCount": 200, "thoughtsTokenCount": 50}}
