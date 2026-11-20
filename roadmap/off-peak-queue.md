@@ -8,7 +8,7 @@
 - There is no end time: a night task that starts runs to the end. Tasks waiting in memory are lost when the dashboard stops or restarts.
 - Step 4: a transcript that would be sampled to fit one call (and is longer than 40 min) is summarised in 20–40 min parts first (`summarizer.summarize_parts`, one call each), and the summary is written from the part notes (`summarize_video`). The parts are saved in the `courses` table, so a course on that video reuses them, and summarising it again reuses them too.
 - Daily budget cap: Settings → Cloud AI → **Daily budget (USD)** (`settings.daily_cap`, `POST /api/ai/settings`). Non-local AI requests check today's spending (`storage.cost_since`) and stop with `QuotaError` when the cap is reached, ending batches cleanly until midnight.
-- Not done: the cost estimate before Summarise still counts one call per video, so it is low for videos summarised in parts.
+- The cost estimate before Summarise (and before a channel import) counts the part calls of videos that will be summarised in parts (`summarizer._parts_cost`, `in_parts`).
 
 **Plan**
 1. Setting: "Videos longer than [90] min: run AI tasks [now / at night]" plus a night window (default 01:00–06:00) and an optional daily token cap (from [token-tracking.md](token-tracking.md)).

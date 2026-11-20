@@ -300,8 +300,7 @@ def estimate_by_length(seconds: List[int], settings: Optional[Dict[str, Any]] = 
             n = max(2, round(s / 1800))
             chars += n * (min(1800 * CHARS_PER_SECOND, budget) + len(PART_PROMPT) + len(SYSTEM))
             tokens_out += n * PART_OUTPUT_TOKENS
-        else:
-            chars += min(s * CHARS_PER_SECOND, budget) + len(SYSTEM) + 4000
+        chars += min(s * CHARS_PER_SECOND, budget) + len(SYSTEM) + 4000   # the whole-video call (from part notes when long)
     tokens_in, tokens_out = chars // 4, tokens_out + OUTPUT_TOKENS * len(seconds)
     return {"videos": len(seconds), "tokens_in": tokens_in, "tokens_out": tokens_out,
             "cost": llm.estimate_cost(settings, "summarize", tokens_in, tokens_out), "uses": llm.describe(settings, "summarize"),
