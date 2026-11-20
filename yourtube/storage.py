@@ -16,7 +16,7 @@ import contextlib
 import contextvars
 import functools
 import threading
-from typing import List, Dict, Any, Optional, Callable, Iterable
+from typing import List, Dict, Any, Optional, Callable, Iterable, Set
 
 _DATA_DIR = os.environ.get("YTKB_DATA_DIR") or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.environ.get("YTKB_DB") or os.path.join(_DATA_DIR, "yt_kb.db")
@@ -668,6 +668,12 @@ def remove_videos(video_ids: Iterable[str], db_path: str = DB_PATH) -> List[str]
         cursor.execute("DELETE FROM embedding_cache WHERE hash NOT IN (SELECT hash FROM search_docs WHERE hash IS NOT NULL)")
         conn.commit()
     return found
+
+def removed_video_ids(db_path: str = DB_PATH) -> Set[str]:
+    """Returns video ids explicitly removed from YourTube."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return {r[0] for r in conn.execute("SELECT video_id FROM removed_videos")}
 
 # Archiving keeps what the user made or reads (row, status, notes, details, rating, summary) and frees the rest
 ARCHIVE_TABLES = ("transcript_segments", "visual_segments", "media_jobs")
@@ -1920,6 +1926,41 @@ def get_activity(video_id: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     with get_connection(db_path) as conn:
         return [dict(r) for r in conn.execute("SELECT kind, at, ok, model, note, tokens_in, tokens_out, cost FROM video_activity "
                                               "WHERE video_id = ? ORDER BY at DESC, id DESC", (video_id,))]
+
+def indexed_videos(model: str, db_path: str = DB_PATH) -> List[str]:
+    """Video ids that have at least one search piece with a vector for this model and none without."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        return [r[0] for r in conn.execute("""
+            SELECT d.video_id FROM search_docs d
+            LEFT JOIN embedding_cache e ON e.model = ? AND e.hash = d.hash
+            WHERE d.hash IS NOT NULL
+            GROUP BY d.video_id
+            HAVING COUNT(e.hash) = COUNT(*)
+            ORDER BY d.video_id
+        """, (model,)).fetchall()]
+
+def record_index_activity(model: str, hashes: List[str], db_path: str = DB_PATH) -> int:
+    """Records an index step for every video whose pieces were embedded. Returns the count of videos recorded."""
+    if not hashes:
+        return 0
+    unique_hashes = [h for h in set(hashes) if h is not None]
+    if not unique_hashes:
+        return 0
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute("""
+            SELECT video_id, COUNT(*) AS n
+            FROM search_docs
+            WHERE hash IN (SELECT value FROM json_each(?))
+            GROUP BY video_id
+            ORDER BY video_id
+        """, (json.dumps(unique_hashes),)).fetchall()
+    for r in rows:
+        vid, n = r["video_id"], r["n"]
+        note = "1 piece" if n == 1 else f"{n} pieces"
+        add_activity(vid, "index", True, model=model, note=note, db_path=db_path)
+    return len(rows)
 
 def usage_summary(since: str, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     """

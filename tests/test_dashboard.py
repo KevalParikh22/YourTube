@@ -49,6 +49,23 @@ class DashboardTest(unittest.TestCase):
         self.assertTrue({"a", "b"} <= {v["video_id"] for v in state["videos"]})   # other tests share this DB
         self.assertIn("ai", state)
         self.assertFalse(state["ai"]["ready"])
+        self.assertIn("indexed", state)
+        self.assertIsInstance(state["indexed"], list)
+
+    def test_state_indexed_fallback_when_model_name_raises(self):
+        import embedder
+        with mock.patch.object(embedder, "model_name", side_effect=Exception("model lookup failed")):
+            code, state = self.call("/api/state")
+            self.assertEqual(code, 200)
+            self.assertEqual(state["indexed"], [])
+
+    def test_video_activity(self):
+        storage.add_activity("a", "index", True, "model-x", "2 pieces")
+        code, body = self.call("/api/video/activity?id=a")
+        self.assertEqual(code, 200)
+        self.assertIn("activity", body)
+        self.assertIsInstance(body["activity"], list)
+        self.assertTrue(any(act.get("kind") == "index" and act.get("note") == "2 pieces" for act in body["activity"]))
 
     def test_csrf_and_host_checks(self):
         self.assertEqual(self.call("/api/reclassify", {}, {"X-YTKB": "0"})[0], 403)
@@ -320,11 +337,12 @@ class DashboardTest(unittest.TestCase):
         with mock.patch("extractor.read_latest_uploads", return_value=uploads) as read, \
                 mock.patch("llm.is_configured", return_value=True):
             est = dashboard._channel_estimate(cid)
-            self.assertEqual((est["videos"], est["new"], est["to_summarize"], est["night"]), (3, 2, 2, False))
+            self.assertEqual((est["videos"], est["new"], est["to_summarize"], est["night"]), (2, 1, 1, False))
             self.assertGreater(est["summarize"]["tokens_in"], 3600 * 15 // 4)        # an hour of speech
             queued, nights = [], []
             with mock.patch("enrich.run_enrich") as enrich, \
                     mock.patch.object(dashboard, "_queue_split", side_effect=lambda kind, action, ids, run: queued.append((kind, ids))), \
+                    mock.patch.object(dashboard.JOB, "start", return_value={"id": 10}), \
                     contextlib.redirect_stdout(io.StringIO()):
                 self.assertTrue(dashboard._import_channel(cid))
             self.assertEqual(read.call_count, 1)                                     # the estimate's read is reused
@@ -343,6 +361,58 @@ class DashboardTest(unittest.TestCase):
         self.assertEqual([(k, at is not None) for k, at in started], [("summarize", True), ("knowledge", True)])
         self.assertEqual(self.call("/api/channels/estimate", {"id": "UC" + "z" * 22})[0], 404)
         self.assertEqual(self.call("/api/channels/import", {"id": "nope"})[0], 404)
+
+    def test_channel_pages_wait_for_queued_summaries(self):
+        cid = "UC" + "w" * 22
+        snapshot = {"lanes": [], "queue": [{"kind": "summarize"}]}
+        with mock.patch.object(dashboard.JOB, "snapshot", return_value=snapshot), \
+                mock.patch.object(dashboard.JOB, "start", return_value={"id": 1}) as start, \
+                mock.patch("knowledge.status") as status, contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(dashboard._build_channel_pages(cid, 1))
+        self.assertEqual(start.call_args.args[:2], ("knowledge", f"Knowledge pages: {cid}"))
+        at = start.call_args.kwargs["not_before"]
+        self.assertEqual(start.call_args.kwargs["key"], ["channel-pages", cid, at])
+        self.assertIsNotNone(start.call_args.kwargs["not_before"])
+        status.assert_not_called()
+
+    def test_channel_pages_retry_is_not_dropped_while_running(self):
+        cid = "UC" + "r" * 22
+        job = dashboard.Job()
+        at = (dashboard.datetime.now() + dashboard.timedelta(hours=1)).isoformat(timespec="seconds")
+        summarize = job.start("summarize", "summarize", lambda: None, key="waiting", not_before=at)
+        pages = job.start("knowledge", "pages", lambda: None, key=["channel-pages", cid], not_before=at)
+        self.assertIsNotNone(summarize)
+        self.assertIsNotNone(pages)
+        try:
+            lane = next(l for l in job.lanes.values() if any(t["id"] == pages["id"] for t in l.pending))
+            with job.lock:
+                task = next(t for t in lane.pending if t["id"] == pages["id"])
+                lane.pending.remove(task)
+                lane.state.update({"running": True, "id": task["id"], "kind": "knowledge", "key": task["key"]})
+            with mock.patch.object(dashboard, "JOB", job), contextlib.redirect_stdout(io.StringIO()):
+                self.assertTrue(dashboard._build_channel_pages(cid, 1))
+            waiting = [t for t in job.snapshot()["queue"] if t["kind"] == "knowledge"]
+            self.assertEqual(len(waiting), 1)
+            self.assertNotEqual(waiting[0]["id"], pages["id"])
+        finally:
+            with job.lock:
+                for lane in job.lanes.values():
+                    if lane.state.get("id") == (pages or {}).get("id"):
+                        lane.state.update({"running": False, "id": None, "kind": None, "key": None})
+            for task in job.snapshot()["queue"]:
+                job.request_stop(task["id"])
+
+    def test_channel_pages_build_only_eligible_topics(self):
+        rows = [{"category": "Ready", "summarised": 5, "page": "ready"},
+                {"category": "Few", "summarised": 2, "page": "none"},
+                {"category": "Build", "summarised": 3, "page": "stale"},
+                {"category": "Empty", "summarised": 0, "page": "none"}]
+        with mock.patch.object(dashboard.JOB, "snapshot", return_value={"lanes": [], "queue": []}), \
+                mock.patch.object(dashboard.JOB, "stop_requested", return_value=False), \
+                mock.patch("knowledge.status", return_value=rows), \
+                mock.patch("knowledge.run_build", return_value=True) as build, contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(dashboard._build_channel_pages("UC" + "p" * 22, 4))
+        build.assert_called_once_with(4, "Build", "UC" + "p" * 22)
 
     def test_channel_that_cannot_be_read_keeps_its_error_and_the_rest_go_on(self):
         self._no_channels()
@@ -796,10 +866,13 @@ class AccessTokenTest(unittest.TestCase):
         self.assertIsNone(self.get("/?t=wrong")[1])                              # a wrong token sets nothing
         status, cookie, location, _ = self.get("/?t=s3cret-token")
         self.assertEqual((status, location), (303, "/"))
-        self.assertIn("ytkb_token=s3cret-token", cookie)
+        self.assertIn(f"{dashboard.TOKEN_COOKIE}_{self.server.server_port}=s3cret-token", cookie)
         self.assertIn("HttpOnly", cookie)
         self.assertIn("SameSite=Strict", cookie)
         status, _, _, body = self.get("/api/state", cookie="ytkb_token=s3cret-token")
+        self.assertEqual(status, 200)
+        status, _, _, body = self.get(
+            "/api/state", cookie=f"{dashboard.TOKEN_COOKIE}_{self.server.server_port}=s3cret-token")
         self.assertEqual(status, 200)
         self.assertNotIn(b"s3cret-token", body)                                  # never sent back to the page
         self.assertEqual(self.get("/api/state", cookie="ytkb_token=nope")[0], 401)
