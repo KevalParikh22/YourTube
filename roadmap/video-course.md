@@ -18,3 +18,17 @@
 Depends on chunked summarising from [off-peak-queue.md](off-peak-queue.md) and benefits from [token-tracking.md](token-tracking.md) for cost.
 
 **Done when:** a 4 h video produces a 3–4 week course page with parts, actions and progress that survives reloads.
+
+## Next: ideas from courseit.xyz (checked on its site, 2026-11-20)
+
+CourseIt turns a YouTube video or playlist (up to 20 h) into lessons with notes and a quiz, split into days by a daily time budget (30–120 min). What its site confirms, and what would help here, most useful first:
+
+| # | Idea | Why it helps finish a long video | Size |
+|---|------|----------------------------------|------|
+| 1 | **Quiz per part with "replay the moment"**: 2–3 questions in the part prompt, each with its time; a wrong answer seeks to that time (reuse `play-at`) | Recall instead of passive watching; fixing a gap costs one click | M |
+| 2 | **Part 1 ready first**: `summarize_parts` saves after each part, the course page shows parts as they arrive | Start while the rest is made (a 4 h course otherwise waits for every call, or for the night) | S |
+| 3 | **Daily pace in minutes**: "N min a day" next to "parts a week", with a finish date from the parts' lengths | Fits a daily habit; a date gives a goal | S |
+| 4 | **Placement check**: a few quiz questions up front; parts you already know are ticked | Skips the intro parts that make people drop long tutorials | M (needs 1) |
+| 5 | **Roadmap**: chain several courses (or a playlist) into one plan | A playlist course is the next step after one long video | L |
+
+CourseIt does not offer export, reminders or offline/local AI; YourTube already has Markdown export and runs locally. Its splitting method is not described on the site, so splitting at topic changes with the LLM stays an open idea (step 1 of the plan uses chapters and pauses).
