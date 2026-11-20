@@ -308,7 +308,7 @@ class DashboardTest(unittest.TestCase):
         with mock.patch("extractor.read_latest_uploads", return_value=uploads) as read, \
                 mock.patch("llm.is_configured", return_value=True):
             est = dashboard._channel_estimate(cid)
-            self.assertEqual((est["videos"], est["new"], est["to_summarize"], est["night"]), (3, 2, 2, False))
+            self.assertEqual((est["videos"], est["new"], est["to_summarize"], est["night"]), (2, 1, 1, False))
             self.assertGreater(est["summarize"]["tokens_in"], 3600 * 15 // 4)        # an hour of speech
             queued, nights = [], []
             with mock.patch("enrich.run_enrich") as enrich, \

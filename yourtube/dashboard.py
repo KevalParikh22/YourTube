@@ -581,7 +581,8 @@ def _channel_estimate(channel_id):
     """What importing a whole channel means: its videos, how many are new, and what summarising them costs."""
     import summarizer
     uploads = _channel_uploads(channel_id)
-    # shortcut: videos removed from YourTube count as new and to summarise (the import skips them), fine for an estimate
+    removed = storage.removed_video_ids()
+    uploads = [v for v in uploads if v["video_id"] not in removed]
     have, done = {v["video_id"] for v in storage.get_all_videos(include_removed=True)}, storage.summary_times()
     todo = [v for v in uploads if v["video_id"] not in done]
     settings = llm.load_settings()

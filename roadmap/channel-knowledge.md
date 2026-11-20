@@ -12,7 +12,6 @@
   Knowledge page → **Pages from** picks a followed channel (`#/knowledge?channel=UC…`), or Channels card → **Knowledge**.
 - Ask: retrieval already filters by source, so **Ask** on a channel opens Ask limited to the channel's source.
 - Topic pages build by themselves after the channel's summaries finish, for topics with 3+ summaries.
-- Not done: the estimate counts videos removed from YourTube as new.
 
 **Plan**
 1. Import a full channel as a source (same as [channel-follow.md](channel-follow.md) step 2, but all past uploads, with a count and cost estimate first).
