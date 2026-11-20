@@ -78,12 +78,7 @@ def split_parts(duration: int, segments: List[Dict[str, Any]], chapters: List[Di
     return out + [[start, duration]]
 
 
-PART_PROMPT = """Video: {title} ({channel}), part {n} of {total}, {start}–{end}.
-
-Transcript of this part:
-{text}
-
-This part will be one lesson of a course the learner follows over a few weeks. Write, in {language}:
+PART_PROMPT = """This part will be one lesson of a course the learner follows over a few weeks. Write, in {language}:
 - title: what this part is about, at most 8 words.
 - summary: at most 3 sentences on what is said or shown and its conclusion.
 - points: 3 to 6 key points in time order, each with the time it is said and at most 25 words.
@@ -91,7 +86,13 @@ This part will be one lesson of a course the learner follows over a few weeks. W
 Times: copy them exactly as written in the transcript, like "4:05" or "1:02:30".
 
 Reply with JSON in this shape (replace every <...>):
-{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"]}}"""
+{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"]}}
+
+Now the video:
+Video: {title} ({channel}), part {n} of {total}, {start}–{end}.
+
+Transcript of this part:
+{text}"""
 
 
 def validate_part(raw: Any, start: int, end: int) -> Dict[str, Any]:
@@ -152,20 +153,7 @@ def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings
         budget -= len(slide_text)
     text, sampled = (_parts_text(parts), False) if parts else fit_transcript(transcript_blocks(segments), budget)
     cand_text = "\n".join(f"- id {c['video_id']}: {c['title']} ({c['channel']}){': ' + c['about'] if c['about'] else ''}" for c in cands) or "(none)"
-    return f"""Video
-Title: {video.get('title')}
-Channel: {video.get('channel')}
-Length: {round((video.get('duration_seconds') or 0) / 60)} min
-Chapters:
-{chapters or '(none)'}
-
-{'Notes on each part of the video (summarised from its full transcript)' if parts else 'Transcript'}{' (evenly sampled excerpts)' if sampled else ''}:
-{text}
-{f"{chr(10)}On-screen text (slides, code), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}
-Other videos in the learner's library that may relate:
-{cand_text}
-
-Write, in {language}:
+    return f"""Write, in {language}:
 - tldr: at most 3 sentences: what the video covers and its main conclusion.
 - minutes: 3 to 10 topics in time order, like minutes of a meeting. Each has the time it starts, a topic (at most 8 words)
   and 1 to 3 notes (at most 20 words each) saying what is actually said, claimed or shown, never "the video discusses X".
@@ -187,7 +175,21 @@ Reply with JSON in this shape (replace every <...>):
  "quiz": [{{"q": "<...>", "a": "<...>", "t": "<time>"}}],
  "takeaways": ["<...>"],
  "learn_more": {{"related": [{{"video_id": "<id>", "relation": "<prerequisite|deeper|other_view|same_topic>", "why": "<...>"}}],
-                "searches": [{{"query": "<...>", "why": "<...>"}}]}}}}"""
+                "searches": [{{"query": "<...>", "why": "<...>"}}]}}}}
+
+Now the video:
+Video
+Title: {video.get('title')}
+Channel: {video.get('channel')}
+Length: {round((video.get('duration_seconds') or 0) / 60)} min
+Chapters:
+{chapters or '(none)'}
+
+{'Notes on each part of the video (summarised from its full transcript)' if parts else 'Transcript'}{' (evenly sampled excerpts)' if sampled else ''}:
+{text}
+{f"{chr(10)}On-screen text (slides, code), read from video frames:{chr(10)}{slide_text}{chr(10)}" if slide_text else ""}
+Other videos in the learner's library that may relate:
+{cand_text}"""
 
 
 def validate(raw: Any, duration: int, candidate_ids: List[str]) -> Dict[str, Any]:
