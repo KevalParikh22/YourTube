@@ -9,10 +9,11 @@
   summaries for the ones without one (50 per task). 500+ to summarise: every summary task waits for the night queue's start.
 - Videos already in the library keep their category; videos removed from YourTube stay out.
 - Knowledge: `knowledge.py` takes a `channel` scope next to the library (pages saved as `_channel-<id>/<category>`);
-  Knowledge page → **Pages from** picks a followed channel (`#/knowledge?channel=UC…`), or Channels card → **Knowledge**.
+  Knowledge page → **Pages from** picks a followed channel (`#/knowledge?channel=UC…`), or Channels card → **Knowledge**;
+  **Build all** builds all stale or ready topic pages (`POST /api/knowledge/build-all`). Channel imports automatically queue
+  a build-all task to run after the summaries finish.
 - Ask: retrieval already filters by source, so **Ask** on a channel opens Ask limited to the channel's source.
-- Not done: building the channel's pages by themselves after the summaries finish (click Build per topic); the estimate
-  counts videos removed from YourTube as new.
+- Not done: the estimate counts videos removed from YourTube as new.
 
 **Plan**
 1. Import a full channel as a source (same as [channel-follow.md](channel-follow.md) step 2, but all past uploads, with a count and cost estimate first).
