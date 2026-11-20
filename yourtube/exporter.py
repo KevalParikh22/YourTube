@@ -59,6 +59,10 @@ def course_markdown(v: Dict[str, Any], course: Dict[str, Any]) -> str:
     for i, p in enumerate(course["parts"]):
         if i % per_week == 0:
             out += [f"## Week {i // per_week + 1}", ""]
+        if p.get("pending"):
+            out += [f"### Part {i + 1} (not written yet)", "",
+                    f"[Watch {_clock(p['start'])}–{_clock(p['end'])}]({_at(vid, p['start'])})", ""]
+            continue
         out += [f"### {'✓ ' if done.get(f'p{i}') else ''}Part {i + 1}: {_md_text(p.get('title'))}", "",
                 f"[Watch {_clock(p['start'])}–{_clock(p['end'])}]({_at(vid, p['start'])})", ""]
         if p.get("summary"):

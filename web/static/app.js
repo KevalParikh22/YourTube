@@ -2282,17 +2282,37 @@ function drawerCourse(v) {
     <button class="btn-text" style="padding:0;height:auto" data-act="course-make" data-id="${esc(v.video_id)}" data-job-btn>Make a weekly course</button>
     ${tip('Splits the video into 20–40 minute parts and summarises each with key points and things to do, using your summaries AI. With the night queue on, a long video waits for the night.')}</div>`;
 }
+const courseTaskFor = id => {
+  const title = (byId(id)?.title || '').slice(0, 60), job = S.data.job || {};
+  const mine = t => t?.label === `Course: ${title}` || t?.label === `Course at night: ${title}`;
+  return (job.lanes || []).some(l => l.running && l.kind === 'course' && mine(l))
+    || (job.queue || []).some(t => t.kind === 'course' && mine(t));
+};
 async function loadCourse(id) {
-  S.courses[id] = 'loading';
+  if (S.courses[id] === undefined) S.courses[id] = 'loading';
   try { S.courses[id] = (await api(`/api/course?id=${encodeURIComponent(id)}`)).course; }
   catch (e) { S.courses[id] = { error: e.message }; }
-  if (route() === 'course' && routeParam('id') === id) refresh();
+  if (route() === 'course' && routeParam('id') === id) {
+    try { S.data.job = await api('/api/job'); } catch (_) {}
+    refresh();
+    const c = S.courses[id];
+    if ((c?.parts?.some(p => p.pending) || !c) && courseTaskFor(id)) setTimeout(async () => {
+      if (route() === 'course' && routeParam('id') === id) await loadCourse(id);
+    }, 4000);
+  }
 }
 async function setCourse(id, per_week) {
   try {
     const res = await api('/api/course', { id, per_week });
     if (res.course !== undefined) { S.courses[id] = res.course; await load({ keepEdits: true }); toast(per_week ? 'Course ready' : 'Course ended. The parts are kept.'); }
-    else await queued(res, 'Course');
+    else {
+      await queued(res, 'Course');
+      if (!res.night?.only) {
+        closeDrawer();
+        location.hash = `#/course?id=${encodeURIComponent(id)}`;
+        await loadCourse(id);
+      }
+    }
   } catch (e) { toast(e.message, true); }
 }
 function viewCourse(id) {
@@ -2301,8 +2321,10 @@ function viewCourse(id) {
   if (!v) return back + '<p class="note">This video is not in your library.</p>';
   if (c === undefined || c === 'loading') return back + '<p class="note">Loading course…</p>';
   if (c?.error) return back + `<p class="note">Could not load the course: ${esc(c.error)}</p>`;
+  const active = courseTaskFor(id);
+  if (!c && active) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">Splitting into parts…</p>`;
   if (!c?.per_week) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">No course for this video yet. Open the video and choose <b>Make a weekly course</b>.</p>`;
-  const done = c.progress || {}, n = c.parts.length, weeks = Math.ceil(n / c.per_week);
+  const done = c.progress || {}, n = c.parts.length, pending = c.parts.some(p => p.pending), written = c.parts.filter(p => !p.pending).length, weeks = Math.ceil(n / c.per_week);
   const watched = c.parts.filter((_, i) => done['p' + i]).length;
   const time = t => `<button class="time-link" data-act="play-at" data-id="${esc(id)}" data-t="${Math.floor(t)}">${clock(Math.floor(t))}</button>`;
   const box = (key, label, extra = '') => `<label class="keep"><input type="checkbox" data-change="course-progress" data-id="${esc(id)}" data-key="${key}" ${done[key] ? 'checked' : ''}${extra}> ${label}</label>`;
@@ -2324,6 +2346,8 @@ function viewCourse(id) {
       html += `</div>`;
       return html;
     }).join('')}</div>` : '';
+    if (p.pending) return `<li class="course-part"><div class="course-head"><b>Part ${i + 1}: being written…</b>
+        <button class="btn btn-sm" data-act="play-at" data-id="${esc(id)}" data-t="${p.start}">▶ Watch ${clock(p.start)}–${clock(p.end)}</button></div></li>`;
     return `<li class="course-part${done['p' + i] ? ' done' : ''}">
       <div class="course-head">${box('p' + i, `<b>Part ${i + 1}: ${esc(p.title || 'Untitled')}</b>`)}
         <button class="btn btn-sm" data-act="play-at" data-id="${esc(id)}" data-t="${p.start}">▶ Watch ${clock(p.start)}–${clock(p.end)}</button></div>
@@ -2334,9 +2358,9 @@ function viewCourse(id) {
     </li>`;
   };
   return `${back}<section>
-    <div class="eyebrow">Course · ${plural(weeks, 'week')} · ${plural(n, 'part')}</div>
-    <h1 class="display">${esc(v.title)}<em>${watched} of ${n} parts watched</em></h1>
-    <div class="meter"><i style="width:${n ? watched / n * 100 : 0}%"></i></div>
+    <div class="eyebrow">Course · ${plural(weeks, 'week')} · ${pending ? `${written} of ${n} parts written` : plural(n, 'part')}</div>
+    <h1 class="display">${esc(v.title)}<em>${watched} of ${pending ? written : n} parts watched</em></h1>
+    <div class="meter"><i style="width:${(pending ? written : n) ? watched / (pending ? written : n) * 100 : 0}%"></i></div>
     <div class="actions" style="margin-top:14px">
       <select data-change="course-pace" data-id="${esc(id)}" aria-label="Parts per week">${[1, 2, 3, 4, 5, 6, 7].map(k => `<option value="${k}" ${k === c.per_week ? 'selected' : ''}>${k} part${k > 1 ? 's' : ''} a week</option>`).join('')}</select>
       <a class="btn btn-sm" href="/api/course/markdown?id=${encodeURIComponent(id)}" download>Export Markdown</a>
@@ -2347,6 +2371,7 @@ function viewCourse(id) {
       return `<section class="section card"><h2 class="h">Week ${w + 1} <span class="faint" style="font-weight:400">· ${left ? `${left} to watch` : 'done ✓'} · ${fmt(ps.reduce((t, p) => t + p.end - p.start, 0) / S.speed)} at ${sx(S.speed)}</span></h2>
         <ol class="course-parts" start="${w * c.per_week + 1}">${ps.map((p, k) => part(p, w * c.per_week + k)).join('')}</ol></section>`;
     }).join('')}
+    ${pending && !active ? `<p class="kv-line">Not finished. <button class="btn-text" data-act="course-continue" data-id="${esc(id)}">Continue</button></p>` : ''}
     <p class="kv-line">${esc(c.model || '')}</p>`;
 }
 function drawerSummary(v) {
@@ -2698,6 +2723,7 @@ document.addEventListener('click', async e => {
     case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
     case 'course-make': setCourse(id, +($('#d-course-pace')?.value || 2)); break;
+    case 'course-continue': setCourse(id, S.courses[id]?.per_week || 2); break;
     case 'course-end': if (confirm('End this course? Its parts and summaries stay, your ticks are kept until the parts are made again.')) { await setCourse(id, null); location.hash = '#/home'; } break;
     case 'course-answer': {
       const part = el.dataset.part, q = el.dataset.q, opt = +el.dataset.opt;

@@ -1856,13 +1856,14 @@ def summary_times(db_path: str = DB_PATH) -> Dict[str, str]:
 
 # --- Courses (a long video in parts, followed week by week) ----------------------------------
 
-def save_parts(video_id: str, parts: List[Dict[str, Any]], model: str = "", db_path: str = DB_PATH) -> None:
+def save_parts(video_id: str, parts: List[Dict[str, Any]], model: str = "", db_path: str = DB_PATH, keep_progress: bool = False) -> None:
     """Saves a video's parts; a course on it keeps its weekly pace, its progress starts again (the parts changed)."""
     init_db(db_path)
     with get_connection(db_path) as conn:
-        conn.execute("""INSERT INTO courses (video_id, parts, model) VALUES (?, ?, ?)
-                        ON CONFLICT(video_id) DO UPDATE SET parts = excluded.parts, model = excluded.model, progress = '{}',
-                                                            created_at = CURRENT_TIMESTAMP""",
+        update = ("parts = excluded.parts, model = excluded.model" if keep_progress else
+                  "parts = excluded.parts, model = excluded.model, progress = '{}', created_at = CURRENT_TIMESTAMP")
+        conn.execute(f"INSERT INTO courses (video_id, parts, model) VALUES (?, ?, ?) "
+                     f"ON CONFLICT(video_id) DO UPDATE SET {update}",
                      (video_id, json.dumps(parts, ensure_ascii=False), model))
         conn.commit()
 

@@ -141,6 +141,53 @@ class CourseRunTest(unittest.TestCase):
         storage.save_playlist(playlist("PLC"), [video("c4", "Four hour course", duration=4 * HOUR), video("c0", "No transcript", duration=HOUR)])
         storage.save_details("c4", {"status": "done", "segments": segments(4 * HOUR, step=60)})
 
+    def test_course_saves_each_part_and_resumes_pending_parts(self):
+        storage.save_playlist(playlist("PLC2"), [video("c-resume", "Resumable", duration=4 * HOUR)])
+        storage.save_details("c-resume", {"status": "done", "segments": segments(4 * HOUR, step=60)})
+        calls = []
+        def partial(system, prompt):
+            calls.append(prompt)
+            if len(calls) == 3:
+                from llm import QuotaError
+                raise QuotaError("quota")
+            return json.dumps(PART)
+        with mock.patch("llm.make_completer", return_value=partial), mock.patch("llm.context_chars", return_value=5000), \
+             mock.patch("llm.model_for", return_value="m"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertFalse(summarizer.run_course(["c-resume"], 2))
+        course = storage.get_course("c-resume")
+        self.assertEqual(course["per_week"], 2)
+        self.assertEqual(course["model"], "m")
+        self.assertEqual(sum(not p.get("pending") for p in course["parts"]), 2)
+        self.assertEqual(sum(bool(p.get("pending")) for p in course["parts"]), len(course["parts"]) - 2)
+        storage.set_course_progress("c-resume", "p0", True)
+        remaining = sum(bool(p.get("pending")) for p in course["parts"])
+        resumed = []
+        def working(system, prompt):
+            resumed.append(prompt)
+            return json.dumps(PART)
+        with mock.patch("llm.make_completer", return_value=working), mock.patch("llm.context_chars", return_value=5000), \
+             mock.patch("llm.model_for", return_value="m"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(summarizer.run_course(["c-resume"], 2))
+        self.assertEqual(len(resumed), remaining)
+        self.assertTrue(storage.get_course("c-resume")["progress"]["p0"])
+        self.assertFalse(any(p.get("pending") for p in storage.get_course("c-resume")["parts"]))
+        storage.set_course_pace("c-resume", None)
+
+    def test_summary_ignores_pending_saved_parts(self):
+        storage.save_playlist(playlist("PLC3"), [video("c-half-summary", "Half course", duration=HOUR)])
+        storage.save_details("c-half-summary", {"status": "done", "segments": segments(HOUR)})
+        storage.save_parts("c-half-summary", [{"start": 0, "end": HOUR, "pending": True}])
+        prompts = []
+        def complete(system, prompt):
+            prompts.append(prompt)
+            return json.dumps(PART if "Transcript of this part" in prompt else GOOD)
+        v = next(v for v in summarizer._videos(["c-half-summary"]))
+        with mock.patch("summarizer.candidates", return_value=[]):
+            result = summarizer._summarize_one(v, complete, 5000, "fake", {})
+        self.assertIsNotNone(result)
+        self.assertNotIn("Part 1: None", prompts[-1])
+        self.assertIn("Video", prompts[-1])
+
     def test_summary_saves_parts_then_course_reuses_them_and_progress(self):
         calls = []
 
@@ -216,6 +263,18 @@ class CourseEndpointTest(test_summarizer.EndpointTest):
         self.assertEqual(self.call("/api/course?id=nope"), (200, {"course": None}))
         for bad in ({"id": "e1", "per_week": 0}, {"id": "e1", "per_week": "2"}, {"per_week": 2}):
             self.assertEqual(self.call("/api/course", bad)[0], 400, bad)
+        storage.save_parts("e3", [{"start": 0, "end": 1800, "pending": True}])
+        storage.set_course_pace("e3", 1)
+        with mock.patch("llm.is_configured", return_value=True), mock.patch("dashboard.JOB.start", return_value={"id": 10, "position": 0}) as start:
+            code, r = self.call("/api/course", {"id": "e3", "per_week": 1})
+        self.assertEqual((code, start.call_args[0][0]), (200, "course"))
+        with mock.patch("llm.is_configured", return_value=False), mock.patch("dashboard.JOB.start") as start:
+            code, r = self.call("/api/course", {"id": "e3", "per_week": 3})
+        self.assertEqual(code, 400)
+        self.assertEqual(r.get("error"), "Choose an AI for summaries in Settings → AI first")
+        self.assertEqual(storage.get_course("e3")["per_week"], 1)
+        self.assertEqual(start.call_count, 0)
+        storage.set_course_pace("e3", None)
         with mock.patch("dashboard.JOB.start") as start:
             code, r = self.call("/api/course", {"id": "e1", "per_week": 1})    # parts exist: no task
         self.assertEqual((code, r["course"]["per_week"], start.call_count), (200, 1, 0))
@@ -233,6 +292,15 @@ class CourseEndpointTest(test_summarizer.EndpointTest):
             self.assertIn("## Week 2", r.read().decode())
         code, r = self.call("/api/course", {"id": "e1", "per_week": None})       # end the course, keep the parts
         self.assertEqual((code, r["course"]["per_week"], len(r["course"]["parts"])), (200, None, 2))
+
+    def test_course_markdown_pending_part(self):
+        from exporter import course_markdown
+        v = {"video_id": "pending-md", "title": "Pending", "channel": "ch", "duration_seconds": HOUR}
+        course = {"parts": [{"start": 0, "end": 1800, "pending": True}], "per_week": 1, "progress": {}}
+        md = course_markdown(v, course)
+        self.assertIn("### Part 1 (not written yet)", md)
+        self.assertIn("[Watch 0:00–30:00]", md)
+        self.assertNotIn("Untitled", md)
 
     def test_course_markdown_quiz(self):
         """course_markdown shows Check yourself and right option when quiz present."""
