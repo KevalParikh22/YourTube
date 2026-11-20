@@ -1835,6 +1835,109 @@
         }
       }
     },
+    "/api/course": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "Get a video's parts and weekly course with its progress",
+        "operationId": "getCourse",
+        "parameters": [
+          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "The course: parts (start, end, title, summary, points, actions), per_week (null: parts only, no course yet) and progress ({\"p<i>\": true} part watched, {\"a<i>.<j>\": true} action done); course is null when the video has no parts",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"course": {"type": ["object", "null"]}}, "required": ["course"]}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      },
+      "post": {
+        "tags": ["AI"],
+        "summary": "Make a video a weekly course, change its pace, or end it",
+        "description": "With parts already made (by a long summary or an earlier course) this only sets the pace and replies with the course. Otherwise it queues a task that splits the video into 20-40 min parts and summarises each one; with the night queue on, a long video waits for the night.",
+        "operationId": "makeCourse",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Video ID"},
+                  "per_week": {"type": ["integer", "null"], "minimum": 1, "maximum": 7, "description": "Parts per week; null ends the course and keeps the parts"}
+                },
+                "required": ["id", "per_week"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The course ({ok, course}) when no AI was needed, else the queued task",
+            "content": {"application/json": {"schema": {"type": "object"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/course/progress": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Mark a course part watched or an action done",
+        "operationId": "setCourseProgress",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string", "description": "Video ID"},
+                  "key": {"type": "string", "pattern": "^(p\\d+|a\\d+\\.\\d+)$", "description": "p<part> or a<part>.<action>, counted from 0"},
+                  "done": {"type": "boolean"}
+                },
+                "required": ["id", "key", "done"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The course's new progress",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}, "progress": {"type": "object"}}}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/course/markdown": {
+      "get": {
+        "tags": ["Export"],
+        "summary": "Export a video's weekly course as Markdown",
+        "operationId": "exportCourseMarkdown",
+        "parameters": [
+          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Markdown: weeks, parts with watch links, key points and actions as checkboxes",
+            "content": {"text/markdown": {"schema": {"type": "string"}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
     "/api/video": {
       "get": {
         "tags": ["Videos"],

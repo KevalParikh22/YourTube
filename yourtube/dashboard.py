@@ -34,7 +34,7 @@ import files
 import voice
 import interests_ai
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
-from exporter import videos_to_csv, video_markdown, markdown_zip, safe_filename
+from exporter import videos_to_csv, video_markdown, course_markdown, markdown_zip, safe_filename
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(ROOT_DIR, "web")
@@ -93,7 +93,7 @@ def _same(a, b):
     return hmac.compare_digest(str(a).encode("utf-8"), str(b).encode("utf-8"))
 
 LANES = ("youtube", "local", "cloud")   # reading YouTube, this computer's GPU/CPU, cloud AI: one task each at a time
-_AI_TASK = {"rate": "rate", "knowledge": "rate", "summarize": "summarize", "suggest": "categorize", "discover": "categorize"}
+_AI_TASK = {"rate": "rate", "knowledge": "rate", "summarize": "summarize", "course": "summarize", "suggest": "categorize", "discover": "categorize"}
 _MEDIA_TASK = {"asr": "transcribe", "visual": "slides", "embed": "embed"}
 
 def lane_for(kind, settings):
@@ -625,6 +625,10 @@ def _summarize_task(since):
     import summarizer
     return lambda ids: lambda: summarizer.run_summarize(ids, should_stop=JOB.stop_requested, done_since=since)
 
+def _course_task(per_week):
+    import summarizer
+    return lambda ids: lambda: summarizer.run_course(ids, per_week, should_stop=JOB.stop_requested)
+
 def _utc_now():
     """Now in SQLite's CURRENT_TIMESTAMP form, to compare with created_at columns."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
@@ -721,6 +725,7 @@ def build_state(library=1):
         "platform": sys.platform,
         "voice": _VOICE_AVAILABLE,
         "summarised": list(storage.summary_times()),   # video ids with a summary (Knowledge: Summarise 5)
+        "courses": storage.list_courses(),
     }
 
 class Handler(BaseHTTPRequestHandler):
@@ -1065,6 +1070,19 @@ class Handler(BaseHTTPRequestHandler):
             vid = (qs.get("id") or [""])[0]
             summary = storage.get_summary(vid)   # None: not summarised yet (not an error)
             return self._json({"summary": summary, "moments": summarizer.related_moments(vid, summary) if summary else {}})
+        if url.path == "/api/course":
+            return self._json({"course": storage.get_course((qs.get("id") or [""])[0])})
+        if url.path == "/api/course/markdown":
+            vid = (qs.get("id") or [""])[0]
+            v = next((x for x in storage.get_library() if x["video_id"] == vid), None)
+            course = storage.get_course(vid)
+            if v is None or not course:
+                return self._error("No course for this video", 404)
+            name = safe_filename("Course " + v["title"]) + ".md"
+            data = course_markdown(v, course).encode("utf-8")
+            files.save_export(name, data)
+            return self._send(200, data, "text/markdown; charset=utf-8",
+                              extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/video":
             vid = (qs.get("id") or [""])[0]
             details = storage.get_details(vid)
@@ -1612,6 +1630,25 @@ class Handler(BaseHTTPRequestHandler):
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
                 return self._queued_split("summarize", "Summarise", ids, _summarize_task(_utc_now()))
+
+            if path == "/api/course":
+                vid, per_week = body.get("id"), body.get("per_week")
+                if not isinstance(vid, str) or not vid:
+                    return self._error("id is required")
+                if per_week is not None and (type(per_week) is not int or not 1 <= per_week <= 7):
+                    return self._error("per_week must be 1 to 7, or null to end the course")
+                if storage.set_course_pace(vid, per_week) or per_week is None:   # parts already made: no AI needed
+                    return self._json({"ok": True, "course": storage.get_course(vid)})
+                if not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                return self._queued_split("course", "Course", [vid], _course_task(per_week))
+
+            if path == "/api/course/progress":
+                vid, key = body.get("id"), body.get("key")
+                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+", key):
+                    return self._error("key must be p<part> or a<part>.<action>")
+                progress = storage.set_course_progress(vid if isinstance(vid, str) else "", key, bool(body.get("done")))
+                return self._json({"ok": True, "progress": progress}) if progress is not None else self._error("No course for this video", 404)
 
             if path == "/api/details/settings":
                 settings = llm.load_settings()

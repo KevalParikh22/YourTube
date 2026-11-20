@@ -16,6 +16,7 @@ const JOB_TEXT = {
   details: ['Fetching video details, one video every few seconds…', 'Video details fetched', 'Details run stopped early. See the log.'],
   rate: ['Rating videos…', 'Videos rated', 'Rating stopped early. See the log.'],
   summarize: ['Summarising videos…', 'Video summaries ready', 'Summarising stopped early. See the log.'],
+  course: ['Splitting the video into parts and summarising each…', 'Course ready', 'Making the course stopped early. See the log.'],
   knowledge: ['Building the knowledge page…', 'Knowledge page ready', 'Knowledge page build stopped or failed. See the log.'],
   pull: ['Downloading the model into Ollama…', 'Model downloaded', 'Download stopped. See the log.'],
   asr: ['Transcribing locally: downloading audio, then speech-to-text…', 'Local transcription finished', 'Transcription stopped or failed. See the log.'],
@@ -44,7 +45,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   statusUndo: [],
-  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, courses: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
@@ -269,6 +270,11 @@ function renderView() {
       if (!S.knowledge.list && !S.knowledge.loadingList) loadKnowledgeList();
     }
     updateJob();
+  }
+  else if (r === 'course') {
+    const id = routeParam('id');
+    v.innerHTML = viewCourse(id);
+    if (S.courses[id] === undefined) loadCourse(id);
   }
   else if (r === 'search') {
     const q = routeParam('q');
@@ -497,6 +503,9 @@ function viewHome() {
   <section class="section home-card"><h2 class="h">Continue watching</h2>
     ${inProgress.length ? `<ul class="rows">${inProgress.map(row).join('')}</ul>` : '<p class="note">Nothing in progress.</p>'}
   </section>
+
+  ${(S.data.courses || []).length ? `<section class="section home-card"><h2 class="h">Courses</h2><ul class="rows">${S.data.courses.filter(c => byId(c.video_id)).map(c =>
+    `<li><a href="#/course?id=${encodeURIComponent(c.video_id)}">${esc(byId(c.video_id).title)}</a> <span class="faint">· ${c.done} of ${plural(c.parts, 'part')} watched · ${c.per_week} a week</span></li>`).join('')}</ul></section>` : ''}
 
   <section class="section home-card"><h2 class="h">Top picks</h2>
     ${!rated.length ? `<p class="note">Rate your videos to get picks. <button class="btn-text" data-act="rate-batch">Rate videos</button></p>`
@@ -1012,6 +1021,7 @@ async function taskFinished(t) {
   const text = JOB_TEXT[t.kind] || JOB_TEXT.sync;
   if (['details', 'sync', 'asr', 'visual', 'remove'].includes(t.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
   if (t.kind === 'summarize' || t.kind === 'remove') S.summaryCache = {};
+  if (['course', 'summarize', 'remove'].includes(t.kind)) S.courses = {};
   if (['summarize', 'knowledge', 'remove'].includes(t.kind)) { S.knowledge.list = null; S.knowledge.pages = {}; }
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
@@ -2216,6 +2226,7 @@ function renderDrawer() {
           : ` · <button class="btn-text" style="height:auto;padding:0" data-act="channel-follow" data-value="${esc(v.video_id)}" data-job-btn title="Add this channel's new uploads to your library by themselves">Follow channel</button>`}</div></div>
       <div class="speeds">${d ? SPEEDS.map(s => `<span class="${s === S.speed ? 'on' : ''}">${sx(s)} <b>${fmt(d / s)}</b></span>`).join('') : 'No duration available'}</div>
       <div id="d-summary">${drawerSummary(v)}</div>
+      ${drawerCourse(v)}
       <div id="d-rating">${drawerRating(v)}</div>
       <div><span class="field-label">Status</span>
         <div class="seg" id="d-status">${Object.entries(STATUS_LABEL).map(([k, l]) => `<button data-act="set-status" data-id="${esc(v.video_id)}" data-status="${k}" class="${v.status === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>
@@ -2273,6 +2284,62 @@ function drawerRating(v) {
     <div class="kv-line">${r.basis === 'metadata' ? 'Rated from title and description only' : 'Rated from the transcript'} · ${esc(r.model || '')}
       · <button class="btn-text" style="padding:0;height:auto;font-size:12.5px" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate again</button></div>
   </div>`;
+}
+// A video longer than one part (40 min) can become a weekly course; parts made by a long summary are reused
+function drawerCourse(v) {
+  const c = (S.data.courses || []).find(x => x.video_id === v.video_id);
+  if (c) return `<div class="kv-line">Course: ${c.done} of ${plural(c.parts, 'part')} watched. <a href="#/course?id=${encodeURIComponent(v.video_id)}" data-act="close">Open course →</a></div>`;
+  if ((v.duration_seconds || 0) <= 40 * 60 || !S.data.ai.ready_for.summarize) return '';
+  return `<div class="kv-line">Too long to watch at once? <select id="d-course-pace" aria-label="Parts per week">${[1, 2, 3, 4].map(n => `<option value="${n}" ${n === 2 ? 'selected' : ''}>${n} part${n > 1 ? 's' : ''} a week</option>`).join('')}</select>
+    <button class="btn-text" style="padding:0;height:auto" data-act="course-make" data-id="${esc(v.video_id)}" data-job-btn>Make a weekly course</button>
+    ${tip('Splits the video into 20–40 minute parts and summarises each with key points and things to do, using your summaries AI. With the night queue on, a long video waits for the night.')}</div>`;
+}
+async function loadCourse(id) {
+  S.courses[id] = 'loading';
+  try { S.courses[id] = (await api(`/api/course?id=${encodeURIComponent(id)}`)).course; }
+  catch (e) { S.courses[id] = { error: e.message }; }
+  if (route() === 'course' && routeParam('id') === id) refresh();
+}
+async function setCourse(id, per_week) {
+  try {
+    const res = await api('/api/course', { id, per_week });
+    if (res.course !== undefined) { S.courses[id] = res.course; await load({ keepEdits: true }); toast(per_week ? 'Course ready' : 'Course ended. The parts are kept.'); }
+    else await queued(res, 'Course');
+  } catch (e) { toast(e.message, true); }
+}
+function viewCourse(id) {
+  const v = byId(id), c = S.courses[id];
+  const back = '<div style="margin-bottom:14px"><a href="#/home" class="btn-text" style="padding-left:0">← Home</a></div>';
+  if (!v) return back + '<p class="note">This video is not in your library.</p>';
+  if (c === undefined || c === 'loading') return back + '<p class="note">Loading course…</p>';
+  if (c?.error) return back + `<p class="note">Could not load the course: ${esc(c.error)}</p>`;
+  if (!c?.per_week) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">No course for this video yet. Open the video and choose <b>Make a weekly course</b>.</p>`;
+  const done = c.progress || {}, n = c.parts.length, weeks = Math.ceil(n / c.per_week);
+  const watched = c.parts.filter((_, i) => done['p' + i]).length;
+  const time = t => `<button class="time-link" data-act="play-at" data-id="${esc(id)}" data-t="${Math.floor(t)}">${clock(Math.floor(t))}</button>`;
+  const box = (key, label, extra = '') => `<label class="keep"><input type="checkbox" data-change="course-progress" data-id="${esc(id)}" data-key="${key}" ${done[key] ? 'checked' : ''}${extra}> ${label}</label>`;
+  const part = (p, i) => `<li class="course-part${done['p' + i] ? ' done' : ''}">
+      <div class="course-head">${box('p' + i, `<b>Part ${i + 1}: ${esc(p.title || 'Untitled')}</b>`)}
+        <button class="btn btn-sm" data-act="play-at" data-id="${esc(id)}" data-t="${p.start}">▶ Watch ${clock(p.start)}–${clock(p.end)}</button></div>
+      ${p.summary ? `<p>${esc(p.summary)}</p>` : ''}
+      ${(p.points || []).length ? `<ul>${p.points.map(x => `<li><div class="chap"><span>${time(x.t)}</span><span>${esc(x.text)}</span></div></li>`).join('')}</ul>` : ''}
+      ${(p.actions || []).length ? `<div class="field-label">Do this week</div>${p.actions.map((a, j) => `<div>${box(`a${i}.${j}`, esc(a))}</div>`).join('')}` : ''}
+    </li>`;
+  return `${back}<section>
+    <div class="eyebrow">Course · ${plural(weeks, 'week')} · ${plural(n, 'part')}</div>
+    <h1 class="display">${esc(v.title)}<em>${watched} of ${n} parts watched</em></h1>
+    <div class="meter"><i style="width:${n ? watched / n * 100 : 0}%"></i></div>
+    <div class="actions" style="margin-top:14px">
+      <select data-change="course-pace" data-id="${esc(id)}" aria-label="Parts per week">${[1, 2, 3, 4, 5, 6, 7].map(k => `<option value="${k}" ${k === c.per_week ? 'selected' : ''}>${k} part${k > 1 ? 's' : ''} a week</option>`).join('')}</select>
+      <a class="btn btn-sm" href="/api/course/markdown?id=${encodeURIComponent(id)}" download>Export Markdown</a>
+      <button class="btn-text" data-act="course-end" data-id="${esc(id)}">End course</button>
+    </div></section>
+    ${Array.from({ length: weeks }, (_, w) => {
+      const ps = c.parts.slice(w * c.per_week, (w + 1) * c.per_week), left = ps.filter((_, k) => !done['p' + (w * c.per_week + k)]).length;
+      return `<section class="section card"><h2 class="h">Week ${w + 1} <span class="faint" style="font-weight:400">· ${left ? `${left} to watch` : 'done ✓'} · ${fmt(ps.reduce((t, p) => t + p.end - p.start, 0) / S.speed)} at ${sx(S.speed)}</span></h2>
+        <ol class="course-parts" start="${w * c.per_week + 1}">${ps.map((p, k) => part(p, w * c.per_week + k)).join('')}</ol></section>`;
+    }).join('')}
+    <p class="kv-line">${esc(c.model || '')}</p>`;
 }
 function drawerSummary(v) {
   const result = S.summaryCache[v.video_id];
@@ -2636,6 +2703,8 @@ document.addEventListener('click', async e => {
     case 'rate-one': startRate([id]); break;
     case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
+    case 'course-make': setCourse(id, +($('#d-course-pace')?.value || 2)); break;
+    case 'course-end': if (confirm('End this course? Its parts and summaries stay, your ticks are kept until the parts are made again.')) { await setCourse(id, null); location.hash = '#/home'; } break;
     case 'remove-sel': {
       const ids = [...S.sel], one = ids.length === 1, notes = ids.filter(x => byId(x)?.notes?.trim()).length;
       if (!confirm(`Remove ${plural(ids.length, 'video')} from YourTube?\n\nThis deletes ${one ? 'its' : 'their'} transcripts, slides, ratings, summaries and search data`
@@ -2970,6 +3039,15 @@ document.addEventListener('change', async e => {
     S.knowledge.list = null; S.knowledge.pages = {};
     await load(); if (route() === 'search' && S.search.q) runSearch();
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
+  }
+  if (ch === 'course-pace') { await setCourse(el.dataset.id, +el.value); return; }
+  if (ch === 'course-progress') {
+    try { const r = await api('/api/course/progress', { id: el.dataset.id, key: el.dataset.key, done: el.checked }); S.courses[el.dataset.id].progress = r.progress; }
+    catch (err) { el.checked = !el.checked; toast(err.message, true); return; }
+    const row = (S.data.courses || []).find(x => x.video_id === el.dataset.id);   // part counts on Home and the drawer
+    if (row) row.done = Object.keys(S.courses[el.dataset.id].progress).filter(k => k[0] === 'p').length;
+    if (el.dataset.key.startsWith('p')) refresh();
+    return;
   }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }
   if (ch === 'channel-auto') {
