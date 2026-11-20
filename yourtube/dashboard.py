@@ -765,8 +765,12 @@ class Handler(BaseHTTPRequestHandler):
     def _token_ok(self):
         if TOKEN is None:
             return True
-        morsel = SimpleCookie(self.headers.get("Cookie") or "").get(TOKEN_COOKIE)
+        jar = SimpleCookie(self.headers.get("Cookie") or "")
+        morsel = jar.get(self._cookie_name()) or jar.get(TOKEN_COOKIE)
         return morsel is not None and _same(morsel.value, TOKEN)
+
+    def _cookie_name(self):
+        return f"{TOKEN_COOKIE}_{self.server.server_port}"
 
     def _host_ok(self):
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
@@ -861,7 +865,7 @@ class Handler(BaseHTTPRequestHandler):
             if not _same(qs["t"][0], TOKEN):
                 return self._send(200, self._token_help(), "text/html; charset=utf-8")
             # Swap the link's token for a cookie, then drop it from the address bar
-            cookie = f"{TOKEN_COOKIE}={TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000"
+            cookie = f"{self._cookie_name()}={TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000"
             return self._send(303, b"", "text/plain", extra_headers={"Location": "/", "Set-Cookie": cookie})
         if not self._token_ok():
             if url.path in ("/", "/index.html"):
