@@ -653,9 +653,9 @@ def _summarize_task(since):
     import summarizer
     return lambda ids: lambda: summarizer.run_summarize(ids, should_stop=JOB.stop_requested, done_since=since)
 
-def _course_task(per_week):
+def _course_task(per_week, daily_minutes=None):
     import summarizer
-    return lambda ids: lambda: summarizer.run_course(ids, per_week, should_stop=JOB.stop_requested)
+    return lambda ids: lambda: summarizer.run_course(ids, per_week, should_stop=JOB.stop_requested, daily_minutes=daily_minutes)
 
 def _utc_now():
     """Now in SQLite's CURRENT_TIMESTAMP form, to compare with created_at columns."""
@@ -1116,8 +1116,14 @@ class Handler(BaseHTTPRequestHandler):
             course = storage.get_course(vid)
             if v is None or not course:
                 return self._error("No course for this video", 404)
+            try:
+                speed = float((qs.get("speed") or ["1"])[0])
+            except ValueError:
+                speed = 1.0
+            if not 0.5 <= speed <= 4:   # anything outside the range falls back to normal speed
+                speed = 1.0
             name = safe_filename("Course " + v["title"]) + ".md"
-            data = course_markdown(v, course).encode("utf-8")
+            data = course_markdown(v, course, speed).encode("utf-8")
             files.save_export(name, data)
             return self._send(200, data, "text/markdown; charset=utf-8",
                               extra_headers={"Content-Disposition": _attachment(name)})
@@ -1688,16 +1694,33 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error("id is required")
                 if per_week is not None and (type(per_week) is not int or not 1 <= per_week <= 7):
                     return self._error("per_week must be 1 to 7, or null to end the course")
-                if storage.set_course_pace(vid, per_week) or per_week is None:   # parts already made: no AI needed
-                    return self._json({"ok": True, "course": storage.get_course(vid)})
+                daily = body.get("daily_minutes")
+                if "daily_minutes" in body and daily is not None and (type(daily) is not int or not 15 <= daily <= 240):
+                    return self._error("daily_minutes must be 15 to 240, or null")
+                course = storage.get_course(vid)
+                if course:
+                    pending = any(p.get("pending") for p in course["parts"])
+                    if per_week is not None and pending:
+                        if not llm.is_configured(llm.load_settings(), "summarize"):
+                            return self._error("Choose an AI for summaries in Settings → AI first")
+                        storage.set_course_pace(vid, per_week)
+                        if "daily_minutes" in body:
+                            storage.set_course_daily(vid, daily)
+                    else:
+                        storage.set_course_pace(vid, per_week)
+                        if "daily_minutes" in body:
+                            storage.set_course_daily(vid, daily)
+                        return self._json({"ok": True, "course": storage.get_course(vid)})
+                if per_week is None:
+                    return self._error("per_week must be 1 to 7 for a new course")
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
-                return self._queued_split("course", "Course", [vid], _course_task(per_week))
+                return self._queued_split("course", "Course", [vid], _course_task(per_week, daily))
 
             if path == "/api/course/progress":
                 vid, key = body.get("id"), body.get("key")
-                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+", key):
-                    return self._error("key must be p<part> or a<part>.<action>")
+                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+|q\d+\.\d+", key):
+                    return self._error("key must be p<part>, a<part>.<action>, or q<part>.<question>")
                 progress = storage.set_course_progress(vid if isinstance(vid, str) else "", key, bool(body.get("done")))
                 return self._json({"ok": True, "progress": progress}) if progress is not None else self._error("No course for this video", 404)
 

@@ -75,10 +75,9 @@ class EstimatePartsTest(unittest.TestCase):
 
     def test_long_transcript_counts_part_calls(self):
         estimate, v, segments = self._estimate()
-        self.assertEqual(summarizer.PART_OUTPUT_TOKENS, 500)
         self.assertEqual(estimate["in_parts"], 1)
         self.assertEqual(estimate["tokens_out"], summarizer.OUTPUT_TOKENS + len(
-            summarizer.split_parts(v["duration_seconds"], segments, v.get("chapters") or [])) * 500)
+            summarizer.split_parts(v["duration_seconds"], segments, v.get("chapters") or [])) * summarizer.PART_OUTPUT_TOKENS)
         one_call_chars = len(summarizer.build_prompt(v, segments, {"language": "English"}, [], 20_000)) + len(summarizer.SYSTEM) + 2000
         self.assertGreater(estimate["tokens_in"], one_call_chars // 4)
 

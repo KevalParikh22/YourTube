@@ -83,16 +83,27 @@ PART_PROMPT = """This part will be one lesson of a course the learner follows ov
 - summary: at most 3 sentences on what is said or shown and its conclusion.
 - points: 3 to 6 key points in time order, each with the time it is said and at most 25 words.
 - actions: 1 to 3 concrete things to do after watching (an exercise, a thing to try, a decision to make), at most 25 words each.
+- quiz: 2 to 3 multiple-choice questions that check this part's key ideas, each with 3 or 4 short options (at most 12 words each), the 0-based index of the right option, and the time the answer is explained (copied from the transcript).
 Times: copy them exactly as written in the transcript, like "4:05" or "1:02:30".
 
 Reply with JSON in this shape (replace every <...>):
-{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"]}}
+{{"title": "<...>", "summary": "<...>", "points": [{{"t": "<time>", "text": "<...>"}}], "actions": ["<...>"], "quiz": [{{"q": "<...>", "options": ["<...>"], "answer": <index>, "t": "<time>"}}]}}
 
 Now the video:
 Video: {title} ({channel}), part {n} of {total}, {start}–{end}.
 
 Transcript of this part:
 {text}"""
+
+
+def _part_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], spans: List[List[int]], n: int,
+                 settings: Dict[str, Any], budget: int) -> str:
+    start, end = spans[n - 1]
+    part = [x for x in segments if start <= x["start"] < end]
+    text, _ = fit_transcript(transcript_blocks(part), budget)
+    return PART_PROMPT.format(title=video.get("title"), channel=video.get("channel"), n=n, total=len(spans),
+                              start=_clock(start), end=_clock(end), text=text or "(no words in this part)",
+                              language=settings.get("language") or "English")
 
 
 def validate_part(raw: Any, start: int, end: int) -> Dict[str, Any]:
@@ -107,27 +118,56 @@ def validate_part(raw: Any, start: int, end: int) -> Dict[str, Any]:
     summary = _text(raw.get("summary"), 600)
     if not summary and not points:
         raise LLMError("The part summary had no summary or points")
+    quiz = []
+    raw_quiz = raw.get("quiz")
+    for item in raw_quiz if isinstance(raw_quiz, list) else []:
+        if not isinstance(item, dict):
+            continue
+        q = _text(item.get("q"), 200)
+        if not q:
+            continue
+        raw_options = item.get("options")
+        if not isinstance(raw_options, list):
+            continue
+        options = [_text(o, 120) for o in raw_options if isinstance(o, str) and _text(o, 120)]
+        if len(options) < 2 or len(options) > 4:
+            continue
+        answer = item.get("answer")
+        if isinstance(answer, bool) or not isinstance(answer, int) or not (0 <= answer < len(options)):
+            continue
+        t_raw = item.get("t")
+        t = parse_time(t_raw)
+        if t is not None and not (start - 60 <= t <= end + 60):
+            t = None
+        quiz.append({"q": q, "options": options, "answer": answer, "t": t})
+        if len(quiz) == 3:
+            break
     return {"start": start, "end": end, "title": _text(raw.get("title"), 80), "summary": summary,
             "points": sorted(points, key=lambda p: p["t"])[:6],
-            "actions": [_text(a, 200) for a in raw.get("actions") or [] if isinstance(a, str) and a.strip()][:3]}
+            "actions": [_text(a, 200) for a in raw.get("actions") or [] if isinstance(a, str) and a.strip()][:3],
+            "quiz": quiz}
 
 
 def summarize_parts(video: Dict[str, Any], segments: List[Dict[str, Any]], settings: Dict[str, Any],
                     complete: Callable[[str, str], str], budget: int,
-                    should_stop: Callable[[], bool] = lambda: False) -> List[Dict[str, Any]]:
-    """One model call per 20–40 min part: [{'start', 'end', 'title', 'summary', 'points', 'actions'}]."""
-    spans = split_parts(video.get("duration_seconds") or 0, segments, video.get("chapters") or [])
-    out = []
-    for n, (start, end) in enumerate(spans, 1):
+                    should_stop: Callable[[], bool] = lambda: False, parts: Optional[List[Dict[str, Any]]] = None,
+                    on_part: Optional[Callable[[int, Dict[str, Any]], None]] = None) -> List[Dict[str, Any]]:
+    """One model call per pending part; completed parts are returned unchanged."""
+    spans = ([[p["start"], p["end"]] for p in parts] if parts is not None else
+             split_parts(video.get("duration_seconds") or 0, segments, video.get("chapters") or []))
+    out = list(parts) if parts is not None else []
+    for i, (start, end) in enumerate(spans):
+        n = i + 1
+        if parts is not None and not parts[i].get("pending"):
+            continue
         if should_stop():
             raise LLMError("Stopped")
-        part = [x for x in segments if start <= x["start"] < end]
-        text, _ = fit_transcript(transcript_blocks(part), budget)
-        prompt = PART_PROMPT.format(title=video.get("title"), channel=video.get("channel"), n=n, total=len(spans),
-                                    start=_clock(start), end=_clock(end), text=text or "(no words in this part)",
-                                    language=settings.get("language") or "English")
-        out.append(validate_part(parse_json(complete(SYSTEM, prompt)), start, end))
-        print(f"      part {n}/{len(spans)} ({_clock(start)}–{_clock(end)}): {out[-1]['title']}")
+        prompt = _part_prompt(video, segments, spans, n, settings, budget)
+        part = validate_part(parse_json(complete(SYSTEM, prompt)), start, end)
+        if parts is None: out.append(part)
+        else: out[i] = part
+        if on_part: on_part(i, part)
+        print(f"      part {n}/{len(spans)} ({_clock(start)}–{_clock(end)}): {part['title']}")
     return out
 
 
@@ -259,7 +299,7 @@ def _summarize_one(video: Dict[str, Any], complete: Callable[[str, str], str], b
     if not segments:
         return None
     made = storage.get_course(video["video_id"])
-    parts = made["parts"] if made else None
+    parts = made["parts"] if made and not any(p.get("pending") for p in made["parts"]) else None
     with storage.video_step(video["video_id"], "summarize", model):
         summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget, parts)
         storage.save_summary(video["video_id"], summary, model=model)
@@ -274,7 +314,7 @@ def _videos(video_ids: List[str]) -> List[Dict[str, Any]]:
 
 
 CHARS_PER_SECOND = 15         # speech is about 150 words a minute; for estimates before a transcript is fetched
-PART_OUTPUT_TOKENS = 500   # rough output per part (title, summary, points, actions)
+PART_OUTPUT_TOKENS = 550   # rough output per part (title, summary, points, actions, quiz)
 
 
 def _parts_cost(video: Dict[str, Any], segments: List[Dict[str, Any]], budget: int) -> Tuple[int, int]:
@@ -320,7 +360,7 @@ def estimate(video_ids: List[str]) -> Dict[str, Any]:
         with_transcript += bool(segments)
         chars += len(build_prompt(v, segments, settings, [], budget)) + len(SYSTEM) + 2000
         made = storage.get_course(v["video_id"])
-        if segments and too_long(v, segments, budget) and not (made and made.get("parts")):
+        if segments and too_long(v, segments, budget) and not (made and made.get("parts") and not any(p.get("pending") for p in made["parts"])):
             part_chars, part_tokens = _parts_cost(v, segments, budget)
             chars += part_chars
             tokens_out += part_tokens
@@ -509,10 +549,11 @@ def related_moments(video_id: str, summary: Dict[str, Any], settings: Optional[D
     return out
 
 
-def run_course(video_ids: List[str], per_week: int, should_stop: Callable[[], bool] = lambda: False) -> bool:
+def run_course(video_ids: List[str], per_week: int, should_stop: Callable[[], bool] = lambda: False,
+               daily_minutes: Optional[int] = None) -> bool:
     """
-    Makes each video a weekly course of `per_week` parts a week. Parts already made (by a long summary or an earlier
-    course) are reused without an AI call. Prints progress for the job log.
+    Makes each video a course of `per_week` parts a week, or `daily_minutes` minutes a day when set. Parts already
+    made (by a long summary or an earlier course) are reused without an AI call. Prints progress for the job log.
     """
     import llm
     import storage
@@ -523,22 +564,37 @@ def run_course(video_ids: List[str], per_week: int, should_stop: Callable[[], bo
         if should_stop():
             print("Stopped. Courses so far are saved.")
             return False
-        if not storage.get_course(v["video_id"]):
+        course = storage.get_course(v["video_id"])
+        if not course or any(p.get("pending") for p in course["parts"]):
             segments = storage.get_segments(v["video_id"])
             if not segments:
                 print(f"   Skipped (no transcript yet: fetch details or transcribe it first): {v['title'][:60]}")
                 ok = False
                 continue
+            if not course:
+                spans = split_parts(v.get("duration_seconds") or 0, segments, v.get("chapters") or [])
+                course = {"parts": [{"start": start, "end": end, "pending": True} for start, end in spans]}
+                storage.save_parts(v["video_id"], course["parts"], model=llm.model_for(settings, "summarize"))
+                course = storage.get_course(v["video_id"])
+            storage.set_course_pace(v["video_id"], per_week)
             print(f"   Splitting into parts: {v['title'][:60]}")
+
+            def on_part(i, part):
+                course["parts"][i] = part
+                storage.save_parts(v["video_id"], course["parts"], model=llm.model_for(settings, "summarize"), keep_progress=True)
+
             try:
                 complete = complete or llm.make_completer(settings, "summarize")
-                parts = summarize_parts(v, segments, settings, complete,
-                                        llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE), should_stop)
+                summarize_parts(v, segments, settings, complete,
+                               llm.context_chars(settings, "summarize", CHAR_BUDGET_REMOTE), should_stop,
+                               parts=course["parts"],
+                               on_part=on_part)
             except LLMError as e:
                 print(f"Error: {e}")
                 return False
-            storage.save_parts(v["video_id"], parts, model=llm.model_for(settings, "summarize"))
         storage.set_course_pace(v["video_id"], per_week)
+        if daily_minutes is not None:
+            storage.set_course_daily(v["video_id"], daily_minutes)
         n = len(storage.get_course(v["video_id"])["parts"])
         print(f"   Course ready: {n} parts, {-(-n // per_week)} weeks at {per_week} a week: {v['title'][:60]}")
     return ok

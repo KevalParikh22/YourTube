@@ -327,11 +327,14 @@ def init_db(db_path: str = DB_PATH) -> None:
                 video_id TEXT PRIMARY KEY,
                 parts TEXT NOT NULL DEFAULT '[]',
                 per_week INTEGER,
+                daily_minutes INTEGER,
                 progress TEXT NOT NULL DEFAULT '{}',
                 model TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        if "daily_minutes" not in _columns(cursor, "courses"):
+            cursor.execute("ALTER TABLE courses ADD COLUMN daily_minutes INTEGER")
         # Videos the user removed from YourTube: a playlist sync skips them (see remove_videos)
         cursor.execute("CREATE TABLE IF NOT EXISTS removed_videos (video_id TEXT PRIMARY KEY, removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         asks = _columns(cursor, "ask_history")
@@ -1994,18 +1997,19 @@ def summary_times(db_path: str = DB_PATH) -> Dict[str, str]:
 
 # --- Courses (a long video in parts, followed week by week) ----------------------------------
 
-def save_parts(video_id: str, parts: List[Dict[str, Any]], model: str = "", db_path: str = DB_PATH) -> None:
+def save_parts(video_id: str, parts: List[Dict[str, Any]], model: str = "", db_path: str = DB_PATH, keep_progress: bool = False) -> None:
     """Saves a video's parts; a course on it keeps its weekly pace, its progress starts again (the parts changed)."""
     init_db(db_path)
     with get_connection(db_path) as conn:
-        conn.execute("""INSERT INTO courses (video_id, parts, model) VALUES (?, ?, ?)
-                        ON CONFLICT(video_id) DO UPDATE SET parts = excluded.parts, model = excluded.model, progress = '{}',
-                                                            created_at = CURRENT_TIMESTAMP""",
+        update = ("parts = excluded.parts, model = excluded.model" if keep_progress else
+                  "parts = excluded.parts, model = excluded.model, progress = '{}', created_at = CURRENT_TIMESTAMP")
+        conn.execute(f"INSERT INTO courses (video_id, parts, model) VALUES (?, ?, ?) "
+                     f"ON CONFLICT(video_id) DO UPDATE SET {update}",
                      (video_id, json.dumps(parts, ensure_ascii=False), model))
         conn.commit()
 
 def get_course(video_id: str, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
-    """{'video_id', 'parts', 'per_week' (None: parts only, no course yet), 'progress', 'model', 'created_at'} or None."""
+    """{'video_id', 'parts', 'per_week' (None: parts only, no course yet), 'daily_minutes', 'progress', 'model', 'created_at'} or None."""
     init_db(db_path)
     with get_connection(db_path) as conn:
         r = conn.execute("SELECT * FROM courses WHERE video_id = ?", (video_id,)).fetchone()
@@ -2016,6 +2020,14 @@ def set_course_pace(video_id: str, per_week: Optional[int], db_path: str = DB_PA
     init_db(db_path)
     with get_connection(db_path) as conn:
         n = conn.execute("UPDATE courses SET per_week = ? WHERE video_id = ?", (per_week, video_id)).rowcount
+        conn.commit()
+    return n > 0
+
+def set_course_daily(video_id: str, minutes: Optional[int], db_path: str = DB_PATH) -> bool:
+    """Minutes a day for the course (None: weekly pace). False when the video has no course row."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        n = conn.execute("UPDATE courses SET daily_minutes = ? WHERE video_id = ?", (minutes, video_id)).rowcount
         conn.commit()
     return n > 0
 
@@ -2036,11 +2048,12 @@ def set_course_progress(video_id: str, key: str, done: bool, db_path: str = DB_P
     return progress
 
 def list_courses(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
-    """Courses being followed: [{'video_id', 'per_week', 'parts', 'done'}] (parts and parts watched, as counts)."""
+    """Courses being followed: [{'video_id', 'per_week', 'daily_minutes', 'parts', 'done'}] (parts and parts watched, as counts)."""
     init_db(db_path)
     with get_connection(db_path) as conn:
-        rows = conn.execute("SELECT video_id, per_week, parts, progress FROM courses WHERE per_week IS NOT NULL ORDER BY created_at DESC").fetchall()
-    return [{"video_id": r["video_id"], "per_week": r["per_week"], "parts": len(json.loads(r["parts"])),
+        rows = conn.execute("SELECT video_id, per_week, daily_minutes, parts, progress FROM courses WHERE per_week IS NOT NULL ORDER BY created_at DESC").fetchall()
+    return [{"video_id": r["video_id"], "per_week": r["per_week"], "daily_minutes": r["daily_minutes"],
+             "parts": len(json.loads(r["parts"])),
              "done": sum(k.startswith("p") for k in json.loads(r["progress"]))} for r in rows]
 
 # --- Knowledge pages (Phase 3) -------------------------------------------------------------
