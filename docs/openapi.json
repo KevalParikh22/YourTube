@@ -14,6 +14,7 @@
   "tags": [
     {"name": "Library", "description": "Playlists and video library management"},
     {"name": "Videos", "description": "Video details, metadata, transcripts, and status"},
+    {"name": "Channels", "description": "Followed channels whose new uploads are added and processed by themselves"},
     {"name": "Categories", "description": "Taxonomy management and categorization rules"},
     {"name": "AI", "description": "AI provider configuration, category discovery, rating, and summarization"},
     {"name": "Ask", "description": "Question answering and conversational inquiry over the library"},
@@ -1812,6 +1813,50 @@
         }
       }
     },
+    "/api/video/activity": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "What ran on a video (details, transcription, slides, rating, summary), when, with which model, and its cloud AI tokens and cost",
+        "operationId": "getVideoActivity",
+        "parameters": [
+          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "Steps, newest first (empty when nothing ran); tokens and cost are null when unknown or no cloud AI was used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "activity": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "kind": {"type": "string", "enum": ["details", "asr", "visual", "rate", "summarize"]},
+                          "at": {"type": "string", "description": "UTC, YYYY-MM-DD HH:MM:SS"},
+                          "ok": {"type": "integer", "enum": [0, 1]},
+                          "model": {"type": ["string", "null"]},
+                          "note": {"type": ["string", "null"], "description": "Error, or the outcome when not a plain success"},
+                          "tokens_in": {"type": ["integer", "null"]},
+                          "tokens_out": {"type": ["integer", "null"]},
+                          "cost": {"type": ["number", "null"], "description": "Approximate USD"}
+                        },
+                        "required": ["kind", "at", "ok"]
+                      }
+                    }
+                  },
+                  "required": ["activity"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
     "/api/video": {
       "get": {
         "tags": ["Videos"],
@@ -1936,6 +1981,143 @@
           "403": {"$ref": "#/components/responses/Error403"},
           "500": {"$ref": "#/components/responses/Error500"},
           "503": {"$ref": "#/components/responses/Error503"}
+        }
+      }
+    },
+    "/api/channels": {
+      "get": {
+        "tags": ["Channels"],
+        "summary": "Followed channels, the check interval and when the next check runs",
+        "operationId": "getChannels",
+        "responses": {
+          "200": {
+            "description": "Followed channels",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "channels": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {"type": "string", "description": "YouTube channel ID (UC…)"},
+                          "title": {"type": "string"},
+                          "library_id": {"type": "integer"},
+                          "auto": {"type": "string", "enum": ["add", "details", "rate", "summarize"]},
+                          "videos": {"type": "integer", "description": "Videos added from it so far"},
+                          "followed_at": {"type": "string"},
+                          "last_checked": {"type": ["string", "null"]},
+                          "last_error": {"type": ["string", "null"]}
+                        }
+                      }
+                    },
+                    "hours": {"type": "integer"},
+                    "hour_choices": {"type": "array", "items": {"type": "integer"}},
+                    "next_check": {"type": ["string", "null"], "description": "Local time of the waiting check"}
+                  },
+                  "required": ["channels", "hours", "hour_choices", "next_check"]
+                }
+              }
+            }
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"}
+        }
+      }
+    },
+    "/api/channels/follow": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Queue following a channel: its current newest uploads are skipped, later uploads are added and processed per auto",
+        "operationId": "followChannel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "value": {"type": "string", "maxLength": 300, "description": "Channel link, @handle, channel ID, or a video link or ID (its channel)"},
+                  "auto": {"type": "string", "enum": ["add", "details", "rate", "summarize"], "default": "summarize"},
+                  "library": {"type": "integer"}
+                },
+                "required": ["value"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Follow task queued", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}},
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/channels/update": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Change what happens to a channel's new videos ({id, auto}), or how often channels are checked ({hours})",
+        "operationId": "updateChannel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "string"},
+                  "auto": {"type": "string", "enum": ["add", "details", "rate", "summarize"]},
+                  "hours": {"type": "integer", "enum": [1, 3, 6, 12, 24]}
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {"description": "Saved", "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}, "hours": {"type": "integer"}}, "required": ["ok"]}}}},
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/channels/unfollow": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Stop following a channel; its videos already added stay",
+        "operationId": "unfollowChannel",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {"application/json": {"schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}}}
+        },
+        "responses": {
+          "200": {"description": "Unfollowed", "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}, "required": ["ok"]}}}},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/channels/check": {
+      "post": {
+        "tags": ["Channels"],
+        "summary": "Queue a check of every followed channel now",
+        "operationId": "checkChannels",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "responses": {
+          "200": {"description": "Check queued", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/JobQueued"}}}},
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
         }
       }
     },

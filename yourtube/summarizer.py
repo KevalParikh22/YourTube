@@ -159,8 +159,9 @@ def _summarize_one(video: Dict[str, Any], complete: Callable[[str, str], str], b
     segments = storage.get_segments(video["video_id"])
     if not segments:
         return None
-    summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget)
-    storage.save_summary(video["video_id"], summary, model=model)
+    with storage.video_step(video["video_id"], "summarize", model):
+        summary = summarize_video(video, segments, settings, complete, candidates(video["video_id"], video, segments), budget)
+        storage.save_summary(video["video_id"], summary, model=model)
     return summary
 
 

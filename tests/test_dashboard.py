@@ -49,6 +49,23 @@ class DashboardTest(unittest.TestCase):
         self.assertTrue({"a", "b"} <= {v["video_id"] for v in state["videos"]})   # other tests share this DB
         self.assertIn("ai", state)
         self.assertFalse(state["ai"]["ready"])
+        self.assertIn("indexed", state)
+        self.assertIsInstance(state["indexed"], list)
+
+    def test_state_indexed_fallback_when_model_name_raises(self):
+        import embedder
+        with mock.patch.object(embedder, "model_name", side_effect=Exception("model lookup failed")):
+            code, state = self.call("/api/state")
+            self.assertEqual(code, 200)
+            self.assertEqual(state["indexed"], [])
+
+    def test_video_activity(self):
+        storage.add_activity("a", "index", True, "model-x", "2 pieces")
+        code, body = self.call("/api/video/activity?id=a")
+        self.assertEqual(code, 200)
+        self.assertIn("activity", body)
+        self.assertIsInstance(body["activity"], list)
+        self.assertTrue(any(act.get("kind") == "index" and act.get("note") == "2 pieces" for act in body["activity"]))
 
     def test_csrf_and_host_checks(self):
         self.assertEqual(self.call("/api/reclassify", {}, {"X-YTKB": "0"})[0], 403)
@@ -264,6 +281,93 @@ class DashboardTest(unittest.TestCase):
         with mock.patch("llm.is_configured", return_value=True), mock.patch.object(dashboard.JOB, "start", side_effect=fake):
             code, body = self.call("/api/summarize", {"ids": ["n_short", "n_long"]})
         self.assertEqual(([at for _, at in calls], "night" in body), ([None], False))   # off: one task, now
+
+    def _no_channels(self):
+        with storage.get_connection() as conn:
+            conn.execute("DELETE FROM channels")
+            conn.commit()
+
+    def test_followed_channel_check_adds_only_new_uploads_and_queues_their_ai(self):
+        self._no_channels()
+        self.addCleanup(self._no_channels)
+        cid = "UC" + "a" * 22
+        storage.follow_channel(cid, "Teacher", ["old1", "old2"], library_id=1, auto="summarize")
+        latest = [video("new1", "Fresh lesson", duration=600), video("old1", "Old lesson"), video("old2", "Older lesson")]
+        queued, scheduled = [], []
+        with mock.patch("extractor.read_latest_uploads", return_value=latest), \
+                mock.patch("enrich.run_enrich") as enrich, \
+                mock.patch("llm.is_configured", return_value=True), \
+                mock.patch.object(dashboard, "_queue_split", side_effect=lambda kind, action, ids, run: queued.append((kind, ids))), \
+                mock.patch.object(dashboard, "_schedule_channel_check", side_effect=lambda *a, **k: scheduled.append(1)), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertTrue(dashboard._check_channels())
+        self.assertIn("Teacher: Fresh lesson", out.getvalue())
+        items = [v["video_id"] for v in storage.get_all_videos(storage.channel_source(cid))]
+        self.assertEqual(items, ["new1"])                                   # the uploads already there aren't added
+        self.assertEqual(enrich.call_args.kwargs["video_ids"], ["new1"])
+        self.assertEqual(queued, [("rate", ["new1"]), ("summarize", ["new1"])])
+        self.assertEqual(scheduled, [1])                                    # the next check is queued
+        ch = storage.get_channels()[0]
+        self.assertEqual((ch["seen"][:3], ch["videos"], ch["last_error"]), (["new1", "old1", "old2"], 1, None))
+        self.assertIsNotNone(ch["last_checked"])
+
+    def test_channel_that_cannot_be_read_keeps_its_error_and_the_rest_go_on(self):
+        self._no_channels()
+        self.addCleanup(self._no_channels)
+        storage.follow_channel("UC" + "b" * 22, "Gone", [], auto="add")
+        with mock.patch("extractor.read_latest_uploads", side_effect=ValueError("This channel does not exist")), \
+                mock.patch.object(dashboard, "_schedule_channel_check"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(dashboard._check_channels())
+        self.assertEqual(storage.get_channels()[0]["last_error"], "This channel does not exist")
+
+    def test_channel_checks_are_scheduled_once(self):
+        self._no_channels()
+        self.addCleanup(self._no_channels)
+        job = dashboard.Job()
+        with mock.patch.object(dashboard, "JOB", job):
+            self.assertIsNone(dashboard._schedule_channel_check())          # nothing followed: no check
+            storage.follow_channel("UC" + "c" * 22, "Someone", [])
+            self.assertIsNotNone(dashboard._schedule_channel_check(minutes=2))
+            self.assertIsNone(dashboard._schedule_channel_check())          # one already waits
+            [t] = job.snapshot()["queue"]
+            self.assertEqual((t["kind"], t["not_before"] is not None), ("channels", True))
+            job.request_stop(t["id"])
+
+    def test_channel_endpoints(self):
+        self._no_channels()
+        self.addCleanup(self._no_channels)
+        saved = llm.load_settings()
+        self.addCleanup(llm.save_settings, saved)
+        self.assertEqual(self.call("/api/channels/follow", {"value": ""})[0], 400)
+        self.assertEqual(self.call("/api/channels/follow", {"value": "@x", "auto": "everything"})[0], 400)
+        self.assertEqual(self.call("/api/channels/check", {})[0], 400)        # nothing followed yet
+        started = []
+        with mock.patch.object(dashboard.JOB, "start", side_effect=lambda kind, label, fn, key=None, not_before=None: started.append((kind, label, fn)) or {"id": 77, "position": 0}):
+            self.assertEqual(self.call("/api/channels/follow", {"value": "@Teacher", "auto": "rate"})[0], 200)
+        kind, label, fn = started[0]
+        self.assertEqual((kind, label), ("channels", "Follow channel: @Teacher"))
+        cid = "UC" + "d" * 22
+        with mock.patch("extractor.resolve_channel", return_value={"id": cid, "title": "Teacher"}), \
+                mock.patch("extractor.read_latest_uploads", return_value=[video("t1"), video("t2")]), \
+                mock.patch.object(dashboard, "_schedule_channel_check"), contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(fn())
+        code, body = self.call("/api/channels")
+        self.assertEqual(code, 200)
+        self.assertEqual([(c["id"], c["title"], c["auto"], c["videos"]) for c in body["channels"]], [(cid, "Teacher", "rate", 0)])
+        self.assertNotIn("seen", body["channels"][0])
+        self.assertEqual(self.call("/api/channels/update", {"id": cid, "auto": "add"}), (200, {"ok": True}))
+        self.assertEqual(storage.get_channels()[0]["auto"], "add")
+        self.assertEqual(self.call("/api/channels/update", {"hours": 5})[0], 400)
+        with mock.patch.object(dashboard, "_schedule_channel_check"):
+            self.assertEqual(self.call("/api/channels/update", {"hours": 12}), (200, {"ok": True, "hours": 12}))
+        self.assertEqual(self.call("/api/channels")[1]["hours"], 12)
+        job = dashboard.Job()
+        with mock.patch.object(dashboard, "JOB", job):
+            dashboard._schedule_channel_check()
+            self.assertEqual(len(job.snapshot()["queue"]), 1)
+            self.assertEqual(self.call("/api/channels/unfollow", {"id": cid}), (200, {"ok": True}))
+            self.assertEqual(job.snapshot()["queue"], [])                 # last channel gone: its check too
+        self.assertEqual(self.call("/api/channels/unfollow", {"id": cid})[0], 404)
 
     def test_run_now_endpoint(self):
         self.assertEqual(self.call("/api/job/run-now", {"id": "x"})[0], 400)

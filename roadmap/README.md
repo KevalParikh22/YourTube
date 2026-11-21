@@ -28,10 +28,10 @@ Unclear items, need the reporter's input before planning:
 | Token use tracking and cutting it down (**tracking done**) | [token-tracking.md](token-tracking.md) | M |
 | One output language for every video | [language-consistency.md](language-consistency.md) | S |
 | Schedule big summaries for the night (**queue done**) | [off-peak-queue.md](off-peak-queue.md) | M |
-| Follow channels, summarise new videos automatically | [channel-follow.md](channel-follow.md) | L |
+| Follow channels, summarise new videos automatically (**done**, Home list open) | [channel-follow.md](channel-follow.md) | L |
 | Whole channel into the knowledge base | [channel-knowledge.md](channel-knowledge.md) | M |
 | A 4–5 hour video becomes a weekly course | [video-course.md](video-course.md) | L |
-| Per-video activity history | [video-activity.md](video-activity.md) | S |
+| Per-video activity history (**done**) | [video-activity.md](video-activity.md) | S |
 | Recommendations from how you choose and drop videos | [taste-model.md](taste-model.md) | XL |
 
 Suggested order: fixes 1–5 and 7 (small, user-visible), then 3+6 together, 2, 8; then token tracking (needed by off-peak and course), off-peak queue, channel follow, channel knowledge, course, taste model.
