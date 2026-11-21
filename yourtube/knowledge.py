@@ -1,5 +1,6 @@
 """
 Knowledge pages (Phase 3): one page per category of a library, combining the summaries of its videos.
+With a channel (a followed channel's ID), the pages cover only that channel's videos and are saved apart.
 Every point cites numbered sources (a video, and a moment when there is one); citations are checked
 in code. A page is stale when the category's summarised videos (or their summaries) change.
 """
@@ -15,15 +16,29 @@ SYSTEM = ("You write a study page that combines notes from several of the learne
 MAX_SECTIONS, MAX_POINTS, MAX_QUESTIONS = 8, 8, 5
 
 
-def _videos(library: int, category: str) -> List[Dict[str, Any]]:
+def page_key(category: str, channel: Optional[str] = None) -> str:
+    """The topic_pages key: the category, or '_channel-<id>/<category>' for a channel's page."""
     import storage
-    return [v for v in storage.get_library() if v["library"] == library and v["category"] == category]
+    return f"{storage.channel_source(channel)}/{category}" if channel else category
 
 
-def summaries_hash(library: int, category: str) -> Tuple[str, List[Dict[str, Any]]]:
+def _in_scope(library: int, channel: Optional[str] = None) -> List[Dict[str, Any]]:
+    """The library's videos, or (with a channel) the videos in that channel's source, whatever their library."""
+    import storage
+    if channel:
+        source = storage.channel_source(channel)
+        return [v for v in storage.get_library() if any(s["id"] == source for s in v["sources"])]
+    return [v for v in storage.get_library() if v["library"] == library]
+
+
+def _videos(library: int, category: str, channel: Optional[str] = None) -> List[Dict[str, Any]]:
+    return [v for v in _in_scope(library, channel) if v["category"] == category]
+
+
+def summaries_hash(library: int, category: str, channel: Optional[str] = None) -> Tuple[str, List[Dict[str, Any]]]:
     """(hash of the summarised videos and their summary times, [(video, summary)]) for a category."""
     import storage
-    pairs = [(v, storage.get_summary(v["video_id"])) for v in _videos(library, category)]
+    pairs = [(v, storage.get_summary(v["video_id"])) for v in _videos(library, category, channel)]
     pairs = [(v, s) for v, s in pairs if s]
     return _digest({v["video_id"]: s["created_at"] for v, s in pairs}), pairs
 
@@ -117,12 +132,12 @@ def validate(raw: Any, count: int) -> Dict[str, Any]:
 
 
 def build_page(library: int, category: str, settings: Optional[Dict[str, Any]] = None,
-               complete: Optional[Callable[[str, str], str]] = None) -> Dict[str, Any]:
+               complete: Optional[Callable[[str, str], str]] = None, channel: Optional[str] = None) -> Dict[str, Any]:
     """Builds and saves the page; returns it. Raises LLMError (e.g. no summarised videos)."""
     import llm
     import storage
     settings = settings or llm.load_settings()
-    digest, pairs = summaries_hash(library, category)
+    digest, pairs = summaries_hash(library, category, channel)
     if not pairs:
         raise LLMError("No video in this category has a summary yet. Summarise some first.")
     budget = max(4_000, llm.context_chars(settings, "summarize") - 6_000)
@@ -130,22 +145,24 @@ def build_page(library: int, category: str, settings: Optional[Dict[str, Any]] =
     complete = complete or llm.make_completer(settings, "summarize")
     page = validate(parse_json(complete(SYSTEM, build_prompt(category, items, settings.get("language") or "English"))), len(items))
     page["shortened"] = shortened
-    storage.save_page(library, category, page, items, digest, llm.model_for(settings, "summarize"))
+    storage.save_page(library, page_key(category, channel), page, items, digest, llm.model_for(settings, "summarize"))
     return page
 
 
-def status(library: int) -> List[Dict[str, Any]]:
+def status(library: int, channel: Optional[str] = None) -> List[Dict[str, Any]]:
     """Per category: {'category', 'videos', 'summarised', 'page': 'none'|'ready'|'stale', 'built_at'}."""
     import storage
     from classifier import FALLBACK_CATEGORY, load_taxonomy
-    videos = [v for v in storage.get_library() if v["library"] == library]
+    videos = _in_scope(library, channel)
     done = storage.summary_times()   # one query, not one library load per category
-    pages = {p["category"]: p for p in storage.list_pages(library)}
+    prefix = page_key("", channel)
+    pages = {p["category"][len(prefix):]: p for p in storage.list_pages(library)
+             if p["category"].startswith(prefix) and (channel or not p["category"].startswith("_channel-"))}
     names = list(load_taxonomy(library=library)) + sorted({v["category"] for v in videos} - set(load_taxonomy(library=library)))
     out = []
     for name in names:
         in_cat = [v for v in videos if v["category"] == name]
-        if not in_cat and name != FALLBACK_CATEGORY and name not in pages:
+        if not in_cat and (channel or name != FALLBACK_CATEGORY) and name not in pages:
             continue
         page = pages.get(name)
         digest = _digest({v["video_id"]: done[v["video_id"]] for v in in_cat if v["video_id"] in done})
@@ -155,11 +172,11 @@ def status(library: int) -> List[Dict[str, Any]]:
     return out
 
 
-def run_build(library: int, category: str) -> bool:
+def run_build(library: int, category: str, channel: Optional[str] = None) -> bool:
     """Job entry point: prints progress for the job log."""
     print(f"Building the knowledge page for {category}…")
     try:
-        page = build_page(library, category)
+        page = build_page(library, category, channel=channel)
     except LLMError as e:
         print(f"Error: {e}")
         return False
@@ -167,6 +184,22 @@ def run_build(library: int, category: str) -> bool:
     print(f"Knowledge page ready: {len(page['sections'])} sections, {points} cited points"
           + (" (older videos shortened to fit the model)" if page["shortened"] else "") + ".")
     return True
+
+
+def run_build_all(library: int, channel: Optional[str] = None) -> bool:
+    """Build every stale page and every unbuilt topic with enough summaries."""
+    rows = status(library, channel)
+    categories = [row["category"] for row in rows
+                  if row["page"] == "stale" or (row["page"] == "none" and row["summarised"] >= 3)]
+    print(f"Knowledge pages: {len(categories)} to build.")
+    if not categories:
+        print("Nothing to build: every page is up to date.")
+        return True
+    ok = True
+    for category in categories:
+        if not run_build(library, category, channel):
+            ok = False
+    return ok
 
 
 def page_markdown(category: str, page: Dict[str, Any], items: List[Dict[str, Any]]) -> str:

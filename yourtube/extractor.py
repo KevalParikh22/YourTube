@@ -112,8 +112,8 @@ def resolve_channel(value: str) -> Dict[str, str]:
         raise ValueError("YouTube did not return a channel for this link")
     return {"id": cid, "title": info.get("channel") or info.get("uploader") or info.get("title") or cid}
 
-def read_latest_uploads(channel_id: str, count: int = 15) -> List[Dict[str, Any]]:
-    """The channel's newest uploads (its 'UU…' uploads playlist, newest first), read anonymously, as video dicts."""
+def read_latest_uploads(channel_id: str, count: Optional[int] = 15) -> List[Dict[str, Any]]:
+    """The channel's newest uploads (its 'UU…' uploads playlist, newest first; count None: all), read anonymously."""
     url = f"https://www.youtube.com/playlist?list=UU{channel_id[2:]}"
     raw = _read_playlist_once(url, {"playlistend": count})   # extra yt-dlp options go in the same dict as cookies
     return _parse_playlist(raw, url, None)["videos"]

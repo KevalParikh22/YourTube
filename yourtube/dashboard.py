@@ -34,7 +34,7 @@ import files
 import voice
 import interests_ai
 from classifier import load_taxonomy, save_taxonomy, classify_video, FALLBACK_CATEGORY
-from exporter import videos_to_csv, video_markdown, markdown_zip, safe_filename
+from exporter import videos_to_csv, video_markdown, course_markdown, markdown_zip, safe_filename
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(ROOT_DIR, "web")
@@ -93,7 +93,7 @@ def _same(a, b):
     return hmac.compare_digest(str(a).encode("utf-8"), str(b).encode("utf-8"))
 
 LANES = ("youtube", "local", "cloud")   # reading YouTube, this computer's GPU/CPU, cloud AI: one task each at a time
-_AI_TASK = {"rate": "rate", "knowledge": "rate", "summarize": "summarize", "suggest": "categorize", "discover": "categorize"}
+_AI_TASK = {"rate": "rate", "knowledge": "rate", "summarize": "summarize", "course": "summarize", "suggest": "categorize", "discover": "categorize"}
 _MEDIA_TASK = {"asr": "transcribe", "visual": "slides", "embed": "embed"}
 
 def lane_for(kind, settings):
@@ -540,6 +540,110 @@ def _check_channels():
     finally:
         _schedule_channel_check()
 
+CHANNEL_BIG = 500              # a whole-channel import this big summarises at night, whatever the video lengths
+CHANNEL_PAGES_RETRY_MINUTES = 30
+_UPLOADS = {}                  # channel id -> (read at, all uploads): the estimate's read, reused by the import
+
+def _build_channel_pages(channel_id, library):
+    """Build channel knowledge pages once its queued summaries have finished."""
+    import knowledge
+    title = next((c["title"] for c in storage.get_channels() if c["id"] == channel_id), channel_id)
+    snapshot = JOB.snapshot()
+    summarizing = (any(lane["running"] and lane["kind"] == "summarize" for lane in snapshot["lanes"]) or
+                   any(task["kind"] == "summarize" for task in snapshot["queue"]))
+    if summarizing:
+        at = (datetime.now() + timedelta(minutes=CHANNEL_PAGES_RETRY_MINUTES)).isoformat(timespec="seconds")
+        JOB.start("knowledge", f"Knowledge pages: {title}", lambda: _build_channel_pages(channel_id, library),
+                  key=["channel-pages", channel_id, at], not_before=at)
+        print(f"Knowledge pages wait for {title}'s summaries; trying again at {at}.")
+        return True
+    built = 0
+    for row in knowledge.status(library, channel_id):
+        if JOB.stop_requested():
+            break
+        if row["summarised"] >= 3 and row["page"] != "ready":
+            built += bool(knowledge.run_build(library, row["category"], channel_id))
+    print(f"Built {built} knowledge page{'' if built == 1 else 's'} for {title}.")
+    return True
+
+def _channel_uploads(channel_id):
+    """All of a channel's uploads, newest first; read again after an hour."""
+    import time
+    from extractor import read_latest_uploads
+    hit = _UPLOADS.get(channel_id)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    videos = read_latest_uploads(channel_id, None)
+    _UPLOADS[channel_id] = (time.time(), videos)
+    return videos
+
+def _channel_estimate(channel_id):
+    """What importing a whole channel means: its videos, how many are new, and what summarising them costs."""
+    import summarizer
+    uploads = _channel_uploads(channel_id)
+    removed = storage.removed_video_ids()
+    uploads = [v for v in uploads if v["video_id"] not in removed]
+    have, done = {v["video_id"] for v in storage.get_all_videos(include_removed=True)}, storage.summary_times()
+    todo = [v for v in uploads if v["video_id"] not in done]
+    settings = llm.load_settings()
+    return {"videos": len(uploads), "new": sum(v["video_id"] not in have for v in uploads), "to_summarize": len(todo),
+            "hours": round(sum(v.get("duration_seconds") or 0 for v in uploads) / 3600, 1),
+            "summarize": summarizer.estimate_by_length([v.get("duration_seconds") or 0 for v in todo], settings),
+            "night": len(todo) >= CHANNEL_BIG, "night_at": _next_time(llm.night_settings(settings)["start"])}
+
+def _import_channel(channel_id):
+    """Adds all of a followed channel's uploads to its source, fetches their details, then queues their summaries."""
+    from classifier import classify_playlist_videos
+    from enrich import run_enrich
+    ch = next((c for c in storage.get_channels() if c["id"] == channel_id), None)
+    if not ch:
+        print("Error: this channel is not followed.")
+        return False
+    try:
+        uploads = _channel_uploads(channel_id)
+    except ValueError as e:
+        print(f"Error: could not read the channel: {e}")
+        return False
+    print(f"Importing {ch['title']}: {len(uploads)} videos.")
+    known = {v["video_id"]: v["category"] for v in storage.get_all_videos(include_removed=True)}
+    for v in uploads:
+        if v["channel"] == "Unknown Channel":
+            v["channel"] = ch["title"]
+    classify_playlist_videos([v for v in uploads if v["video_id"] not in known], load_taxonomy(library=ch["library_id"]))
+    for v in uploads:   # videos already in the library keep their category
+        v["category"] = known.get(v["video_id"], v["category"])
+    # Not partial: the list is the whole channel, and videos the user removed from YourTube stay out
+    counts = storage.save_playlist({"id": storage.channel_source(channel_id), "title": ch["title"], "url": ""},
+                                   uploads, library_id=ch["library_id"])
+    ids = [v["video_id"] for v in uploads]
+    storage.set_channel(channel_id, seen=ids[:storage.CHANNEL_SEEN_KEEP])
+    print(f"   {counts['added']} added, {len(ids) - counts['added']} already there.\n")
+    run_enrich(video_ids=ids, limit=len(ids), should_stop=JOB.stop_requested)
+    if JOB.stop_requested():
+        return True
+    done, settings = storage.summary_times(), llm.load_settings()
+    todo = [v["video_id"] for v in storage.get_all_videos(playlist_id=storage.channel_source(channel_id)) if v["video_id"] not in done]
+    if not todo:
+        print("Every video already has a summary. Build its knowledge pages on the Knowledge page.")
+        return True
+    if not llm.is_configured(settings, "summarize"):
+        print("No AI is set up for summaries in Settings → AI, so the videos wait for you.")
+        return True
+    at = _next_time(llm.night_settings(settings)["start"]) if len(todo) >= CHANNEL_BIG else None
+    for i in range(0, len(todo), 50):   # summaries take at most 50 videos per task
+        chunk, run = todo[i:i + 50], _summarize_task(_utc_now())
+        if at:
+            JOB.start("summarize", _label(f"Summarise {ch['title']} at night", chunk), run(chunk), key=["night"] + chunk, not_before=at)
+        else:
+            _queue_split("summarize", f"Summarise {ch['title']}", chunk, run)
+    retry_at = (datetime.now() + timedelta(minutes=CHANNEL_PAGES_RETRY_MINUTES)).isoformat(timespec="seconds")
+    JOB.start("knowledge", f"Knowledge pages: {ch['title']}",
+              lambda: _build_channel_pages(channel_id, ch["library_id"]), key=["channel-pages", channel_id],
+              not_before=at or retry_at)
+    print(f"Summarise: {len(todo)} videos queued" + (f", starting {at} (night queue)" if at else "") +
+          ". The channel's knowledge pages build by themselves after the summaries finish.")
+    return True
+
 # Task functions for _queue_split: run(since)(ids) -> the task. since: videos done after it are skipped (Retry, overlaps)
 def _rate_task(since):
     import rater
@@ -548,6 +652,10 @@ def _rate_task(since):
 def _summarize_task(since):
     import summarizer
     return lambda ids: lambda: summarizer.run_summarize(ids, should_stop=JOB.stop_requested, done_since=since)
+
+def _course_task(per_week, daily_minutes=None):
+    import summarizer
+    return lambda ids: lambda: summarizer.run_course(ids, per_week, should_stop=JOB.stop_requested, daily_minutes=daily_minutes)
 
 def _utc_now():
     """Now in SQLite's CURRENT_TIMESTAMP form, to compare with created_at columns."""
@@ -650,6 +758,7 @@ def build_state(library=1):
         "platform": sys.platform,
         "voice": _VOICE_AVAILABLE,
         "summarised": list(storage.summary_times()),   # video ids with a summary (Knowledge: Summarise 5)
+        "courses": storage.list_courses(),
         "indexed": indexed,
     }
 
@@ -667,8 +776,12 @@ class Handler(BaseHTTPRequestHandler):
     def _token_ok(self):
         if TOKEN is None:
             return True
-        morsel = SimpleCookie(self.headers.get("Cookie") or "").get(TOKEN_COOKIE)
+        jar = SimpleCookie(self.headers.get("Cookie") or "")
+        morsel = jar.get(self._cookie_name()) or jar.get(TOKEN_COOKIE)
         return morsel is not None and _same(morsel.value, TOKEN)
+
+    def _cookie_name(self):
+        return f"{TOKEN_COOKIE}_{self.server.server_port}"
 
     def _host_ok(self):
         host = (self.headers.get("Host") or "").rsplit(":", 1)[0].strip("[]")
@@ -763,7 +876,7 @@ class Handler(BaseHTTPRequestHandler):
             if not _same(qs["t"][0], TOKEN):
                 return self._send(200, self._token_help(), "text/html; charset=utf-8")
             # Swap the link's token for a cookie, then drop it from the address bar
-            cookie = f"{TOKEN_COOKIE}={TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000"
+            cookie = f"{self._cookie_name()}={TOKEN}; HttpOnly; SameSite=Strict; Path=/; Max-Age=31536000"
             return self._send(303, b"", "text/plain", extra_headers={"Location": "/", "Set-Cookie": cookie})
         if not self._token_ok():
             if url.path in ("/", "/index.html"):
@@ -976,10 +1089,11 @@ class Handler(BaseHTTPRequestHandler):
         if url.path in ("/api/knowledge", "/api/knowledge/page", "/api/export/knowledge"):
             import knowledge
             lib = _library((qs.get("library") or ["1"])[0]) or 1
+            channel = (qs.get("channel") or [""])[0] or None
             if url.path == "/api/knowledge":
-                return self._json({"library": lib, "categories": knowledge.status(lib)})
+                return self._json({"library": lib, "channel": channel, "categories": knowledge.status(lib, channel)})
             category = (qs.get("category") or [""])[0]
-            found = storage.get_page(lib, category)
+            found = storage.get_page(lib, knowledge.page_key(category, channel))
             if url.path == "/api/knowledge/page":
                 return self._json(found or {"page": None})
             if not found:
@@ -994,6 +1108,25 @@ class Handler(BaseHTTPRequestHandler):
             vid = (qs.get("id") or [""])[0]
             summary = storage.get_summary(vid)   # None: not summarised yet (not an error)
             return self._json({"summary": summary, "moments": summarizer.related_moments(vid, summary) if summary else {}})
+        if url.path == "/api/course":
+            return self._json({"course": storage.get_course((qs.get("id") or [""])[0])})
+        if url.path == "/api/course/markdown":
+            vid = (qs.get("id") or [""])[0]
+            v = next((x for x in storage.get_library() if x["video_id"] == vid), None)
+            course = storage.get_course(vid)
+            if v is None or not course:
+                return self._error("No course for this video", 404)
+            try:
+                speed = float((qs.get("speed") or ["1"])[0])
+            except ValueError:
+                speed = 1.0
+            if not 0.5 <= speed <= 4:   # anything outside the range falls back to normal speed
+                speed = 1.0
+            name = safe_filename("Course " + v["title"]) + ".md"
+            data = course_markdown(v, course, speed).encode("utf-8")
+            files.save_export(name, data)
+            return self._send(200, data, "text/markdown; charset=utf-8",
+                              extra_headers={"Content-Disposition": _attachment(name)})
         if url.path == "/api/video/activity":
             return self._json({"activity": storage.get_activity((qs.get("id") or [""])[0])})
         if url.path == "/api/video":
@@ -1122,6 +1255,18 @@ class Handler(BaseHTTPRequestHandler):
                         if t["kind"] == "channels" and t["not_before"]:
                             JOB.request_stop(t["id"])
                 return self._json({"ok": True})
+
+            if path in ("/api/channels/estimate", "/api/channels/import"):
+                cid = _clean(body.get("id")) or ""
+                if not any(c["id"] == cid for c in storage.get_channels()):
+                    return self._error("Not a followed channel", 404)
+                if path == "/api/channels/import":
+                    title = next(c["title"] for c in storage.get_channels() if c["id"] == cid)
+                    return self._queued(JOB.start("channels", f"Import all of {title}", lambda: _import_channel(cid), key=["import", cid]))
+                try:
+                    return self._json(_channel_estimate(cid))
+                except ValueError as e:
+                    return self._error(f"Could not read the channel: {e}", 502)
 
             if path == "/api/channels/check":
                 if not storage.get_channels():
@@ -1512,11 +1657,23 @@ class Handler(BaseHTTPRequestHandler):
                 category = _clean(body.get("category"))
                 if not isinstance(category, str) or not category:
                     return self._error("category is required")
-                target = lib or 1
+                target, channel = lib or 1, (_clean(body.get("channel")) if isinstance(body.get("channel"), str) else None) or None
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
                 return self._queued(JOB.start("knowledge", f"Knowledge page: {category}",
-                                              lambda: knowledge.run_build(target, category), key=[target, category]))
+                                              lambda: knowledge.run_build(target, category, channel),
+                                              key=[target, category, channel]))
+
+            if path == "/api/knowledge/build-all":
+                import knowledge
+                target, channel = lib or 1, (_clean(body.get("channel")) if isinstance(body.get("channel"), str) else None) or None
+                if not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                channel_title = next((c["title"] for c in storage.get_channels() if c["id"] == channel), channel)
+                label = "Knowledge pages: build all" + (f" for {channel_title}" if channel else "")
+                return self._queued(JOB.start("knowledge", label,
+                                              lambda: knowledge.run_build_all(target, channel),
+                                              key=[target, "all", channel]))
 
             if path in ("/api/summarize", "/api/summarize/estimate"):
                 import summarizer
@@ -1530,6 +1687,42 @@ class Handler(BaseHTTPRequestHandler):
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
                 return self._queued_split("summarize", "Summarise", ids, _summarize_task(_utc_now()))
+
+            if path == "/api/course":
+                vid, per_week = body.get("id"), body.get("per_week")
+                if not isinstance(vid, str) or not vid:
+                    return self._error("id is required")
+                if per_week is not None and (type(per_week) is not int or not 1 <= per_week <= 7):
+                    return self._error("per_week must be 1 to 7, or null to end the course")
+                daily = body.get("daily_minutes")
+                if "daily_minutes" in body and daily is not None and (type(daily) is not int or not 15 <= daily <= 240):
+                    return self._error("daily_minutes must be 15 to 240, or null")
+                course = storage.get_course(vid)
+                if course:
+                    pending = any(p.get("pending") for p in course["parts"])
+                    if per_week is not None and pending:
+                        if not llm.is_configured(llm.load_settings(), "summarize"):
+                            return self._error("Choose an AI for summaries in Settings → AI first")
+                        storage.set_course_pace(vid, per_week)
+                        if "daily_minutes" in body:
+                            storage.set_course_daily(vid, daily)
+                    else:
+                        storage.set_course_pace(vid, per_week)
+                        if "daily_minutes" in body:
+                            storage.set_course_daily(vid, daily)
+                        return self._json({"ok": True, "course": storage.get_course(vid)})
+                if per_week is None:
+                    return self._error("per_week must be 1 to 7 for a new course")
+                if not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                return self._queued_split("course", "Course", [vid], _course_task(per_week, daily))
+
+            if path == "/api/course/progress":
+                vid, key = body.get("id"), body.get("key")
+                if not isinstance(key, str) or not re.fullmatch(r"p\d+|a\d+\.\d+|q\d+\.\d+", key):
+                    return self._error("key must be p<part>, a<part>.<action>, or q<part>.<question>")
+                progress = storage.set_course_progress(vid if isinstance(vid, str) else "", key, bool(body.get("done")))
+                return self._json({"ok": True, "progress": progress}) if progress is not None else self._error("No course for this video", 404)
 
             if path == "/api/details/settings":
                 settings = llm.load_settings()
@@ -1645,6 +1838,11 @@ class Handler(BaseHTTPRequestHandler):
                         or not isinstance(start, str) or not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", start)):
                     return self._error("night needs on, minutes (10 to 1440) and start (HH:MM)")
                 settings["night"] = {"on": bool(night.get("on")), "minutes": minutes, "start": start}
+            if "daily_cap" in body:
+                cap = body["daily_cap"]
+                if cap is not None and (not isinstance(cap, (int, float)) or isinstance(cap, bool) or not 0 <= cap <= 1000):
+                    return self._error("daily_cap must be empty or a number from 0 to 1000")
+                settings["daily_cap"] = None if cap in (None, 0) else cap
             if body.get("asr_model") in ("auto", "large-v3-turbo", "small", "medium", "distil-large-v3"):
                 settings["asr_model"] = body["asr_model"]
             if isinstance(body.get("vision_model"), str) and re.fullmatch(r"[\w.\-/:]*", body["vision_model"]):
