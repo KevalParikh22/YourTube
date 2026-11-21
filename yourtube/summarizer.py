@@ -549,10 +549,11 @@ def related_moments(video_id: str, summary: Dict[str, Any], settings: Optional[D
     return out
 
 
-def run_course(video_ids: List[str], per_week: int, should_stop: Callable[[], bool] = lambda: False) -> bool:
+def run_course(video_ids: List[str], per_week: int, should_stop: Callable[[], bool] = lambda: False,
+               daily_minutes: Optional[int] = None) -> bool:
     """
-    Makes each video a weekly course of `per_week` parts a week. Parts already made (by a long summary or an earlier
-    course) are reused without an AI call. Prints progress for the job log.
+    Makes each video a course of `per_week` parts a week, or `daily_minutes` minutes a day when set. Parts already
+    made (by a long summary or an earlier course) are reused without an AI call. Prints progress for the job log.
     """
     import llm
     import storage
@@ -592,6 +593,8 @@ def run_course(video_ids: List[str], per_week: int, should_stop: Callable[[], bo
                 print(f"Error: {e}")
                 return False
         storage.set_course_pace(v["video_id"], per_week)
+        if daily_minutes is not None:
+            storage.set_course_daily(v["video_id"], daily_minutes)
         n = len(storage.get_course(v["video_id"])["parts"])
         print(f"   Course ready: {n} parts, {-(-n // per_week)} weeks at {per_week} a week: {v['title'][:60]}")
     return ok

@@ -50,33 +50,51 @@ def safe_filename(name: str, limit: int = 80) -> str:
     name = re.sub(r'[\\/:*?"<>|\x00-\x1f]+', " ", name or "").strip(" .")
     return (" ".join(name.split())[:limit].rstrip(" .") or "untitled")
 
-def course_markdown(v: Dict[str, Any], course: Dict[str, Any]) -> str:
-    """A video's weekly course (storage.get_course): weeks, parts with watch links, key points, and actions as checkboxes."""
+def course_markdown(v: Dict[str, Any], course: Dict[str, Any], speed: float = 1.0) -> str:
+    """A video's course (storage.get_course): days (daily pace) or weeks, parts with watch links, key points, and actions as checkboxes."""
     vid, done, per_week = v["video_id"], course.get("progress") or {}, course.get("per_week") or 1
+    daily = course.get("daily_minutes")
+    if daily is None:
+        groups = [(f"Week {i // per_week + 1}", list(range(i, min(i + per_week, len(course["parts"])))))
+                  for i in range(0, len(course["parts"]), per_week)]
+        pace = f"{per_week} a week"
+    else:
+        groups, cur, used = [], [], 0
+        for i, p in enumerate(course["parts"]):
+            length = (p["end"] - p["start"]) / speed / 60   # minutes at this playback speed
+            if cur and used + length > daily:       # a day always gets at least one part
+                groups.append((f"Day {len(groups) + 1}", cur))
+                cur, used = [], 0
+            cur.append(i)
+            used += length
+        if cur:
+            groups.append((f"Day {len(groups) + 1}", cur))
+        pace = f"{daily} min a day" + (f" at {speed:g}×" if speed != 1 else "")
     out = [f"# Course: {_md_text(v.get('title'))}", "",
            f"[▶ Watch on YouTube](https://www.youtube.com/watch?v={vid}) · {_md_text(v.get('channel'))} · {_length(v.get('duration_seconds'))}"
-           f" · {len(course['parts'])} parts, {per_week} a week", ""]
-    for i, p in enumerate(course["parts"]):
-        if i % per_week == 0:
-            out += [f"## Week {i // per_week + 1}", ""]
-        if p.get("pending"):
-            out += [f"### Part {i + 1} (not written yet)", "",
+           f" · {len(course['parts'])} parts, {pace}", ""]
+    for label, indexes in groups:
+        out += [f"## {label}", ""]
+        for i in indexes:
+            p = course["parts"][i]
+            if p.get("pending"):
+                out += [f"### Part {i + 1} (not written yet)", "",
+                        f"[Watch {_clock(p['start'])}–{_clock(p['end'])}]({_at(vid, p['start'])})", ""]
+                continue
+            out += [f"### {'✓ ' if done.get(f'p{i}') else ''}Part {i + 1}: {_md_text(p.get('title'))}", "",
                     f"[Watch {_clock(p['start'])}–{_clock(p['end'])}]({_at(vid, p['start'])})", ""]
-            continue
-        out += [f"### {'✓ ' if done.get(f'p{i}') else ''}Part {i + 1}: {_md_text(p.get('title'))}", "",
-                f"[Watch {_clock(p['start'])}–{_clock(p['end'])}]({_at(vid, p['start'])})", ""]
-        if p.get("summary"):
-            out += [_md_text(p["summary"]), ""]
-        out += [f"- [{_clock(x['t'])}]({_at(vid, x['t'])}) {_md_text(x['text'])}" for x in p.get("points") or []]
-        out += [f"- [{'x' if done.get(f'a{i}.{j}') else ' '}] {_md_text(a)}" for j, a in enumerate(p.get("actions") or [])]
-        if p.get("quiz"):
-            out += ["Check yourself:"]
-            for item in p["quiz"]:
-                right = item["options"][item["answer"]]
-                t = item.get("t")
-                link = f" ([{_clock(t)}]({_at(vid, t)}))" if t is not None else ""
-                out += [f"- {_md_text(item['q'])} → {_md_text(right)}{link}"]
-        out.append("")
+            if p.get("summary"):
+                out += [_md_text(p["summary"]), ""]
+            out += [f"- [{_clock(x['t'])}]({_at(vid, x['t'])}) {_md_text(x['text'])}" for x in p.get("points") or []]
+            out += [f"- [{'x' if done.get(f'a{i}.{j}') else ' '}] {_md_text(a)}" for j, a in enumerate(p.get("actions") or [])]
+            if p.get("quiz"):
+                out += ["Check yourself:"]
+                for item in p["quiz"]:
+                    right = item["options"][item["answer"]]
+                    t = item.get("t")
+                    link = f" ([{_clock(t)}]({_at(vid, t)}))" if t is not None else ""
+                    out += [f"- {_md_text(item['q'])} → {_md_text(right)}{link}"]
+            out.append("")
     return "\n".join(out)
 
 def video_markdown(v: Dict[str, Any], details: Dict[str, Any] = None, summary: Dict[str, Any] = None) -> str:

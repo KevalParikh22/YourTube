@@ -1913,14 +1913,14 @@
     "/api/course": {
       "get": {
         "tags": ["Videos"],
-        "summary": "Get a video's parts and weekly course with its progress",
+        "summary": "Get a video's parts and course with its progress",
         "operationId": "getCourse",
         "parameters": [
           {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
         ],
         "responses": {
           "200": {
-            "description": "The course: parts (start, end, title, summary, points, actions), per_week (null: parts only, no course yet) and progress ({\"p<i>\": true} part watched, {\"a<i>.<j>\": true} action done); course is null when the video has no parts",
+            "description": "The course: parts (start, end, title, summary, points, actions), per_week (null: parts only, no course yet), daily_minutes (minutes a day, or null for a weekly pace) and progress ({\"p<i>\": true} part watched, {\"a<i>.<j>\": true} action done); course is null when the video has no parts",
             "content": {"application/json": {"schema": {"type": "object", "properties": {"course": {"type": ["object", "null"]}}, "required": ["course"]}}}
           },
           "401": {"$ref": "#/components/responses/Error401"},
@@ -1941,7 +1941,8 @@
                 "type": "object",
                 "properties": {
                   "id": {"type": "string", "description": "Video ID"},
-                  "per_week": {"type": ["integer", "null"], "minimum": 1, "maximum": 7, "description": "Parts per week; null ends the course and keeps the parts"}
+                  "per_week": {"type": ["integer", "null"], "minimum": 1, "maximum": 7, "description": "Parts per week; null ends the course and keeps the parts"},
+                  "daily_minutes": {"type": ["integer", "null"], "minimum": 15, "maximum": 240, "description": "Minutes a day; null keeps a weekly pace. per_week is also required for a new course"}
                 },
                 "required": ["id", "per_week"]
               }
@@ -2000,7 +2001,8 @@
         "summary": "Export a video's weekly course as Markdown",
         "operationId": "exportCourseMarkdown",
         "parameters": [
-          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}}
+          {"name": "id", "in": "query", "required": true, "description": "Video ID", "schema": {"type": "string"}},
+          {"name": "speed", "in": "query", "required": false, "description": "Playback speed used to group days (0.5 to 4, default 1)", "schema": {"type": "number", "minimum": 0.5, "maximum": 4, "default": 1}}
         ],
         "responses": {
           "200": {

@@ -518,7 +518,7 @@ function viewHome() {
   ${newFromChannels.length ? `<section class="section home-card"><h2 class="h">New from followed channels</h2><ul class="rows">${newFromChannels.map(row).join('')}</ul></section>` : ''}
 
   ${(S.data.courses || []).length ? `<section class="section home-card"><h2 class="h">Courses</h2><ul class="rows">${S.data.courses.filter(c => byId(c.video_id)).map(c =>
-    `<li><a href="#/course?id=${encodeURIComponent(c.video_id)}">${esc(byId(c.video_id).title)}</a> <span class="faint">· ${c.done} of ${plural(c.parts, 'part')} watched · ${c.per_week} a week</span></li>`).join('')}</ul></section>` : ''}
+    `<li><a href="#/course?id=${encodeURIComponent(c.video_id)}">${esc(byId(c.video_id).title)}</a> <span class="faint">· ${c.done} of ${plural(c.parts, 'part')} watched · ${c.daily_minutes != null ? `${c.daily_minutes} min a day` : `${c.per_week} a week`}</span></li>`).join('')}</ul></section>` : ''}
 
   <section class="section home-card"><h2 class="h">Top picks</h2>
     ${!rated.length ? `<p class="note">Rate your videos to get picks. <button class="btn-text" data-act="rate-batch">Rate videos</button></p>`
@@ -2329,13 +2329,37 @@ function drawerRating(v) {
       · <button class="btn-text" style="padding:0;height:auto;font-size:12.5px" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate again</button></div>
   </div>`;
 }
-// A video longer than one part (40 min) can become a weekly course; parts made by a long summary are reused
+// A course is paced by parts a week or minutes a day; both pace selects use the same options.
+const COURSE_PACES = [
+  ...[1, 2, 3, 4, 5, 6, 7].map(n => [`w${n}`, `${n} part${n > 1 ? 's' : ''} a week`]),
+  ...[15, 20, 30, 45, 60, 90, 120].map(n => [`d${n}`, `${n} min a day`]),
+];
+const courseOptions = selected => COURSE_PACES.map(([v, l]) => `<option value="${v}" ${v === selected ? 'selected' : ''}>${l}</option>`).join('');
+const coursePace = (value, c) => String(value || '').startsWith('d')
+  ? { per_week: c?.per_week || 2, daily_minutes: +String(value).slice(1) }
+  : { per_week: +String(value || '').slice(1) || c?.per_week || 2, daily_minutes: null };
+const selectedCoursePace = c => c?.daily_minutes != null ? `d${c.daily_minutes}` : `w${c?.per_week || 2}`;
+// Minutes a day: walk the parts in order, starting a new day when the current one would go over the budget.
+// A day always gets at least one part. Returns arrays of part indexes.
+function courseDays(parts, minutes, speed) {
+  const days = [];
+  let day = [], used = 0;
+  parts.forEach((p, i) => {
+    const length = (p.end - p.start) / speed / 60;
+    if (day.length && used + length > minutes) { days.push(day); day = []; used = 0; }
+    day.push(i);
+    used += length;
+  });
+  if (day.length) days.push(day);
+  return days;
+}
+// A video longer than one part (40 min) can become a course; parts made by a long summary are reused
 function drawerCourse(v) {
   const c = (S.data.courses || []).find(x => x.video_id === v.video_id);
   if (c) return `<div class="kv-line">Course: ${c.done} of ${plural(c.parts, 'part')} watched. <a href="#/course?id=${encodeURIComponent(v.video_id)}" data-act="close">Open course →</a></div>`;
   if ((v.duration_seconds || 0) <= 40 * 60 || !S.data.ai.ready_for.summarize) return '';
-  return `<div class="kv-line">Too long to watch at once? <select id="d-course-pace" aria-label="Parts per week">${[1, 2, 3, 4].map(n => `<option value="${n}" ${n === 2 ? 'selected' : ''}>${n} part${n > 1 ? 's' : ''} a week</option>`).join('')}</select>
-    <button class="btn-text" style="padding:0;height:auto" data-act="course-make" data-id="${esc(v.video_id)}" data-job-btn>Make a weekly course</button>
+  return `<div class="kv-line">Too long to watch at once? <select id="d-course-pace" aria-label="Course pace">${courseOptions(selectedCoursePace(S.courses[v.video_id]))}</select>
+    <button class="btn-text" style="padding:0;height:auto" data-act="course-make" data-id="${esc(v.video_id)}" data-job-btn>Make a course</button>
     ${tip('Splits the video into 20–40 minute parts and summarises each with key points and things to do, using your summaries AI. With the night queue on, a long video waits for the night.')}</div>`;
 }
 const courseTaskFor = id => {
@@ -2357,9 +2381,9 @@ async function loadCourse(id) {
     }, 4000);
   }
 }
-async function setCourse(id, per_week) {
+async function setCourse(id, per_week, daily_minutes = null) {
   try {
-    const res = await api('/api/course', { id, per_week });
+    const res = await api('/api/course', { id, per_week, daily_minutes });
     if (res.course !== undefined) { S.courses[id] = res.course; await load({ keepEdits: true }); toast(per_week ? 'Course ready' : 'Course ended. The parts are kept.'); }
     else {
       await queued(res, 'Course');
@@ -2379,9 +2403,18 @@ function viewCourse(id) {
   if (c?.error) return back + `<p class="note">Could not load the course: ${esc(c.error)}</p>`;
   const active = courseTaskFor(id);
   if (!c && active) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">Splitting into parts…</p>`;
-  if (!c?.per_week) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">No course for this video yet. Open the video and choose <b>Make a weekly course</b>.</p>`;
+  if (!c?.per_week) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">No course for this video yet. Open the video and choose <b>Make a course</b>.</p>`;
   const done = c.progress || {}, n = c.parts.length, pending = c.parts.some(p => p.pending), written = c.parts.filter(p => !p.pending).length, weeks = Math.ceil(n / c.per_week);
-  const watched = c.parts.filter((_, i) => done['p' + i]).length;
+  const daily = c.daily_minutes != null, days = daily ? courseDays(c.parts, c.daily_minutes, S.speed) : [];
+  const watched = c.parts.filter((_, i) => done['p' + i]).length, unwatched = n - watched;
+  let finish = '';
+  if (unwatched) {
+    const ahead = daily ? courseDays(c.parts.filter((_, i) => !done['p' + i]), c.daily_minutes, S.speed).length
+                        : Math.ceil(unwatched / c.per_week) * 7;
+    const date = new Date();
+    date.setDate(date.getDate() + ahead - 1);
+    finish = ` · done by ${date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}`;
+  }
   const time = t => `<button class="time-link" data-act="play-at" data-id="${esc(id)}" data-t="${Math.floor(t)}">${clock(Math.floor(t))}</button>`;
   const box = (key, label, extra = '') => `<label class="keep"><input type="checkbox" data-change="course-progress" data-id="${esc(id)}" data-key="${key}" ${done[key] ? 'checked' : ''}${extra}> ${label}</label>`;
   const part = (p, i) => {
@@ -2409,23 +2442,23 @@ function viewCourse(id) {
         <button class="btn btn-sm" data-act="play-at" data-id="${esc(id)}" data-t="${p.start}">▶ Watch ${clock(p.start)}–${clock(p.end)}</button></div>
       ${p.summary ? `<p>${esc(p.summary)}</p>` : ''}
       ${(p.points || []).length ? `<ul>${p.points.map(x => `<li><div class="chap"><span>${time(x.t)}</span><span>${esc(x.text)}</span></div></li>`).join('')}</ul>` : ''}
-      ${(p.actions || []).length ? `<div class="field-label">Do this week</div>${p.actions.map((a, j) => `<div>${box(`a${i}.${j}`, esc(a))}</div>`).join('')}` : ''}
+      ${(p.actions || []).length ? `<div class="field-label">${daily ? 'Do today' : 'Do this week'}</div>${p.actions.map((a, j) => `<div>${box(`a${i}.${j}`, esc(a))}</div>`).join('')}` : ''}
       ${quizHtml}
     </li>`;
   };
   return `${back}<section>
-    <div class="eyebrow">Course · ${plural(weeks, 'week')} · ${pending ? `${written} of ${n} parts written` : plural(n, 'part')}</div>
-    <h1 class="display">${esc(v.title)}<em>${watched} of ${pending ? written : n} parts watched</em></h1>
+    <div class="eyebrow">Course · ${plural(daily ? days.length : weeks, daily ? 'day' : 'week')} · ${pending ? `${written} of ${n} parts written` : plural(n, 'part')}</div>
+    <h1 class="display">${esc(v.title)}<em>${watched} of ${pending ? written : n} parts watched${unwatched ? finish : ' · All watched'}</em></h1>
     <div class="meter"><i style="width:${(pending ? written : n) ? watched / (pending ? written : n) * 100 : 0}%"></i></div>
     <div class="actions" style="margin-top:14px">
-      <select data-change="course-pace" data-id="${esc(id)}" aria-label="Parts per week">${[1, 2, 3, 4, 5, 6, 7].map(k => `<option value="${k}" ${k === c.per_week ? 'selected' : ''}>${k} part${k > 1 ? 's' : ''} a week</option>`).join('')}</select>
-      <a class="btn btn-sm" href="/api/course/markdown?id=${encodeURIComponent(id)}" download>Export Markdown</a>
+      <select data-change="course-pace" data-id="${esc(id)}" aria-label="Course pace">${courseOptions(selectedCoursePace(c))}</select>
+      <a class="btn btn-sm" href="/api/course/markdown?id=${encodeURIComponent(id)}&speed=${S.speed}" download>Export Markdown</a>
       <button class="btn-text" data-act="course-end" data-id="${esc(id)}">End course</button>
     </div></section>
-    ${Array.from({ length: weeks }, (_, w) => {
-      const ps = c.parts.slice(w * c.per_week, (w + 1) * c.per_week), left = ps.filter((_, k) => !done['p' + (w * c.per_week + k)]).length;
-      return `<section class="section card"><h2 class="h">Week ${w + 1} <span class="faint" style="font-weight:400">· ${left ? `${left} to watch` : 'done ✓'} · ${fmt(ps.reduce((t, p) => t + p.end - p.start, 0) / S.speed)} at ${sx(S.speed)}</span></h2>
-        <ol class="course-parts" start="${w * c.per_week + 1}">${ps.map((p, k) => part(p, w * c.per_week + k)).join('')}</ol></section>`;
+    ${(daily ? days : Array.from({ length: weeks }, (_, w) => c.parts.slice(w * c.per_week, (w + 1) * c.per_week).map((_, k) => w * c.per_week + k))).map((indexes, w) => {
+      const left = indexes.filter(i => !done['p' + i]).length;
+      return `<section class="section card"><h2 class="h">${daily ? 'Day' : 'Week'} ${w + 1} <span class="faint" style="font-weight:400">· ${left ? `${left} to watch` : 'done ✓'} · ${fmt(indexes.reduce((t, i) => t + c.parts[i].end - c.parts[i].start, 0) / S.speed)} at ${sx(S.speed)}</span></h2>
+        <ol class="course-parts" start="${indexes[0] + 1}">${indexes.map(i => part(c.parts[i], i)).join('')}</ol></section>`;
     }).join('')}
     ${pending && !active ? `<p class="kv-line">Not finished. <button class="btn-text" data-act="course-continue" data-id="${esc(id)}">Continue</button></p>` : ''}
     <p class="kv-line">${esc(c.model || '')}</p>`;
@@ -2792,9 +2825,9 @@ document.addEventListener('click', async e => {
     case 'rate-one': startRate([id]); break;
     case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
-    case 'course-make': setCourse(id, +($('#d-course-pace')?.value || 2)); break;
-    case 'course-continue': setCourse(id, S.courses[id]?.per_week || 2); break;
-    case 'course-end': if (confirm('End this course? Its parts and summaries stay, your ticks are kept until the parts are made again.')) { await setCourse(id, null); location.hash = '#/home'; } break;
+    case 'course-make': { const p = coursePace($('#d-course-pace')?.value, S.courses[id]); setCourse(id, p.per_week, p.daily_minutes); break; }
+    case 'course-continue': { const c = S.courses[id] || {}; setCourse(id, c.per_week || 2, c.daily_minutes ?? null); break; }
+    case 'course-end': if (confirm('End this course? Its parts and summaries stay, your ticks are kept until the parts are made again.')) { await setCourse(id, null, null); location.hash = '#/home'; } break;
     case 'course-answer': {
       const part = el.dataset.part, q = el.dataset.q, opt = +el.dataset.opt;
       const course = S.courses[id];
@@ -3149,7 +3182,10 @@ document.addEventListener('change', async e => {
     await load(); if (route() === 'search' && S.search.q) runSearch();
     toast(S.lib ? `Library: ${libName(S.lib)}` : 'All libraries'); return;
   }
-  if (ch === 'course-pace') { await setCourse(el.dataset.id, +el.value); return; }
+  if (ch === 'course-pace') {
+    const p = coursePace(el.value, S.courses[el.dataset.id]);
+    await setCourse(el.dataset.id, p.per_week, p.daily_minutes); return;
+  }
   if (ch === 'course-progress') {
     try { const r = await api('/api/course/progress', { id: el.dataset.id, key: el.dataset.key, done: el.checked }); S.courses[el.dataset.id].progress = r.progress; }
     catch (err) { el.checked = !el.checked; toast(err.message, true); return; }

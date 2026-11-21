@@ -1,13 +1,14 @@
 import contextlib
 import io
 import json
+import sqlite3
 import unittest
 from unittest import mock
 
 import storage
 import summarizer
 from llm import LLMError
-from tests.helpers import playlist, video
+from tests.helpers import playlist, video, temp_db
 from tests import test_summarizer
 from tests.test_summarizer import GOOD as _GOOD
 
@@ -135,6 +136,30 @@ class PartsTest(unittest.TestCase):
         self.assertEqual(len(prompts), 1)
 
 
+class CourseStorageTest(unittest.TestCase):
+    def test_init_db_adds_daily_minutes_to_an_existing_courses_table(self):
+        path = temp_db()
+        with sqlite3.connect(path) as conn:
+            conn.execute("CREATE TABLE courses (video_id TEXT PRIMARY KEY, parts TEXT NOT NULL DEFAULT '[]', "
+                         "per_week INTEGER, progress TEXT NOT NULL DEFAULT '{}', model TEXT, "
+                         "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        storage.init_db(path)
+        with sqlite3.connect(path) as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(courses)")}
+        self.assertIn("daily_minutes", cols)
+        storage.save_parts("old-course", [{"start": 0, "end": 1800}], db_path=path)
+        self.assertIsNone(storage.get_course("old-course", db_path=path)["daily_minutes"])
+
+    def test_set_course_daily_round_trip_and_false_without_a_course(self):
+        path = temp_db()
+        storage.save_parts("daily-storage", [{"start": 0, "end": 1800}], db_path=path)
+        self.assertTrue(storage.set_course_daily("daily-storage", 30, db_path=path))
+        self.assertEqual(storage.get_course("daily-storage", db_path=path)["daily_minutes"], 30)
+        self.assertTrue(storage.set_course_daily("daily-storage", None, db_path=path))
+        self.assertIsNone(storage.get_course("daily-storage", db_path=path)["daily_minutes"])
+        self.assertFalse(storage.set_course_daily("no-course", 30, db_path=path))
+
+
 class CourseRunTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -173,6 +198,17 @@ class CourseRunTest(unittest.TestCase):
         self.assertFalse(any(p.get("pending") for p in storage.get_course("c-resume")["parts"]))
         storage.set_course_pace("c-resume", None)
 
+    def test_run_course_sets_daily_minutes_only_when_given(self):
+        storage.save_playlist(playlist("PLD"), [video("d-run", "Daily course", duration=HOUR)])
+        storage.save_parts("d-run", [summarizer.validate_part(PART, 0, 1800), summarizer.validate_part(PART, 1800, 3600)])
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(summarizer.run_course(["d-run"], 2, daily_minutes=45))
+        self.assertEqual(storage.get_course("d-run")["daily_minutes"], 45)
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertTrue(summarizer.run_course(["d-run"], 2))
+        self.assertEqual(storage.get_course("d-run")["daily_minutes"], 45)   # not cleared when omitted
+        storage.set_course_pace("d-run", None)
+
     def test_summary_ignores_pending_saved_parts(self):
         storage.save_playlist(playlist("PLC3"), [video("c-half-summary", "Half course", duration=HOUR)])
         storage.save_details("c-half-summary", {"status": "done", "segments": segments(HOUR)})
@@ -209,7 +245,7 @@ class CourseRunTest(unittest.TestCase):
         self.assertEqual(storage.set_course_progress("c4", "a0.1", True), {"p0": True, "a0.1": True})
         self.assertEqual(storage.set_course_progress("c4", "a0.1", False), {"p0": True})
         self.assertIsNone(storage.set_course_progress("c0", "p0", True))
-        self.assertEqual(storage.list_courses(), [{"video_id": "c4", "per_week": 2, "parts": n, "done": 1}])
+        self.assertEqual(storage.list_courses(), [{"video_id": "c4", "per_week": 2, "daily_minutes": None, "parts": n, "done": 1}])
         from exporter import course_markdown
         md = course_markdown(next(v for v in storage.get_library() if v["video_id"] == "c4"), storage.get_course("c4"))
         self.assertIn("## Week 2", md)
@@ -291,6 +327,88 @@ class CourseEndpointTest(test_summarizer.EndpointTest):
             self.assertIn("## Week 2", r.read().decode())
         code, r = self.call("/api/course", {"id": "e1", "per_week": None})       # end the course, keep the parts
         self.assertEqual((code, r["course"]["per_week"], len(r["course"]["parts"])), (200, None, 2))
+
+    def test_course_daily_pace_on_an_existing_course(self):
+        storage.save_playlist(playlist("PLDAILY"), [video("e-daily", "Daily API", duration=HOUR)])
+        storage.save_parts("e-daily", [summarizer.validate_part(PART, 0, 1800)])
+        storage.set_course_pace("e-daily", 2)
+        code, r = self.call("/api/course", {"id": "e-daily", "per_week": 2, "daily_minutes": 30})
+        self.assertEqual(code, 200)
+        self.assertEqual(r["course"]["daily_minutes"], 30)
+        self.assertEqual(storage.get_course("e-daily")["daily_minutes"], 30)
+        for good in (15, 240):      # boundaries of the allowed range
+            code, r = self.call("/api/course", {"id": "e-daily", "per_week": 2, "daily_minutes": good})
+            self.assertEqual((code, r["course"]["daily_minutes"]), (200, good))
+        code, r = self.call("/api/course", {"id": "e-daily", "per_week": 2, "daily_minutes": None})
+        self.assertEqual(code, 200)
+        self.assertIsNone(r["course"]["daily_minutes"])
+        self.assertIsNone(storage.get_course("e-daily")["daily_minutes"])
+        for bad in (5, 300, True, "30"):
+            self.assertEqual(self.call("/api/course", {"id": "e-daily", "per_week": 2, "daily_minutes": bad})[0], 400, bad)
+        storage.set_course_pace("e-daily", None)
+
+    def test_new_course_passes_daily_minutes_to_its_task(self):
+        storage.save_playlist(playlist("PLNEWDAILY"), [video("e-new-daily", "New daily course", duration=HOUR)])
+        with mock.patch("llm.is_configured", return_value=True), \
+             mock.patch("dashboard.JOB.start", return_value={"id": 12, "position": 0}) as start, \
+             mock.patch("summarizer.run_course") as run:
+            code, r = self.call("/api/course", {"id": "e-new-daily", "per_week": 2, "daily_minutes": 30})
+            self.assertEqual((code, start.call_args[0][0]), (200, "course"))
+            start.call_args[0][2]()     # the queued task
+            self.assertEqual(run.call_args[0], (["e-new-daily"], 2))
+            self.assertEqual(run.call_args.kwargs["daily_minutes"], 30)
+
+    def test_course_markdown_daily_groups_parts_into_days(self):
+        from exporter import course_markdown
+        v = {"video_id": "md-daily", "title": "Daily", "channel": "ch", "duration_seconds": 90 * 60}
+        course = {"parts": [{"start": i * 1800, "end": (i + 1) * 1800, "title": f"Part {i + 1}"} for i in range(3)],
+                  "per_week": 2, "daily_minutes": 30, "progress": {}}
+        md = course_markdown(v, course)
+        self.assertIn("30 min a day", md)
+        self.assertNotIn("min a day at", md)   # no speed in the header at 1x
+        self.assertNotIn("a week", md)
+        self.assertEqual([l for l in md.splitlines() if l.startswith("## Day")],
+                         ["## Day 1", "## Day 2", "## Day 3"])
+        self.assertEqual(md.split("## Day 1")[1].split("## Day 2")[0].count("### Part"), 1)
+        self.assertEqual(course_markdown(v, course, 1).splitlines()[2], md.splitlines()[2])
+        fast = course_markdown(v, course, 2)
+        self.assertIn("30 min a day at 2×", fast)
+        self.assertEqual([l for l in fast.splitlines() if l.startswith("## Day")], ["## Day 1", "## Day 2"])
+        self.assertEqual(fast.split("## Day 1")[1].split("## Day 2")[0].count("### Part"), 2)
+        self.assertEqual(fast.split("## Day 2")[1].count("### Part"), 1)
+        self.assertNotIn("## Day 3", fast)
+        self.assertNotIn("a week", fast)
+        self.assertNotIn("## Day", course_markdown(v, {**course, "parts": []}))
+
+    def test_course_markdown_endpoint_accepts_only_speeds_from_half_to_four(self):
+        import urllib.request
+        storage.save_playlist(playlist("PLMDSPEED"), [video("e-md-speed", "MD Speed", duration=90 * 60)])
+        storage.save_parts("e-md-speed", [{"start": i * 1800, "end": (i + 1) * 1800, "title": f"Part {i + 1}"} for i in range(3)])
+        storage.set_course_pace("e-md-speed", 2)
+        storage.set_course_daily("e-md-speed", 30)
+
+        def export(query=""):
+            with urllib.request.urlopen(f"{self.base}/api/course/markdown?id=e-md-speed{query}") as r:
+                return r.read().decode()
+
+        def days(text):
+            return [l for l in text.splitlines() if l.startswith("## Day")]
+
+        normal = export()
+        self.assertIn("30 min a day", normal)
+        self.assertNotIn("min a day at", normal)
+        self.assertEqual(days(normal), ["## Day 1", "## Day 2", "## Day 3"])
+        fast = export("&speed=2")
+        self.assertIn("30 min a day at 2×", fast)
+        self.assertEqual(days(fast), ["## Day 1", "## Day 2"])
+        self.assertEqual(fast.split("## Day 1")[1].split("## Day 2")[0].count("### Part"), 2)
+        for good in ("0.5", "4", "1.25"):
+            self.assertIn(f"at {good}×", export(f"&speed={good}"))
+        for bad in ("", "abc", "0", "0.49", "4.01", "nan", "inf", "-1"):
+            text = export(f"&speed={bad}")
+            self.assertNotIn("min a day at", text, bad)
+            self.assertEqual(days(text), ["## Day 1", "## Day 2", "## Day 3"], bad)
+        storage.set_course_pace("e-md-speed", None)
 
     def test_course_markdown_pending_part(self):
         from exporter import course_markdown
