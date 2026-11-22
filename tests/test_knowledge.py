@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 import knowledge
+import llm
 import storage
 from llm import LLMError
 from tests.helpers import playlist, video
@@ -44,6 +45,15 @@ class ValidateTest(unittest.TestCase):
         texts = [i["text"] for i in items]
         self.assertNotIn("old claim", texts)          # the older video keeps only TL;DR and takeaways
         self.assertIn("old takeaway", texts)
+
+    def test_build_prompt_uses_language_rule_after_the_bullet_list(self):
+        items = [{"n": 1, "title": "Cat clip", "t": None, "text": "A note about cats"}]
+        prompt = knowledge.build_prompt("Cat", items, "Hindi")
+        rule = llm.language_rule("Hindi")
+        self.assertIn(rule, prompt)
+        self.assertIn("Write in Hindi a study page on this topic", prompt)   # the original start is kept
+        self.assertTrue(prompt.index("- open_questions:") < prompt.index(rule) < prompt.index("Cite only the numbers above."))
+        self.assertIn(llm.language_rule("English"), knowledge.build_prompt("Cat", items, "English"))
 
 
 class PageTest(unittest.TestCase):

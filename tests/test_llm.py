@@ -7,6 +7,14 @@ from unittest import mock
 import llm
 
 
+class LanguageRuleTest(unittest.TestCase):
+    def test_language_rule_requires_translation_but_preserves_names_and_text(self):
+        rule = llm.language_rule("German")
+        self.assertIn("Write all text in German", rule)
+        self.assertIn("even when the video", rule)
+        self.assertEqual(rule, "Write all text in German, even when the video, transcript or excerpts are in another language; translate what you report, but keep names, code and on-screen text as they are.")
+
+
 class RetryTest(unittest.TestCase):
     def setUp(self):   # pacing has its own test; here only the retry waits reach time.sleep
         patcher = mock.patch.object(llm, "_wait_turn", lambda service: None)

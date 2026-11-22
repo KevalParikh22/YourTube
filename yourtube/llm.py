@@ -90,6 +90,10 @@ LANGUAGES = [
     "Chinese", "Arabic", "Turkish", "Indonesian",
 ]
 
+
+def language_rule(language: str) -> str:
+    return f"Write all text in {language}, even when the video, transcript or excerpts are in another language; translate what you report, but keep names, code and on-screen text as they are."
+
 # Approximate USD per 1M tokens (input, output), for cost estimates only
 PRICES = {
     "claude-opus-5-5": (4.00, 20.00), "claude-sonnet-5-5": (2.00, 10.00), "claude-haiku-5-5": (0.10, 0.50),

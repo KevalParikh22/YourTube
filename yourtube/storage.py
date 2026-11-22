@@ -1995,6 +1995,17 @@ def summary_times(db_path: str = DB_PATH) -> Dict[str, str]:
     with get_connection(db_path) as conn:
         return dict(conn.execute("SELECT video_id, created_at FROM video_summaries").fetchall())
 
+def other_language(language: str, db_path: str = DB_PATH) -> Dict[str, List[str]]:
+    """Video IDs with summaries or ratings in a different, non-empty language."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        out = {}
+        for key, table in (("summaries", "video_summaries"), ("ratings", "video_ratings")):
+            out[key] = [row[0] for row in conn.execute(
+                f"SELECT video_id FROM {table} WHERE language IS NOT NULL AND TRIM(language) != '' "
+                "AND LOWER(TRIM(language)) != LOWER(TRIM(?)) ORDER BY video_id", (language,))]
+        return out
+
 # --- Courses (a long video in parts, followed week by week) ----------------------------------
 
 def save_parts(video_id: str, parts: List[Dict[str, Any]], model: str = "", db_path: str = DB_PATH, keep_progress: bool = False) -> None:

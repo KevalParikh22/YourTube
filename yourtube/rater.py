@@ -14,6 +14,7 @@ import re
 from typing import Any, Callable, Dict, List, Optional
 
 from exporter import _clock
+import llm
 from llm import LLMError, parse_json
 
 VERDICTS = ("watch", "skim", "skip")
@@ -119,7 +120,7 @@ Then write notes the learner can decide from without watching, like minutes of a
   (at most 20 words each) saying what is actually said, claimed or shown, not "the video discusses X".
 - takeaways: 3 to 5 concrete conclusions or actions.
 - tldr: at most 2 sentences. reason: at most 20 words, why this verdict.
-Write all text in {language}.
+{llm.language_rule(language)}
 Times: copy them exactly as written in the transcript or chapters, like "4:05" or "1:02:30" (hours:minutes:seconds). Only use times that appear there.
 
 Reply with JSON in this shape (replace every <...>):

@@ -758,6 +758,7 @@ def build_state(library=1):
         "platform": sys.platform,
         "voice": _VOICE_AVAILABLE,
         "summarised": list(storage.summary_times()),   # video ids with a summary (Knowledge: Summarise 5)
+        "other_language": storage.other_language(settings.get("language") or "English"),
         "courses": storage.list_courses(),
         "indexed": indexed,
     }

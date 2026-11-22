@@ -64,6 +64,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const sx = s => `${s}×`;
 const plural = (n, w) => `${n} ${n === 1 ? w : /[^aeiou]y$/.test(w) ? w.slice(0, -1) + 'ies' : w + 's'}`;
+const otherLang = l => !!l && l.trim().toLowerCase() !== (S.data.ai.language || 'English').trim().toLowerCase();
 const tip = text => `<button type="button" class="tip" aria-label="More info" data-tip="${esc(text)}"><span aria-hidden="true">i</span><span class="tip-text">${esc(text)}</span></button>`;
 function fmt(sec) {
   sec = Math.round(sec || 0);
@@ -1890,6 +1891,9 @@ function viewAbout() {
   const ai = S.data.ai;
   const langs = ai.languages || [];
   const curLang = ai.language || 'English';
+  const redo = S.data.other_language || {};
+  const redoSummaries = redo.summaries?.length || 0, redoRatings = redo.ratings?.length || 0;
+  const otherNote = (redoSummaries || redoRatings) ? `<div class="kv-line">${[redoSummaries ? plural(redoSummaries, 'summary') : '', redoRatings ? plural(redoRatings, 'rating') : ''].filter(Boolean).join(' and ')} are in another language. <button class="btn-text" style="padding:0;height:auto" data-act="redo-language">Redo in ${esc(curLang)}</button></div>` : '';
   const customLang = (curLang && !langs.includes(curLang)) ? curLang : null;
   const langOptions = [
     ...(customLang ? [`<option value="${esc(customLang)}" selected>${esc(customLang)} (custom)</option>`] : []),
@@ -1923,7 +1927,8 @@ function viewAbout() {
         <div id="ai-interests-err" class="hint warn-text" style="margin-top:4px;display:none"></div>
       </div>
       <div><label class="field-label" for="ai-lang">Response language</label>
-        <select id="ai-lang">${langOptions}</select></div>
+        <select id="ai-lang">${langOptions}</select>
+        ${otherNote}</div>
       <div></div>
     </div>
     <div class="actions"><button class="btn btn-dark btn-sm" data-act="ai-save-prefs">Save</button></div>
@@ -2302,6 +2307,7 @@ async function loadActivity(id) {
 }
 function drawerRating(v) {
   const r = v.rating;
+  const cur = S.data.ai.language || 'English';
   const hasSummary = !!S.summaryCache[v.video_id]?.summary;
   if (!r) return S.data.ai.ready_for.rate
     ? `<div class="kv-line">Not rated yet. <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Rate this video</button></div>`
@@ -2314,6 +2320,7 @@ function drawerRating(v) {
   const pct = k => Math.round((calc?.formula?.[k] || 0) / wsum * 100);
   const calcLine = calc ? `${calc.score} = quality ${calc.quality} (depth ${breakdown.depth?.score ?? '—'} × ${pct('depth')}% + value ${breakdown.value?.score ?? '—'} × ${pct('value')}% + freshness ${breakdown.freshness?.score ?? '—'} × ${pct('freshness')}%) + interest ${calc.interest}` : '';
   return `<div class="rate-box">
+    ${v.rating && otherLang(v.rating.language) ? `<div class="kv-line lang-note">Rating in ${esc(v.rating.language)} · <button class="btn-text" style="padding:0;height:auto" data-act="rate-one" data-id="${esc(v.video_id)}" data-job-btn>Redo in ${esc(cur)}</button></div>` : ''}
     <div class="tri-head"><span class="score-big">${r.score.toFixed(1)}</span>${badge(v).replace(/<b>.*?<\/b>/, '')}
       <span class="muted" style="font-size:13px">${esc(r.reason)}</span></div>
     <div id="why-score" class="field-label">Why this score</div>
@@ -2486,12 +2493,14 @@ function drawerSummary(v) {
     ? `<div class="kv-line">No summary yet. <button class="btn-text" style="padding:0;height:auto" data-act="summarize-one" data-id="${esc(v.video_id)}" data-job-btn>Summarise</button> <span class="faint">(local models take about 1–2 minutes)</span></div>`
     : '<div class="kv-line">No summary yet. <a href="#/settings/routing">Choose an AI for summaries in Settings</a>.</div>';
   const s = result.summary, moments = result.moments || {};
+  const cur = S.data.ai.language || 'English';
   const at = t => Number.isFinite(+t) ? Math.max(0, Math.floor(+t)) : 0;
   const time = t => t == null || !Number.isFinite(+t) ? '' : `<button class="time-link" data-act="seek" data-t="${at(t)}">${clock(at(t))}</button>`;   // no time: no fake 0:00 link
   const relationLabel = { prerequisite: 'Prerequisites', deeper: 'Go deeper', other_view: 'Other views', same_topic: 'Same topic' };
   const grouped = {};
   for (const item of s.learn_more?.related || []) (grouped[item.relation] ||= []).push(item);
   return `<section class="section card" style="margin:0"><h4 class="h">AI summary</h4>
+    ${otherLang(s.language) ? `<div class="kv-line lang-note">Summary in ${esc(s.language)} · <button class="btn-text" style="padding:0;height:auto" data-act="summarize-one" data-id="${esc(v.video_id)}" data-job-btn>Redo in ${esc(cur)}</button></div>` : ''}
     ${s.tldr ? `<p class="tldr">${esc(s.tldr)}</p>` : ''}
     ${s.minutes?.length ? `<div class="field-label">Minutes</div><ul>${s.minutes.map((m, i) => `<li><div class="chap"><span>${time(m.t)}</span><span><b>${esc(m.topic)}</b>${(m.notes || []).map(n => `<small class="minute-note">${esc(n)}</small>`).join('')}${(moments[i] || []).length ? `<span class="also">Also in ${(moments[i] || []).map(x => `<button class="also-chip" data-act="play-at" data-id="${esc(x.video_id)}" data-t="${at(x.t)}" title="${esc(x.title)} @ ${clock(at(x.t))}">${esc(x.title)} · ${clock(at(x.t))}</button>`).join('')}</span>` : ''}</span></div></li>`).join('')}</ul>` : ''}
     ${s.claims?.length ? `<div class="field-label">Key claims and quotes</div><ul>${s.claims.map(c => `<li><div class="chap"><span>${time(c.t)}</span><span><b>${esc(c.kind)}</b> · ${esc(c.text)}</span></div></li>`).join('')}</ul>` : ''}
@@ -2840,6 +2849,12 @@ document.addEventListener('click', async e => {
     case 'rate-one': startRate([id]); break;
     case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
+    case 'redo-language': {
+      const o = S.data.other_language || {}, note = `These were made in another language; redo them in ${S.data.ai.language || 'English'}.\n\n`;
+      if (o.summaries?.length) await startSummary(o.summaries, note);
+      if (o.ratings?.length) await startRate(o.ratings, note);
+      break;
+    }
     case 'course-make': { const p = coursePace($('#d-course-pace')?.value, S.courses[id]); setCourse(id, p.per_week, p.daily_minutes); break; }
     case 'course-continue': { const c = S.courses[id] || {}; setCourse(id, c.per_week || 2, c.daily_minutes ?? null); break; }
     case 'course-end': if (confirm('End this course? Its parts and summaries stay, your ticks are kept until the parts are made again.')) { await setCourse(id, null, null); location.hash = '#/home'; } break;
