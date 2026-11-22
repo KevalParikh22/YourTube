@@ -32,3 +32,28 @@ CourseIt turns a YouTube video or playlist (up to 20 h) into lessons with notes 
 | 5 | **Roadmap**: chain several courses (or a playlist) into one plan | A playlist course is the next step after one long video | L |
 
 CourseIt does not offer export, reminders or offline/local AI; YourTube already has Markdown export and runs locally. Its splitting method is not described on the site, so splitting at topic changes with the LLM stays an open idea (step 1 of the plan uses chapters and pauses).
+
+## Pending (2026-11-22)
+
+Everything above marked **Done** is merged (PRs #6 and #7). What is left:
+
+### 1. Check the course with a real AI
+Every course feature so far was tested with a fake AI on a scratch copy. Still to check by hand (local list S13.1–S13.12 in `docs/MANUAL-TESTS.md`, which is not in git):
+- Parts are 20–40 min and start at sensible places (chapters or topic changes), not mid-sentence.
+- Part summaries, key points and actions are useful; the quiz questions are fair and their "Replay the moment" times are right.
+- Parts appear one by one while the course is written; Stop then **Continue** writes only the missing ones.
+- A daily pace gives days that fit; the finish date is right; the Markdown export matches the page.
+- **Skip what you know** questions are fair enough to decide a part can be skipped.
+- A 3–4 h video summarised in parts: the estimate is several times a normal one, and the summary covers the whole video.
+- Night queue: a course on a long video waits for the night start time.
+
+### 2. Roadmap of several courses (idea 5, size L)
+Chain several courses, or a whole playlist, into one plan with one pace and one finish date.
+
+### 3. Reminders (plan step 4)
+A nudge when today's or this week's parts are due. Needs notifications, which the app does not have yet.
+
+### 4. Known limits
+- Courses made before 2026-11-21 have no quiz, so the quiz and **Skip what you know** do not show for them; their parts must be made again to get one (this resets their ticks).
+- **Skip what you know** asks one question per part, so a lucky guess can tick a part; it can be unticked by hand.
+- Splitting uses chapters or pauses in the speech, not the AI, to find topic changes (plan step 1).
