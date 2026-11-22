@@ -2850,9 +2850,9 @@ document.addEventListener('click', async e => {
     case 'rate-sel': { const r = newOnly([...S.sel], x => byId(x)?.rating, 'rated', 'Rate'); if (r) startRate(r.ids, r.note); break; }
     case 'summarize-one': startSummary([id]); break;
     case 'redo-language': {
-      const o = S.data.other_language || {};
-      if (o.summaries?.length) await startSummary(o.summaries, 'in the current language');
-      if (o.ratings?.length) await startRate(o.ratings, 'in the current language');
+      const o = S.data.other_language || {}, note = `These were made in another language; redo them in ${S.data.ai.language || 'English'}.\n\n`;
+      if (o.summaries?.length) await startSummary(o.summaries, note);
+      if (o.ratings?.length) await startRate(o.ratings, note);
       break;
     }
     case 'course-make': { const p = coursePace($('#d-course-pace')?.value, S.courses[id]); setCourse(id, p.per_week, p.daily_minutes); break; }
