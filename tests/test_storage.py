@@ -19,6 +19,25 @@ class StorageTest(unittest.TestCase):
     def lib(self):
         return {v["video_id"]: v for v in storage.get_library(db_path=self.db)}
 
+    def test_other_language_lists_nonempty_different_languages_sorted(self):
+        self.assertEqual(storage.other_language("English", db_path=self.db), {"summaries": [], "ratings": []})
+        self.save([video(vid) for vid in ("summary_hindi", "summary_english", "summary_null", "summary_empty",
+                                          "rating_hindi", "rating_english", "rating_null", "rating_empty")])
+        for vid in ("summary_hindi", "summary_english", "summary_null", "summary_empty"):
+            storage.save_summary(vid, {"tldr": "text", "language": "Hindi" if vid == "summary_hindi" else "English"}, db_path=self.db)
+        for vid in ("rating_hindi", "rating_english", "rating_null", "rating_empty"):
+            storage.save_rating(vid, {"score": 1, "verdict": "watch",
+                                      "language": "Hindi" if vid == "rating_hindi" else "English"}, db_path=self.db)
+        with storage.get_connection(self.db) as conn:
+            conn.execute("UPDATE video_summaries SET language = 'english ' WHERE video_id = 'summary_english'")
+            conn.execute("UPDATE video_summaries SET language = NULL WHERE video_id = 'summary_null'")
+            conn.execute("UPDATE video_summaries SET language = '' WHERE video_id = 'summary_empty'")
+            conn.execute("UPDATE video_ratings SET language = 'english ' WHERE video_id = 'rating_english'")
+            conn.execute("UPDATE video_ratings SET language = NULL WHERE video_id = 'rating_null'")
+            conn.execute("UPDATE video_ratings SET language = '' WHERE video_id = 'rating_empty'")
+        self.assertEqual(storage.other_language("English", db_path=self.db),
+                         {"summaries": ["summary_hindi"], "ratings": ["rating_hindi"]})
+
     def test_add_then_resync_counts(self):
         self.assertEqual(self.save([video("a"), video("b")]), {"added": 2, "updated": 0, "removed": 0})
         self.assertEqual(self.save([video("a"), video("b"), video("c")]), {"added": 1, "updated": 2, "removed": 0})
