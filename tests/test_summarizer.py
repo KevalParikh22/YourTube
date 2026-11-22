@@ -5,6 +5,7 @@ import unittest
 from unittest import mock
 
 import embedder
+import llm
 import storage
 import summarizer
 from llm import LLMError
@@ -54,6 +55,15 @@ class PromptTest(unittest.TestCase):
         second = summarizer.build_prompt(video("two", "Second"), [], {"language": "English"}, [])
         self.assertGreaterEqual(len(first), 1500)
         self.assertEqual(first[:1500], second[:1500])
+
+    def test_language_rule_in_main_and_part_prompts(self):
+        rule = llm.language_rule("Hindi")
+        prompt = summarizer.build_prompt(video("one", "First"), [], {"language": "Hindi"}, [])
+        self.assertIn(rule, prompt)
+        part_prompt = summarizer._part_prompt(
+            video("one", "First"), [{"start": 0, "text": "hello"}], [[0, 60]], 1,
+            {"language": "Hindi"}, 1000)
+        self.assertIn(rule, part_prompt)
 
 
 class EstimatePartsTest(unittest.TestCase):

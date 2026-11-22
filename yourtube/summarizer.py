@@ -7,6 +7,7 @@ Related moments ("also explained in X at 4:20") are found in code with the meani
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from exporter import _clock
+import llm
 from llm import LLMError, parse_json
 from rater import CHAR_BUDGET_REMOTE, fit_transcript, parse_time, transcript_blocks
 
@@ -84,6 +85,7 @@ PART_PROMPT = """This part will be one lesson of a course the learner follows ov
 - points: 3 to 6 key points in time order, each with the time it is said and at most 25 words.
 - actions: 1 to 3 concrete things to do after watching (an exercise, a thing to try, a decision to make), at most 25 words each.
 - quiz: 2 to 3 multiple-choice questions that check this part's key ideas, each with 3 or 4 short options (at most 12 words each), the 0-based index of the right option, and the time the answer is explained (copied from the transcript).
+{language_rule}
 Times: copy them exactly as written in the transcript, like "4:05" or "1:02:30".
 
 Reply with JSON in this shape (replace every <...>):
@@ -103,7 +105,8 @@ def _part_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], spans: L
     text, _ = fit_transcript(transcript_blocks(part), budget)
     return PART_PROMPT.format(title=video.get("title"), channel=video.get("channel"), n=n, total=len(spans),
                               start=_clock(start), end=_clock(end), text=text or "(no words in this part)",
-                              language=settings.get("language") or "English")
+                              language=settings.get("language") or "English",
+                              language_rule=llm.language_rule(settings.get("language") or "English"))
 
 
 def validate_part(raw: Any, start: int, end: int) -> Dict[str, Any]:
@@ -206,6 +209,7 @@ def build_prompt(video: Dict[str, Any], segments: List[Dict[str, Any]], settings
   Only use ids from the list; leave it empty if none fit.
 - learn_more.searches: up to 3 YouTube searches (at most 8 words) for what this video assumes or leaves out and the
   library does not cover, each with why (at most 15 words).
+{llm.language_rule(language)}
 Times: copy them exactly as written in the transcript, like "4:05" or "1:02:30". Only use times that appear there.
 
 Reply with JSON in this shape (replace every <...>):
