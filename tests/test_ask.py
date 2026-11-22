@@ -80,6 +80,21 @@ class AskTest(unittest.TestCase):
                          ("How do I fine-tune cheaply?", [1, 2], "q_db"))
         self.assertEqual(asker.from_history(saved)["cited"], [1, 2])
 
+    def test_answer_prompt_uses_language_rule_and_still_cites_excerpts(self):
+        seen = {}
+
+        def complete(system, prompt):
+            seen["prompt"] = prompt
+            return json.dumps({"answer": "It trains adapters [1]."})
+        asker.ask("How do I fine-tune cheaply?", settings={**llm.load_settings(), "language": "Hindi"},
+                  complete=complete, retrieve_fn=found, sim_fn=None, save=False)
+        self.assertIn(llm.language_rule("Hindi"), seen["prompt"])
+        self.assertIn("Cite excerpts as [n].", seen["prompt"])
+        for settings in ({**llm.load_settings(), "language": ""},
+                         {k: v for k, v in llm.load_settings().items() if k != "language"}):
+            asker.ask("q", settings=settings, complete=complete, retrieve_fn=found, sim_fn=None, save=False)
+            self.assertIn(llm.language_rule("English"), seen["prompt"])
+
     def test_nothing_found_skips_the_model(self):
         def complete(system, prompt):
             raise AssertionError("the model must not be called")

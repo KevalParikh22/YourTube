@@ -9,6 +9,7 @@ import json
 import re
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import llm
 from llm import LLMError, parse_json
 
 SYSTEM = ("You write a study page that combines notes from several of the learner's YouTube videos on one topic. "
@@ -92,6 +93,7 @@ Write in {language} a study page on this topic that someone could learn from wit
 - sections: 2 to {MAX_SECTIONS}, each with a heading and 2 to {MAX_POINTS} points. Each point is one sentence (at most 35 words)
   and cites the source numbers it is based on. Combine what different videos say; note where they disagree.
 - open_questions: up to {MAX_QUESTIONS} things the videos disagree on or leave unanswered.
+{llm.language_rule(language)}
 Cite only the numbers above. Do not add knowledge that is not in the sources.
 
 Reply with JSON in this shape:

@@ -186,7 +186,7 @@ def ask(question: str, filters: Optional[Dict[str, Any]] = None, settings: Optio
             complete = complete or llm.make_completer(settings, "ask")
             budget = max(3000, llm.context_chars(settings, "ask") - len(SYSTEM) - 1500)
             prompt = (f"Question: {standalone}\n\nExcerpts:\n{excerpts(pieces, budget)}\n\n"
-                      f"Write the answer in {settings.get('language') or 'English'}. Cite excerpts as [n].")
+                      f"{llm.language_rule(settings.get('language') or 'English')} Cite excerpts as [n].")
             reply = complete(SYSTEM, prompt)
             try:
                 data = llm.parse_json(reply)
