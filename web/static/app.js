@@ -45,7 +45,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   statusUndo: [],
-  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, courses: {}, courseWrong: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, courses: {}, courseWrong: {}, placement: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
@@ -2395,6 +2395,18 @@ async function setCourse(id, per_week, daily_minutes = null) {
     }
   } catch (e) { toast(e.message, true); }
 }
+// Written, unwatched parts with a quiz question: the placement check uses only their first question
+const placementParts = c => (c?.parts || []).map((p, i) => ({ i, p, q: (p.quiz || [])[0] }))
+  .filter(x => !x.p.pending && !(c?.progress || {})['p' + x.i] && x.q);
+function placementPanel(id, parts) {
+  const answers = S.placement[id].answers;
+  return `<section class="section card placement"><h2 class="h">Skip what you know</h2>
+    ${parts.map(({ i, p, q }) => `<fieldset class="placement-part"><legend>Part ${i + 1}: ${esc(p.title || 'Untitled')}</legend>
+      <div class="quiz-q">${esc(q.q)}</div><div class="placement-opts">${q.options.map((o, oi) =>
+        `<label class="placement-opt"><input type="radio" name="placement-${esc(id)}-${i}" value="${oi}" data-change="placement-answer" data-id="${esc(id)}" data-part="${i}" ${answers[i] === oi ? 'checked' : ''}> ${esc(o)}</label>`).join('')}</div></fieldset>`).join('')}
+    <div class="actions"><button class="btn btn-sm" data-act="placement-done" data-id="${esc(id)}">Tick what I know</button>
+      <button class="btn-text" data-act="placement-cancel" data-id="${esc(id)}">Cancel</button></div></section>`;
+}
 function viewCourse(id) {
   const v = byId(id), c = S.courses[id];
   const back = '<div style="margin-bottom:14px"><a href="#/home" class="btn-text" style="padding-left:0">← Home</a></div>';
@@ -2405,6 +2417,8 @@ function viewCourse(id) {
   if (!c && active) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">Splitting into parts…</p>`;
   if (!c?.per_week) return back + `<h1 class="display">${esc(v.title)}</h1><p class="note">No course for this video yet. Open the video and choose <b>Make a course</b>.</p>`;
   const done = c.progress || {}, n = c.parts.length, pending = c.parts.some(p => p.pending), written = c.parts.filter(p => !p.pending).length, weeks = Math.ceil(n / c.per_week);
+  const checkable = placementParts(c);
+  if (S.placement[id] && !checkable.length) delete S.placement[id];
   const daily = c.daily_minutes != null, days = daily ? courseDays(c.parts, c.daily_minutes, S.speed) : [];
   const watched = c.parts.filter((_, i) => done['p' + i]).length, unwatched = n - watched;
   let finish = '';
@@ -2446,13 +2460,14 @@ function viewCourse(id) {
       ${quizHtml}
     </li>`;
   };
-  return `${back}<section>
+  return `${back}${S.placement[id] ? placementPanel(id, checkable) : ''}<section>
     <div class="eyebrow">Course · ${plural(daily ? days.length : weeks, daily ? 'day' : 'week')} · ${pending ? `${written} of ${n} parts written` : plural(n, 'part')}</div>
     <h1 class="display">${esc(v.title)}<em>${watched} of ${pending ? written : n} parts watched${unwatched ? finish : ' · All watched'}</em></h1>
     <div class="meter"><i style="width:${(pending ? written : n) ? watched / (pending ? written : n) * 100 : 0}%"></i></div>
     <div class="actions" style="margin-top:14px">
       <select data-change="course-pace" data-id="${esc(id)}" aria-label="Course pace">${courseOptions(selectedCoursePace(c))}</select>
       <a class="btn btn-sm" href="/api/course/markdown?id=${encodeURIComponent(id)}&speed=${S.speed}" download>Export Markdown</a>
+      ${checkable.length >= 2 && !S.placement[id] ? `<button class="btn btn-sm" data-act="placement-open" data-id="${esc(id)}">Skip what you know</button>${tip('A few questions, one per part. Parts you answer right are ticked as known, so the plan only keeps the rest.')}` : ''}
       <button class="btn-text" data-act="course-end" data-id="${esc(id)}">End course</button>
     </div></section>
     ${(daily ? days : Array.from({ length: weeks }, (_, w) => c.parts.slice(w * c.per_week, (w + 1) * c.per_week).map((_, k) => w * c.per_week + k))).map((indexes, w) => {
@@ -2846,6 +2861,30 @@ document.addEventListener('click', async e => {
       refresh();
       break;
     }
+    case 'placement-open': S.placement[id] = { answers: {} }; refresh(); break;
+    case 'placement-cancel': delete S.placement[id]; refresh(); break;
+    case 'placement-done': {
+      const c = S.courses[id];
+      if (!c) break;
+      let n = 0, error = null;
+      try {
+        for (const { i, q } of placementParts(c)) {
+          if (S.placement[id]?.answers[i] !== q.answer) continue;
+          let reply = await api('/api/course/progress', { id, key: `p${i}`, done: true });
+          c.progress = reply.progress;
+          reply = await api('/api/course/progress', { id, key: `q${i}.0`, done: true });
+          c.progress = reply.progress;
+          n++;
+        }
+      } catch (err) { error = err; toast(err.message, true); }
+      const row = (S.data.courses || []).find(x => x.video_id === id);
+      if (row) row.done = Object.keys(c.progress || {}).filter(k => k[0] === 'p').length;
+      delete S.placement[id];
+      refresh();
+      if (error) break;   // retry from what the server actually saved
+      toast(n ? `Ticked ${plural(n, 'part')} you already know` : 'Nothing ticked: watch them all');
+      break;
+    }
     case 'remove-sel': {
       const ids = [...S.sel], one = ids.length === 1, notes = ids.filter(x => byId(x)?.notes?.trim()).length;
       if (!confirm(`Remove ${plural(ids.length, 'video')} from YourTube?\n\nThis deletes ${one ? 'its' : 'their'} transcripts, slides, ratings, summaries and search data`
@@ -3192,6 +3231,11 @@ document.addEventListener('change', async e => {
     const row = (S.data.courses || []).find(x => x.video_id === el.dataset.id);   // part counts on Home and the drawer
     if (row) row.done = Object.keys(S.courses[el.dataset.id].progress).filter(k => k[0] === 'p').length;
     if (el.dataset.key.startsWith('p')) refresh();
+    return;
+  }
+  if (ch === 'placement-answer') {
+    const pl = S.placement[el.dataset.id];
+    if (pl) pl.answers[el.dataset.part] = +el.value;
     return;
   }
   if (ch === 'theme') { S.theme = el.value; store.set('ytkb.theme', S.theme); applyTheme(); toast('Theme saved'); return; }

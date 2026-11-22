@@ -604,3 +604,9 @@
 .quiz-opt.right { background: var(--watch-bg); color: var(--watch); border-color: var(--watch); }
 .quiz-opt.wrong { background: var(--skip-bg); color: var(--skip); border-color: var(--skip); }
 .quiz-result { font-size: 13px; color: var(--ink-2); margin-bottom: 4px; }
+.placement { margin-top: 14px; }
+.placement-part { border: 0; padding: 0; margin: 16px 0 0; }
+.placement-part legend { padding: 0; margin-bottom: 6px; font-size: 14px; font-weight: 600; }
+.placement-opts { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.placement-opt { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+.placement-opt input { margin: 0; accent-color: var(--accent); }
