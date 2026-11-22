@@ -45,7 +45,7 @@ const S = {
   ingest: { url: '', access: store.get('ytkb.access') || 'auto', cookies: store.get('ytkb.cookies') || '' },
   ai: { provider: null, key: '', models: {} },
   statusUndo: [],
-  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, courses: {}, courseWrong: {}, placement: {}, local: null, guide: null, asrPlan: null, visPlan: null,
+  drawer: null, drawerOpen: {}, polling: false, detailCache: {}, summaryCache: {}, courses: {}, paths: {}, courseWrong: {}, placement: {}, local: null, guide: null, asrPlan: null, visPlan: null,
   busy: {},   // video IDs a running media job was started for: { asr: [...], visual: [...] }
   stopPending: false,
   search: { q: '', kind: 'all', res: null, seq: 0, limit: 50, meaning: store.get('ytkb.meaning') === '1' },
@@ -277,6 +277,11 @@ function renderView() {
     v.innerHTML = viewCourse(id);
     if (S.courses[id] === undefined) loadCourse(id);
   }
+  else if (r === 'path') {
+    const id = routeParam('id');
+    v.innerHTML = viewPath(id);
+    if (S.paths[id] === undefined) loadPath(id);
+  }
   else if (r === 'search') {
     const q = routeParam('q');
     if (q != null && q !== S.search.q) { S.search.q = q; S.search.res = null; S.search.limit = 50; }
@@ -458,6 +463,7 @@ function selBar() {
     ${sel.some(v => v.suggestion) ? `<button class="btn-text" data-act="sug-accept-sel">Accept AI suggestions</button>` : ''}
     ${S.data.ai.ready_for.rate ? `<button class="btn-text" data-act="rate-sel" data-job-btn>Rate selected</button>` : ''}
     ${S.data.ai.ready_for.summarize ? `<button class="btn-text" data-act="summarize-sel" data-job-btn>Summarise selected</button>` : ''}
+    ${S.sel.size >= 2 ? `<button class="btn-text" data-act="path-make">Make a learning path</button>` : ''}
     ${queueUrls(sel).map((u, i, a) => `<a class="btn-text" href="${esc(u)}" target="_blank" rel="noopener">Play${a.length > 1 ? ` ${i + 1}/${a.length}` : ''}</a>`).join('')}
     <span class="grow"></span>
     ${S.sel.size < S.visible.length ? `<button class="btn-text" data-act="sel-all">Select all ${S.visible.length}</button>` : ''}
@@ -485,6 +491,8 @@ function viewHome() {
     && v.added_at && new Date(v.added_at.replace(' ', 'T') + 'Z').getTime() >= weekAgo)
     .sort((a, b) => new Date(b.added_at.replace(' ', 'T') + 'Z') - new Date(a.added_at.replace(' ', 'T') + 'Z')).slice(0, 5);
   const unrated = videos().filter(v => !v.rating && !isDone(v)).length;   // what Rate would rate
+  const inPath = new Set((S.data.paths || []).flatMap(p => p.video_ids || []));
+  const courseRows = (S.data.courses || []).filter(c => byId(c.video_id) && !inPath.has(c.video_id));
   const failedSync = S.data.job?.recent?.find(j => j.kind === 'sync' && !j.ok && !j.stopped && !j.dismissed);
   const knowledgeStale = Array.isArray(S.knowledge.list) ? S.knowledge.list.filter(c => c.page === 'stale').length : 0;
   const rows = categoryNames().map(c => ({ c, st: stats(videos().filter(v => v.category === c)) }))
@@ -518,7 +526,10 @@ function viewHome() {
 
   ${newFromChannels.length ? `<section class="section home-card"><h2 class="h">New from followed channels</h2><ul class="rows">${newFromChannels.map(row).join('')}</ul></section>` : ''}
 
-  ${(S.data.courses || []).length ? `<section class="section home-card"><h2 class="h">Courses</h2><ul class="rows">${S.data.courses.filter(c => byId(c.video_id)).map(c =>
+  ${(S.data.paths || []).length ? `<section class="section home-card"><h2 class="h">Learning paths</h2><ul class="rows">${S.data.paths.map(p =>
+    `<li><a href="#/path?id=${p.id}">${esc(p.title)}</a> <span class="faint">· ${p.done} of ${plural(p.parts, 'part')} watched · ${p.daily_minutes != null ? `${p.daily_minutes} min a day` : `${p.per_week} a week`}</span></li>`).join('')}</ul></section>` : ''}
+
+  ${courseRows.length ? `<section class="section home-card"><h2 class="h">Courses</h2><ul class="rows">${courseRows.map(c =>
     `<li><a href="#/course?id=${encodeURIComponent(c.video_id)}">${esc(byId(c.video_id).title)}</a> <span class="faint">· ${c.done} of ${plural(c.parts, 'part')} watched · ${c.daily_minutes != null ? `${c.daily_minutes} min a day` : `${c.per_week} a week`}</span></li>`).join('')}</ul></section>` : ''}
 
   <section class="section home-card"><h2 class="h">Top picks</h2>
@@ -1037,7 +1048,7 @@ async function taskFinished(t) {
   const text = JOB_TEXT[t.kind] || JOB_TEXT.sync;
   if (['details', 'sync', 'asr', 'visual', 'remove'].includes(t.kind)) { S.detailCache = {}; S.asrPlan = null; S.visPlan = null; }  // transcripts or slides changed
   if (t.kind === 'summarize' || t.kind === 'remove') S.summaryCache = {};
-  if (['course', 'summarize', 'remove'].includes(t.kind)) S.courses = {};
+  if (['course', 'summarize', 'remove'].includes(t.kind)) { S.courses = {}; S.paths = {}; }
   if (['summarize', 'knowledge', 'remove'].includes(t.kind)) { S.knowledge.list = null; S.knowledge.pages = {}; }
   if (!S.data.job.running) S.busy = {};
   if (t.kind === 'pull' || t.kind === 'embed') S.local = null;        // new model downloaded, or index status changed
@@ -2388,6 +2399,28 @@ async function loadCourse(id) {
     }, 4000);
   }
 }
+async function loadPath(id) {
+  if (S.paths[id] === undefined) S.paths[id] = 'loading';
+  try {
+    const p = (await api(`/api/path?id=${encodeURIComponent(id)}`)).path;
+    for (const [vid, course] of Object.entries(p.courses || {})) if (course) S.courses[vid] = course;
+    S.paths[id] = p;
+  } catch (e) { S.paths[id] = { error: e.message }; }
+  if (route() === 'path' && routeParam('id') === id) {
+    try { S.data.job = await api('/api/job'); } catch (_) {}
+    refresh();
+    const p = S.paths[id], job = S.data.job || {};
+    const needsParts = (p?.video_ids || []).some(vid => {
+      const c = p?.courses?.[vid];
+      return !c || c.parts?.some(part => part.pending);
+    });
+    const active = (job.lanes || []).some(l => l.running && l.kind === 'course')
+      || (job.queue || []).some(t => t.kind === 'course');
+    if (needsParts && active) setTimeout(async () => {
+      if (route() === 'path' && routeParam('id') === id) await loadPath(id);
+    }, 4000);
+  }
+}
 async function setCourse(id, per_week, daily_minutes = null) {
   try {
     const res = await api('/api/course', { id, per_week, daily_minutes });
@@ -2484,6 +2517,62 @@ function viewCourse(id) {
     }).join('')}
     ${pending && !active ? `<p class="kv-line">Not finished. <button class="btn-text" data-act="course-continue" data-id="${esc(id)}">Continue</button></p>` : ''}
     <p class="kv-line">${esc(c.model || '')}</p>`;
+}
+function viewPath(id) {
+  const back = '<div style="margin-bottom:14px"><a href="#/home" class="btn-text" style="padding-left:0">← Home</a></div>';
+  const p = S.paths[id];
+  if (p === undefined || p === 'loading') return back + '<p class="note">Loading learning path…</p>';
+  if (p?.error) return back + `<p class="note">Could not load the learning path: ${esc(p.error)}</p>`;
+  if (!p?.video_ids) return back + '<p class="note">Learning path not found.</p>';
+  const items = [];
+  for (const vid of p.video_ids) {
+    if (!byId(vid)) continue;
+    const course = S.courses[vid];
+    if (course?.parts?.length) course.parts.forEach((part, i) => items.push({ vid, i, part }));
+    else items.push({ vid, missing: true });
+  }
+  const progress = vid => S.courses[vid]?.progress || {};
+  const watched = it => !it.missing && !!progress(it.vid)['p' + it.i];
+  const written = items.filter(it => !it.missing), watchedN = written.filter(watched).length, unwatched = written.length - watchedN;
+  const per = p.per_week || 2, daily = p.daily_minutes != null;
+  const groups = daily
+    ? courseDays(items.map(it => it.missing ? { start: 0, end: 0 } : it.part), p.daily_minutes, S.speed).map(indexes => indexes.map(i => items[i]))
+    : Array.from({ length: Math.ceil(items.length / per) }, (_, w) => items.slice(w * per, (w + 1) * per));
+  let finish = '';
+  if (unwatched) {
+    const ahead = daily
+      ? courseDays(written.filter(it => !watched(it)).map(it => it.part), p.daily_minutes, S.speed).length
+      : Math.ceil(unwatched / per) * 7;
+    const date = new Date();
+    date.setDate(date.getDate() + ahead - 1);
+    finish = ` · done by ${date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}`;
+  }
+  const title = vid => byId(vid)?.title || '';
+  const watch = it => `<button class="btn btn-sm" data-act="play-at" data-id="${esc(it.vid)}" data-t="${Math.floor(it.part.start)}">▶ Watch ${clock(it.part.start)}–${clock(it.part.end)}</button>`;
+  const open = vid => `<a class="btn-text" href="#/course?id=${encodeURIComponent(vid)}">Open course</a>`;
+  const row = it => {
+    if (it.missing) return `<li class="course-part path-item"><div class="course-head"><b>${esc(title(it.vid))}</b>: being split into parts…</div></li>`;
+    const key = 'p' + it.i;
+    const label = `<b>${esc(title(it.vid).slice(0, 50))}</b> · Part ${it.i + 1}: ${it.part.pending ? 'being written…' : esc(it.part.title || 'Untitled')}`;
+    const name = it.part.pending ? label : `<label class="keep"><input type="checkbox" data-change="course-progress" data-id="${esc(it.vid)}" data-key="${key}" ${progress(it.vid)[key] ? 'checked' : ''}> ${label}</label>`;
+    return `<li class="course-part path-item${watched(it) ? ' done' : ''}"><div class="course-head">${name}<span class="path-actions">${watch(it)}${open(it.vid)}</span></div></li>`;
+  };
+  return `${back}<section>
+    <div class="eyebrow">Learning path · ${plural(p.video_ids.length, 'video')} · ${plural(groups.length, daily ? 'day' : 'week')}</div>
+    <h1 class="display">${esc(p.title)}<em>${unwatched ? `${watchedN} of ${written.length} parts watched${finish}` : 'All watched'}</em></h1>
+    <div class="meter"><i style="width:${written.length ? watchedN / written.length * 100 : 0}%"></i></div>
+    <div class="actions" style="margin-top:14px">
+      <select data-change="path-pace" data-id="${esc(id)}" aria-label="Learning path pace">${courseOptions(selectedCoursePace(p))}</select>
+      ${tip('One pace for every part of every video in this path, in the order shown. The videos’ own course paces are not used here.')}
+      <button class="btn btn-sm" data-act="path-rename" data-id="${esc(id)}">Rename</button>
+      <button class="btn-text" data-act="path-delete" data-id="${esc(id)}">Delete path</button>
+    </div></section>
+    ${groups.map((group, w) => {
+      const toWatch = group.filter(it => !it.missing && !watched(it)).length;
+      const secs = group.reduce((t, it) => t + (it.missing ? 0 : it.part.end - it.part.start), 0);
+      return `<section class="section card"><h2 class="h">${daily ? 'Day' : 'Week'} ${w + 1} <span class="faint" style="font-weight:400">· ${toWatch ? `${toWatch} to watch` : 'done ✓'} · ${fmt(secs / S.speed)} at ${sx(S.speed)}</span></h2>
+        <ol class="course-parts" start="${items.indexOf(group[0]) + 1}">${group.map(row).join('')}</ol></section>`;
+    }).join('')}`;
 }
 function drawerSummary(v) {
   const result = S.summaryCache[v.video_id];
@@ -2858,6 +2947,30 @@ document.addEventListener('click', async e => {
     case 'course-make': { const p = coursePace($('#d-course-pace')?.value, S.courses[id]); setCourse(id, p.per_week, p.daily_minutes); break; }
     case 'course-continue': { const c = S.courses[id] || {}; setCourse(id, c.per_week || 2, c.daily_minutes ?? null); break; }
     case 'course-end': if (confirm('End this course? Its parts and summaries stay, your ticks are kept until the parts are made again.')) { await setCourse(id, null, null); location.hash = '#/home'; } break;
+    case 'path-rename': {
+      const path = S.paths[id];
+      if (!path?.title) break;
+      const answer = prompt('Rename learning path', path.title);
+      if (answer === null || !answer.trim() || answer.trim() === path.title) break;
+      try {
+        const r = await api('/api/path/update', { id: +id, title: answer.trim() });
+        S.paths[id] = { ...path, ...r.path };
+        const row = (S.data.paths || []).find(pr => pr.id === +id); if (row) row.title = r.path.title;
+        refresh(); toast('Learning path renamed');
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
+    case 'path-delete': {
+      if (!confirm("Delete this learning path? The videos' courses stay.")) break;
+      try {
+        await api('/api/path/delete', { id: +id });
+        delete S.paths[id];
+        S.data.paths = (S.data.paths || []).filter(pr => pr.id !== +id);
+        location.hash = '#/home';
+        toast('Learning path deleted');
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'course-answer': {
       const part = el.dataset.part, q = el.dataset.q, opt = +el.dataset.opt;
       const course = S.courses[id];
@@ -2910,6 +3023,21 @@ document.addEventListener('click', async e => {
       break;
     }
     case 'summarize-sel': { const r = newOnly([...S.sel], isSummarised, 'summarised', 'Summarise'); if (r) startSummary(r.ids, r.note); break; }
+    case 'path-make': {
+      const chosen = S.visible.filter(v => S.sel.has(v.video_id));
+      if (chosen.length < 2) break;
+      const suggested = chosen[0].category || 'Learning path';
+      const answer = prompt('Name this learning path', suggested);
+      if (answer === null) break;
+      try {
+        const res = await api('/api/path', { title: answer.trim() || suggested, ids: chosen.map(v => v.video_id), per_week: 2, daily_minutes: null });
+        if (res.id) await queued(res, 'Learning path'); else toast('Learning path ready');
+        S.sel.clear();
+        await load({ keepEdits: true });
+        location.hash = `#/path?id=${res.path_id}`;
+      } catch (err) { toast(err.message, true); }
+      break;
+    }
     case 'summary-retry': delete S.summaryCache[id]; loadSummary(id); break;
     case 'knowledge-build': buildKnowledge(el.dataset.cat); break;
     case 'knowledge-build-all': buildAllKnowledge(); break;
@@ -3240,12 +3368,26 @@ document.addEventListener('change', async e => {
     const p = coursePace(el.value, S.courses[el.dataset.id]);
     await setCourse(el.dataset.id, p.per_week, p.daily_minutes); return;
   }
+  if (ch === 'path-pace') {
+    const p = coursePace(el.value, S.paths[el.dataset.id]), path = S.paths[el.dataset.id];
+    try {
+      const r = await api('/api/path/update', { id: +el.dataset.id, per_week: p.per_week, daily_minutes: p.daily_minutes });
+      if (path?.video_ids) Object.assign(path, { per_week: r.path.per_week, daily_minutes: r.path.daily_minutes });
+      refresh();
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
   if (ch === 'course-progress') {
     try { const r = await api('/api/course/progress', { id: el.dataset.id, key: el.dataset.key, done: el.checked }); S.courses[el.dataset.id].progress = r.progress; }
     catch (err) { el.checked = !el.checked; toast(err.message, true); return; }
     const row = (S.data.courses || []).find(x => x.video_id === el.dataset.id);   // part counts on Home and the drawer
     if (row) row.done = Object.keys(S.courses[el.dataset.id].progress).filter(k => k[0] === 'p').length;
-    if (el.dataset.key.startsWith('p')) refresh();
+    for (const pr of S.data.paths || []) {                 // a path spans several videos, so its count changes too
+      if (!(pr.video_ids || []).includes(el.dataset.id)) continue;
+      const loaded = pr.video_ids.filter(v => S.courses[v]?.progress);
+      if (loaded.length) pr.done = loaded.reduce((n, v) => n + Object.keys(S.courses[v].progress).filter(k => k[0] === 'p').length, 0);
+    }
+    if (el.dataset.key.startsWith('p') || route() === 'path') refresh();
     return;
   }
   if (ch === 'placement-answer') {

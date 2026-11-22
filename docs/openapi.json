@@ -1961,6 +1961,125 @@
         }
       }
     },
+    "/api/path": {
+      "get": {
+        "tags": ["Videos"],
+        "summary": "Get a learning path and its videos' courses",
+        "operationId": "getPath",
+        "parameters": [
+          {"name": "id", "in": "query", "required": true, "description": "Learning path ID", "schema": {"type": "integer"}}
+        ],
+        "responses": {
+          "200": {
+            "description": "The path (id, title, library_id, video_ids, per_week, daily_minutes, created_at) and courses keyed by video ID (null when a video has no course)",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"path": {"type": "object"}}, "required": ["path"]}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      },
+      "post": {
+        "tags": ["AI"],
+        "summary": "Create a learning path from 2 to 50 videos",
+        "description": "Creates the path and its order; videos without a finished course are split into parts by one queued course task. Nothing is created when no AI is configured for summaries and parts are needed.",
+        "operationId": "createPath",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {"type": "string", "minLength": 1, "maxLength": 120, "description": "Path title, trimmed"},
+                  "ids": {"type": "array", "minItems": 2, "maxItems": 50, "uniqueItems": true, "items": {"type": "string"}, "description": "Video IDs in the order to follow them"},
+                  "per_week": {"type": "integer", "minimum": 1, "maximum": 7, "default": 2, "description": "Parts per week for the path"},
+                  "daily_minutes": {"type": ["integer", "null"], "minimum": 15, "maximum": 240, "description": "Minutes a day, or null for a weekly pace"},
+                  "library": {"type": "integer", "description": "Library ID (default 1; 0 means all)"}
+                },
+                "required": ["title", "ids"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The new path_id, with the queued course task when parts were needed",
+            "content": {"application/json": {"schema": {"type": "object"}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "409": {"$ref": "#/components/responses/Error409"}
+        }
+      }
+    },
+    "/api/path/update": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Rename a learning path or change its pace",
+        "description": "Only the fields present in the body change; an explicit null daily_minutes clears the daily pace.",
+        "operationId": "updatePath",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {"type": "integer", "description": "Learning path ID"},
+                  "title": {"type": "string", "minLength": 1, "maxLength": 120},
+                  "per_week": {"type": "integer", "minimum": 1, "maximum": 7},
+                  "daily_minutes": {"type": ["integer", "null"], "minimum": 15, "maximum": 240}
+                },
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The updated path",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}, "path": {"type": "object"}}}}}
+          },
+          "400": {"$ref": "#/components/responses/Error400"},
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
+    "/api/path/delete": {
+      "post": {
+        "tags": ["Videos"],
+        "summary": "Delete a learning path, keeping its videos' courses",
+        "operationId": "deletePath",
+        "security": [{"cookieAuth": [], "headerAuth": []}],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {"id": {"type": "integer", "description": "Learning path ID"}},
+                "required": ["id"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Path deleted",
+            "content": {"application/json": {"schema": {"type": "object", "properties": {"ok": {"type": "boolean"}}}}}
+          },
+          "401": {"$ref": "#/components/responses/Error401"},
+          "403": {"$ref": "#/components/responses/Error403"},
+          "404": {"$ref": "#/components/responses/Error404"}
+        }
+      }
+    },
     "/api/course/progress": {
       "post": {
         "tags": ["Videos"],

@@ -30,7 +30,7 @@ Unclear items, need the reporter's input before planning:
 | Schedule big summaries for the night (**done**) | [off-peak-queue.md](off-peak-queue.md) | M |
 | Follow channels, summarise new videos automatically (**done**, Home list included) | [channel-follow.md](channel-follow.md) | L |
 | Whole channel into the knowledge base (**done**, pages built per topic or with **Build all**) | [channel-knowledge.md](channel-knowledge.md) | M |
-| A 4–5 hour video becomes a weekly course (**done**; pending: real-AI checks, roadmap of courses, reminders) | [video-course.md](video-course.md) | L |
+| A 4–5 hour video becomes a weekly course (**done**, incl. learning paths; pending: real-AI checks, reminders) | [video-course.md](video-course.md) | L |
 | Per-video activity history (**done**: card marks, Library filters, index steps) | [video-activity.md](video-activity.md) | S |
 | Recommendations from how you choose and drop videos | [taste-model.md](taste-model.md) | XL |
 

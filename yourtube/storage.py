@@ -335,6 +335,19 @@ def init_db(db_path: str = DB_PATH) -> None:
         """)
         if "daily_minutes" not in _columns(cursor, "courses"):
             cursor.execute("ALTER TABLE courses ADD COLUMN daily_minutes INTEGER")
+        # A learning path: the order of several videos and one pace. Each video keeps its own course row.
+        # video_ids is JSON; a video removed from YourTube stays in it and is skipped when the path is read.
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS course_paths (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                library_id INTEGER NOT NULL DEFAULT 1,
+                video_ids TEXT NOT NULL DEFAULT '[]',
+                per_week INTEGER NOT NULL DEFAULT 2,
+                daily_minutes INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         # Videos the user removed from YourTube: a playlist sync skips them (see remove_videos)
         cursor.execute("CREATE TABLE IF NOT EXISTS removed_videos (video_id TEXT PRIMARY KEY, removed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
         asks = _columns(cursor, "ask_history")
@@ -2066,6 +2079,71 @@ def list_courses(db_path: str = DB_PATH) -> List[Dict[str, Any]]:
     return [{"video_id": r["video_id"], "per_week": r["per_week"], "daily_minutes": r["daily_minutes"],
              "parts": len(json.loads(r["parts"])),
              "done": sum(k.startswith("p") for k in json.loads(r["progress"]))} for r in rows]
+
+# --- Learning paths (several courses followed as one plan) ---------------------------------
+
+_UNSET = object()   # an argument left out of update_path is not the same as an explicit None
+
+def create_path(title: str, video_ids: List[str], per_week: int = 2, daily_minutes: Optional[int] = None,
+                library_id: int = 1, db_path: str = DB_PATH) -> int:
+    """Saves a path's title, video order and pace; the videos' own courses are made separately."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        cur = conn.execute("INSERT INTO course_paths (title, library_id, video_ids, per_week, daily_minutes) "
+                           "VALUES (?, ?, ?, ?, ?)",
+                           (title, int(library_id), json.dumps(list(video_ids), ensure_ascii=False), per_week, daily_minutes))
+        conn.commit()
+        return cur.lastrowid
+
+def get_path(path_id: int, db_path: str = DB_PATH) -> Optional[Dict[str, Any]]:
+    """The path with `video_ids` as a list, or None."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        r = conn.execute("SELECT * FROM course_paths WHERE id = ?", (path_id,)).fetchone()
+    return r and {**dict(r), "video_ids": json.loads(r["video_ids"] or "[]")}
+
+def update_path(path_id: int, title=_UNSET, per_week=_UNSET, daily_minutes=_UNSET,
+                db_path: str = DB_PATH) -> bool:
+    """Changes only the fields passed; daily_minutes=None clears it. False when the path does not exist."""
+    fields = {k: v for k, v in (("title", title), ("per_week", per_week), ("daily_minutes", daily_minutes))
+              if v is not _UNSET}
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        if fields:
+            n = conn.execute(f"UPDATE course_paths SET {', '.join(k + ' = ?' for k in fields)} WHERE id = ?",
+                             (*fields.values(), path_id)).rowcount
+        else:
+            n = int(conn.execute("SELECT 1 FROM course_paths WHERE id = ?", (path_id,)).fetchone() is not None)
+        conn.commit()
+    return n > 0
+
+def delete_path(path_id: int, db_path: str = DB_PATH) -> bool:
+    """Deletes the path only; its videos' courses stay."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        n = conn.execute("DELETE FROM course_paths WHERE id = ?", (path_id,)).rowcount
+        conn.commit()
+    return n > 0
+
+def list_paths(library_id: Optional[int] = None, db_path: str = DB_PATH) -> List[Dict[str, Any]]:
+    """[{id, title, video_ids, per_week, daily_minutes, videos, parts, done}], newest first; parts come from each video's course."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        rows = conn.execute("SELECT * FROM course_paths WHERE ? IS NULL OR library_id = ? "
+                            "ORDER BY created_at DESC, id DESC", (library_id, library_id)).fetchall()
+    result = []
+    for r in rows:
+        ids = json.loads(r["video_ids"] or "[]")
+        parts = done = 0
+        for vid in ids:
+            course = get_course(vid, db_path=db_path)
+            if not course:   # no course yet, or its video was removed: nothing to count
+                continue
+            parts += len(course["parts"])
+            done += sum(k.startswith("p") for k in course["progress"])
+        result.append({"id": r["id"], "title": r["title"], "video_ids": ids, "per_week": r["per_week"],
+                       "daily_minutes": r["daily_minutes"], "videos": len(ids), "parts": parts, "done": done})
+    return result
 
 # --- Knowledge pages (Phase 3) -------------------------------------------------------------
 
