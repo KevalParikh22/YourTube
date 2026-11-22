@@ -759,6 +759,7 @@ def build_state(library=1):
         "voice": _VOICE_AVAILABLE,
         "summarised": list(storage.summary_times()),   # video ids with a summary (Knowledge: Summarise 5)
         "courses": storage.list_courses(),
+        "paths": storage.list_paths(library or None),   # library 0 = all libraries
         "indexed": indexed,
     }
 
@@ -820,11 +821,11 @@ class Handler(BaseHTTPRequestHandler):
                 [t["label"] for t in snap["queue"] if t["lane"] == lane and t["id"] < started["id"] and not t["not_before"]]
         return self._json({"ok": True, "id": started["id"], "position": started["position"], "after": ahead, **extra})
 
-    def _queued_split(self, kind, action, ids, run):
+    def _queued_split(self, kind, action, ids, run, **extra):
         """_queue_split, as a reply: with a night task it has night: {videos, at, only (nothing runs now)}."""
         started, night, late, at = _queue_split(kind, action, ids, run)
-        extra = {"night": {"videos": len(late), "at": at, "only": started is None}} if night else {}
-        return self._queued(started or night, **extra)
+        reply = {"night": {"videos": len(late), "at": at, "only": started is None}} if night else {}
+        return self._queued(started or night, **reply, **extra)
 
     def _body(self):
         try:
@@ -1110,6 +1111,16 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"summary": summary, "moments": summarizer.related_moments(vid, summary) if summary else {}})
         if url.path == "/api/course":
             return self._json({"course": storage.get_course((qs.get("id") or [""])[0])})
+        if url.path == "/api/path":
+            try:
+                path_id = int((qs.get("id") or [""])[0])
+            except (TypeError, ValueError):
+                path_id = None
+            path = storage.get_path(path_id) if path_id is not None else None
+            if path is None:
+                return self._error("Unknown learning path", 404)
+            return self._json({"path": {**path,
+                                        "courses": {vid: storage.get_course(vid) or None for vid in path["video_ids"]}}})
         if url.path == "/api/course/markdown":
             vid = (qs.get("id") or [""])[0]
             v = next((x for x in storage.get_library() if x["video_id"] == vid), None)
@@ -1687,6 +1698,70 @@ class Handler(BaseHTTPRequestHandler):
                 if not llm.is_configured(llm.load_settings(), "summarize"):
                     return self._error("Choose an AI for summaries in Settings → AI first")
                 return self._queued_split("summarize", "Summarise", ids, _summarize_task(_utc_now()))
+
+            if path == "/api/path":
+                title = body.get("title")
+                if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120:
+                    return self._error("title must be a non-empty string of at most 120 characters")
+                title = title.strip()
+                ids = body.get("ids")
+                if (not isinstance(ids, list) or not 2 <= len(ids) <= 50
+                        or not all(isinstance(i, str) for i in ids) or len(set(ids)) != len(ids)):
+                    return self._error("Pick 2 to 50 videos")
+                known = {v["video_id"] for v in storage.get_library()}
+                if any(i not in known for i in ids):
+                    return self._error("Unknown video id")
+                libs = storage.video_libraries()
+                path_lib = libs.get(ids[0], 1) if lib is None else lib   # library 0: the first video's library
+                if any(libs.get(i, 1) != path_lib for i in ids):
+                    return self._error("Pick videos from one library")
+                per_week = body.get("per_week", 2)
+                if type(per_week) is not int or not 1 <= per_week <= 7:
+                    return self._error("per_week must be 1 to 7")
+                daily = body.get("daily_minutes")
+                if daily is not None and (type(daily) is not int or not 15 <= daily <= 240):
+                    return self._error("daily_minutes must be 15 to 240, or null")
+                need = []
+                for vid in ids:
+                    course = storage.get_course(vid)
+                    if course is None or any(p.get("pending") for p in course["parts"]):
+                        need.append(vid)
+                if need and not llm.is_configured(llm.load_settings(), "summarize"):
+                    return self._error("Choose an AI for summaries in Settings → AI first")
+                path_id = storage.create_path(title, ids, per_week, daily, path_lib)
+                if not need:
+                    return self._json({"ok": True, "path_id": path_id})
+                return self._queued_split("course", "Course", need, _course_task(per_week), path_id=path_id)
+
+            if path == "/api/path/update":
+                pid = body.get("id")
+                if type(pid) is not int:
+                    return self._error("Unknown learning path", 404)
+                fields = {}
+                if "title" in body:
+                    title = body["title"]
+                    if not isinstance(title, str) or not 1 <= len(title.strip()) <= 120:
+                        return self._error("title must be a non-empty string of at most 120 characters")
+                    fields["title"] = title.strip()
+                if "per_week" in body:
+                    pace = body["per_week"]
+                    if type(pace) is not int or not 1 <= pace <= 7:
+                        return self._error("per_week must be 1 to 7")
+                    fields["per_week"] = pace
+                if "daily_minutes" in body:
+                    daily = body["daily_minutes"]
+                    if daily is not None and (type(daily) is not int or not 15 <= daily <= 240):
+                        return self._error("daily_minutes must be 15 to 240, or null")
+                    fields["daily_minutes"] = daily
+                if not storage.update_path(pid, **fields):
+                    return self._error("Unknown learning path", 404)
+                return self._json({"ok": True, "path": storage.get_path(pid)})
+
+            if path == "/api/path/delete":
+                pid = body.get("id")
+                if type(pid) is not int or not storage.delete_path(pid):
+                    return self._error("Unknown learning path", 404)
+                return self._json({"ok": True})
 
             if path == "/api/course":
                 vid, per_week = body.get("id"), body.get("per_week")

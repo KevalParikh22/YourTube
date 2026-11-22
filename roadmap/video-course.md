@@ -29,7 +29,7 @@ CourseIt turns a YouTube video or playlist (up to 20 h) into lessons with notes 
 | 2 **Done** | **Part 1 ready first**: `summarize_parts` saves after each part, the course page shows parts as they arrive | Start while the rest is made (a 4 h course otherwise waits for every call, or for the night) | S |
 | 3 **Done** | **Daily pace in minutes**: "N min a day" next to "parts a week", with a finish date from the parts' lengths | Fits a daily habit; a date gives a goal | S |
 | 4 **Done** | **Placement check**: a few quiz questions up front; parts you already know are ticked | Skips the intro parts that make people drop long tutorials | M (needs 1) |
-| 5 | **Roadmap**: chain several courses (or a playlist) into one plan | A playlist course is the next step after one long video | L |
+| 5 **Done** | **Roadmap** (built as "learning paths"): chain several courses (or a playlist) into one plan | A playlist course is the next step after one long video | L |
 
 CourseIt does not offer export, reminders or offline/local AI; YourTube already has Markdown export and runs locally. Its splitting method is not described on the site, so splitting at topic changes with the LLM stays an open idea (step 1 of the plan uses chapters and pauses).
 
@@ -47,8 +47,8 @@ Every course feature so far was tested with a fake AI on a scratch copy. Still t
 - A 3–4 h video summarised in parts: the estimate is several times a normal one, and the summary covers the whole video.
 - Night queue: a course on a long video waits for the night start time.
 
-### 2. Roadmap of several courses (idea 5, size L)
-Chain several courses, or a whole playlist, into one plan with one pace and one finish date.
+### 2. Roadmap of several courses (idea 5): done 2026-11-22
+Built as **learning paths**: `course_paths` table (title, library, video order, pace), `GET/POST /api/path`, `/api/path/update`, `/api/path/delete`, a `#/path?id=` page with one pace and finish date over every part, and Home → Learning paths. Still open: a path's own Markdown export, reordering videos after it is made, and making a path from a playlist in one click (select all in the playlist instead).
 
 ### 3. Reminders (plan step 4)
 A nudge when today's or this week's parts are due. Needs notifications, which the app does not have yet.

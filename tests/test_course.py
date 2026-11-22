@@ -431,5 +431,214 @@ class CourseEndpointTest(test_summarizer.EndpointTest):
         self.assertIn("→ Python", md)   # right option for answer=0
 
 
+class PathStorageTest(unittest.TestCase):
+    def test_create_get_update_delete_round_trip(self):
+        db = temp_db()
+        pid = storage.create_path("Learn Python", ["v1", "v2"], per_week=3, daily_minutes=45,
+                                  library_id=2, db_path=db)
+        self.assertIsInstance(pid, int)
+        got = storage.get_path(pid, db_path=db)
+        self.assertEqual((got["title"], got["library_id"], got["video_ids"]), ("Learn Python", 2, ["v1", "v2"]))
+        self.assertEqual((got["per_week"], got["daily_minutes"]), (3, 45))
+        self.assertIsNone(storage.get_path(9999, db_path=db))
+        default_id = storage.create_path("Defaults", ["v3"], db_path=db)
+        default = storage.get_path(default_id, db_path=db)
+        self.assertEqual((default["per_week"], default["daily_minutes"], default["library_id"]), (2, None, 1))
+        self.assertTrue(storage.update_path(pid, title="Renamed", db_path=db))
+        self.assertEqual(storage.get_path(pid, db_path=db)["per_week"], 3)   # untouched field
+        self.assertTrue(storage.update_path(pid, daily_minutes=None, db_path=db))
+        self.assertIsNone(storage.get_path(pid, db_path=db)["daily_minutes"])
+        self.assertTrue(storage.update_path(pid, db_path=db))                # no fields: still exists
+        self.assertFalse(storage.update_path(9999, title="x", db_path=db))
+        storage.save_parts("v1", [{"start": 0, "end": 1800}], db_path=db)
+        self.assertTrue(storage.delete_path(pid, db_path=db))
+        self.assertIsNone(storage.get_path(pid, db_path=db))
+        self.assertIsNotNone(storage.get_course("v1", db_path=db))           # a path's courses stay
+        self.assertFalse(storage.delete_path(pid, db_path=db))
+
+    def test_list_paths_counts_parts_and_done_across_courses(self):
+        db = temp_db()
+        storage.save_parts("lp-a", [{"start": t, "end": t + 1800} for t in (0, 1800, 3600)], db_path=db)
+        storage.set_course_progress("lp-a", "p0", True, db_path=db)
+        storage.set_course_progress("lp-a", "a0.0", True, db_path=db)        # an action is not a watched part
+        storage.save_parts("lp-b", [{"start": 0, "end": 1800}], db_path=db)
+        storage.set_course_progress("lp-b", "p0", True, db_path=db)
+        first = storage.create_path("First", ["lp-a", "lp-b", "no-course"], per_week=4, daily_minutes=30, db_path=db)
+        second = storage.create_path("Second", ["lp-b"], library_id=2, db_path=db)
+        rows = storage.list_paths(db_path=db)
+        self.assertEqual([r["id"] for r in rows], [second, first])           # newest first
+        self.assertEqual(rows[1], {"id": first, "title": "First", "video_ids": ["lp-a", "lp-b", "no-course"],
+                                   "per_week": 4, "daily_minutes": 30, "videos": 3, "parts": 4, "done": 2})
+        self.assertEqual(rows[0]["video_ids"], ["lp-b"])   # each row carries its own video list
+        self.assertEqual([r["id"] for r in storage.list_paths(1, db_path=db)], [first])
+        self.assertEqual([r["id"] for r in storage.list_paths(2, db_path=db)], [second])
+
+    def test_removed_video_stays_in_path_and_is_skipped_by_readers(self):
+        db = temp_db()
+        storage.save_playlist(playlist("PLRM"), [video("rm-v", "Removed", duration=HOUR)], db_path=db)
+        storage.save_parts("rm-v", [{"start": 0, "end": 1800}], db_path=db)
+        pid = storage.create_path("With removed", ["rm-v", "other"], db_path=db)
+        self.assertEqual(storage.remove_videos(["rm-v"], db_path=db), ["rm-v"])
+        self.assertEqual(storage.get_path(pid, db_path=db)["video_ids"], ["rm-v", "other"])
+        self.assertIsNone(storage.get_course("rm-v", db_path=db))
+        row = storage.list_paths(db_path=db)[0]
+        self.assertEqual((row["videos"], row["parts"], row["done"]), (2, 0, 0))
+
+
+class PathEndpointTest(test_summarizer.EndpointTest):
+    def test_summarize_endpoints(self):   # inherited test belongs to test_summarizer
+        pass
+
+    def test_create_path_validation(self):
+        storage.save_playlist(playlist("PLPATHVAL"),
+                              [video("pv1", "One", duration=HOUR), video("pv2", "Two", duration=HOUR)])
+        for vid in ("pv1", "pv2"):
+            storage.save_parts(vid, [{"start": 0, "end": 1800}])
+        before = len(storage.list_paths(1))
+        for bad in ("", "   ", 17, "x" * 121):
+            code, r = self.call("/api/path", {"title": bad, "ids": ["pv1", "pv2"]})
+            self.assertEqual(code, 400, bad)
+        for bad in ([], ["pv1"], ["pv1", "pv1"], ["pv1"] + [f"v{i}" for i in range(50)],
+                    ["pv1", 2], "pv1,pv2"):
+            code, r = self.call("/api/path", {"title": "Valid", "ids": bad})
+            self.assertEqual((code, r.get("error")), (400, "Pick 2 to 50 videos"), bad)
+        code, r = self.call("/api/path", {"title": "Valid", "ids": ["pv1", "unknown-one"]})
+        self.assertEqual(code, 400)
+        for bad in (0, 8, True, 2.0, "2", None):
+            code, r = self.call("/api/path", {"title": "Pace", "ids": ["pv1", "pv2"], "per_week": bad})
+            self.assertEqual(code, 400, bad)
+        for bad in (0, 5, 241, True, "30"):
+            code, r = self.call("/api/path", {"title": "Pace", "ids": ["pv1", "pv2"], "daily_minutes": bad})
+            self.assertEqual(code, 400, bad)
+        self.assertEqual(len(storage.list_paths(1)), before)   # nothing was created by bad requests
+        # boundaries: 2 and 50 videos, per_week 1 and 7, daily_minutes 15 and 240
+        many = [f"pm{i}" for i in range(50)]
+        storage.save_playlist(playlist("PLPATHMANY"), [video(vid, vid, duration=HOUR) for vid in many])
+        for vid in many:
+            storage.save_parts(vid, [{"start": 0, "end": 1800}])
+        code, r = self.call("/api/path", {"title": "Many", "ids": many, "per_week": 1, "daily_minutes": 15})
+        self.assertEqual(code, 200)
+        self.assertEqual(storage.get_path(r["path_id"])["per_week"], 1)
+        code, r = self.call("/api/path", {"title": "Boundaries", "ids": ["pv1", "pv2"],
+                                          "per_week": 7, "daily_minutes": 240})
+        self.assertEqual(code, 200)
+        self.assertEqual((storage.get_path(r["path_id"])["per_week"],
+                          storage.get_path(r["path_id"])["daily_minutes"]), (7, 240))
+
+    def test_create_path_requires_all_videos_in_one_library(self):
+        storage.save_playlist(playlist("PLPATHLIB1"),
+                              [video("lib1-a", "One", duration=HOUR), video("lib1-b", "Two", duration=HOUR)])
+        second = storage.create_library("Course path second library")
+        storage.save_playlist(playlist("PLPATHLIB2"),
+                              [video("lib2-a", "Three", duration=HOUR), video("lib2-b", "Four", duration=HOUR)],
+                              library_id=second)
+        for vid in ("lib1-a", "lib1-b", "lib2-a", "lib2-b"):
+            storage.save_parts(vid, [{"start": 0, "end": 1800}])   # finished courses: no AI task needed
+        before = len(storage.list_paths())
+        for ids, lib in ((["lib1-a", "lib2-a"], second), (["lib2-a", "lib1-a"], second),
+                         (["lib1-a", "lib2-a"], 1), (["lib2-a", "lib1-a"], 0)):
+            code, r = self.call("/api/path", {"title": "Mixed", "ids": ids, "library": lib})
+            self.assertEqual((code, r.get("error")), (400, "Pick videos from one library"), (ids, lib))
+        self.assertEqual(len(storage.list_paths()), before)   # a rejected mix saves nothing
+        code, r = self.call("/api/path", {"title": "Second", "ids": ["lib2-b", "lib2-a"], "library": second})
+        self.assertEqual(code, 200)
+        self.assertEqual(storage.get_path(r["path_id"])["library_id"], second)
+        code, r = self.call("/api/path", {"title": "All", "ids": ["lib1-b", "lib1-a"], "library": 0})
+        self.assertEqual(code, 200)
+        self.assertEqual(storage.get_path(r["path_id"])["library_id"], 1)   # first video's library
+
+    def test_create_path_with_finished_courses_queues_no_task(self):
+        storage.save_playlist(playlist("PLPATHREADY"),
+                              [video("pr1", "Ready one", duration=HOUR), video("pr2", "Ready two", duration=HOUR)])
+        for vid in ("pr1", "pr2"):
+            storage.save_parts(vid, [{"start": 0, "end": 1800}, {"start": 1800, "end": 3600}])
+        before = len(storage.list_paths(1))
+        with mock.patch("dashboard.JOB.start") as start, mock.patch("llm.is_configured", return_value=False):
+            code, r = self.call("/api/path", {"title": "  Ready  ", "ids": ["pr1", "pr2"],
+                                              "per_week": 3, "daily_minutes": 30})
+        self.assertEqual(code, 200)
+        self.assertEqual(start.call_count, 0)
+        self.assertEqual(len(storage.list_paths(1)), before + 1)
+        self.assertEqual(r["ok"], True)
+        got = storage.get_path(r["path_id"])
+        self.assertEqual((got["title"], got["per_week"], got["daily_minutes"], got["library_id"]),
+                         ("Ready", 3, 30, 1))
+
+    def test_create_path_queues_one_course_task_for_missing_or_pending_parts(self):
+        storage.save_playlist(playlist("PLPATHQ"), [video("pq-ready", "Ready", duration=HOUR),
+                                                    video("pq-none", "No course", duration=HOUR),
+                                                    video("pq-pending", "Pending", duration=HOUR)])
+        storage.save_parts("pq-ready", [{"start": 0, "end": 1800}])
+        storage.save_parts("pq-pending", [{"start": 0, "end": 1800, "pending": True}])
+        with mock.patch("llm.is_configured", return_value=True) as configured, \
+             mock.patch("dashboard.JOB.start", return_value={"id": 21, "position": 0}) as start:
+            code, r = self.call("/api/path", {"title": "Queued", "ids": ["pq-ready", "pq-none", "pq-pending"],
+                                              "per_week": 2})
+        self.assertEqual(code, 200)
+        self.assertEqual((configured.call_count, configured.call_args[0][1]), (1, "summarize"))
+        self.assertEqual(start.call_count, 1)                                # one task for both videos
+        self.assertEqual(start.call_args[0][0], "course")
+        self.assertEqual(start.call_args[1]["key"], ["pq-none", "pq-pending"])
+        self.assertIsNotNone(storage.get_path(r["path_id"]))
+        self.assertEqual(r["path_id"], storage.get_path(r["path_id"])["id"])
+
+    def test_create_path_without_ai_and_parts_needed_creates_nothing(self):
+        storage.save_playlist(playlist("PLPATHNOAI"),
+                              [video("pa1", "One", duration=HOUR), video("pa2", "Two", duration=HOUR)])
+        before = len(storage.list_paths(1))
+        with mock.patch("llm.is_configured", return_value=False), mock.patch("dashboard.JOB.start") as start:
+            code, r = self.call("/api/path", {"title": "No AI", "ids": ["pa1", "pa2"]})
+        self.assertEqual((code, r.get("error")),
+                         (400, "Choose an AI for summaries in Settings → AI first"))
+        self.assertEqual(start.call_count, 0)
+        self.assertEqual(len(storage.list_paths(1)), before)
+
+    def test_get_path_returns_courses_keyed_by_video_id(self):
+        storage.save_playlist(playlist("PLPATHGET"),
+                              [video("pg1", "Has course", duration=HOUR), video("pg2", "No course", duration=HOUR)])
+        storage.save_parts("pg1", [{"start": 0, "end": 1800}])
+        pid = storage.create_path("Get", ["pg1", "pg2"])
+        code, r = self.call(f"/api/path?id={pid}")
+        self.assertEqual(code, 200)
+        self.assertEqual(r["path"]["video_ids"], ["pg1", "pg2"])
+        self.assertEqual(r["path"]["courses"]["pg1"]["video_id"], "pg1")
+        self.assertIsNone(r["path"]["courses"]["pg2"])
+        for bad in ("", "abc", "1.5", "999999"):
+            code, r = self.call(f"/api/path?id={bad}")
+            self.assertEqual((code, r.get("error")), (404, "Unknown learning path"), bad)
+
+    def test_update_and_delete_path_endpoints(self):
+        storage.save_playlist(playlist("PLPATHUPD"),
+                              [video("pu1", "One", duration=HOUR), video("pu2", "Two", duration=HOUR)])
+        storage.save_parts("pu1", [{"start": 0, "end": 1800}])
+        pid = storage.create_path("Before", ["pu1", "pu2"], per_week=3, daily_minutes=45)
+        code, r = self.call("/api/path/update", {"id": pid, "title": " After ", "daily_minutes": None})
+        self.assertEqual(code, 200)
+        self.assertEqual(r, {"ok": True, "path": storage.get_path(pid)})
+        self.assertEqual((r["path"]["title"], r["path"]["per_week"], r["path"]["daily_minutes"]), ("After", 3, None))
+        self.assertEqual(r["path"]["video_ids"], ["pu1", "pu2"])
+        code, r = self.call("/api/path/update", {"id": pid, "per_week": 7, "daily_minutes": 240})
+        self.assertEqual((code, r["path"]["per_week"], r["path"]["daily_minutes"]), (200, 7, 240))
+        for bad in ({"title": ""}, {"title": "x" * 121}, {"per_week": 0}, {"per_week": True},
+                    {"daily_minutes": 5}, {"daily_minutes": True}):
+            self.assertEqual(self.call("/api/path/update", {"id": pid, **bad})[0], 400, bad)
+        self.assertEqual(storage.get_path(pid)["title"], "After")            # bad updates changed nothing
+        code, r = self.call("/api/path/delete", {"id": pid})
+        self.assertEqual((code, r), (200, {"ok": True}))
+        self.assertIsNone(storage.get_path(pid))
+        self.assertIsNotNone(storage.get_course("pu1"))                      # courses are kept
+        for unknown in (999999, "abc", None, True):
+            self.assertEqual(self.call("/api/path/update", {"id": unknown})[0], 404, unknown)
+            self.assertEqual(self.call("/api/path/delete", {"id": unknown})[0], 404, unknown)
+
+    def test_build_state_includes_paths_for_its_library(self):
+        import dashboard
+        pid = storage.create_path("State", ["sx1", "sx2"])
+        state = dashboard.build_state()
+        self.assertIn("paths", state)
+        self.assertIn(pid, [p["id"] for p in state["paths"]])
+        self.assertIn(pid, [p["id"] for p in dashboard.build_state(0)["paths"]])   # library 0 = all libraries
+
+
 if __name__ == "__main__":
     unittest.main()

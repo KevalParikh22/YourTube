@@ -596,6 +596,11 @@
 .course-part.done > :not(.course-head) { opacity: .6; }
 .course-part ul { list-style: none; padding: 0; }
 .course-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+/* Learning-path rows: the title and its two actions share a line when there is room */
+.path-item .course-head { align-items: baseline; }
+.path-item .keep { margin-top: 0; }
+.path-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: nowrap; white-space: nowrap; }
+@media (max-width: 640px) { .path-actions { flex-wrap: wrap; white-space: normal; } }
 .quiz-item { margin: 6px 0; }
 .quiz-q { margin-bottom: 6px; font-size: 14px; }
 .quiz-opts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
