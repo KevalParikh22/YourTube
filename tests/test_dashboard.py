@@ -51,6 +51,9 @@ class DashboardTest(unittest.TestCase):
         self.assertFalse(state["ai"]["ready"])
         self.assertIn("indexed", state)
         self.assertIsInstance(state["indexed"], list)
+        self.assertIn("other_language", state)
+        self.assertIsInstance(state["other_language"]["summaries"], list)
+        self.assertIsInstance(state["other_language"]["ratings"], list)
 
     def test_state_indexed_fallback_when_model_name_raises(self):
         import embedder
