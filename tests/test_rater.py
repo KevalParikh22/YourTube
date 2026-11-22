@@ -50,6 +50,8 @@ class PromptTest(unittest.TestCase):
         for needle in ("Today is 2026-10-20", "RAG and agents", "AI (key interest), Music", "Uploaded: 2024-01-05",
                        "Length: 20 min", "[5:00] Build", "[0:30] line 3", "in Hindi"):
             self.assertIn(needle, prompt)
+        self.assertIn(llm.language_rule("Hindi"), prompt)
+        self.assertNotIn("Write all text in Hindi.", prompt)
         prompt, basis = rater.build_prompt({**VIDEO, "upload_date": None, "chapters": []}, [], {})
         self.assertEqual(basis, "metadata")
         self.assertIn("Uploaded: unknown", prompt)
