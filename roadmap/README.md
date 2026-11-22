@@ -1,5 +1,7 @@
 # Roadmap
 
+**Start here:** [NEXT.md](NEXT.md) lists what is still to do and how to set up a new machine.
+
 Open issues from testing (2026-11-19). Bugs and small changes have a fix plan below; new features each have their own file.
 
 ## Fixes
